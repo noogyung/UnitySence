@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "4-2",
-  "lastUpdatedAt": "2026-11-16T02:46:15+09:00",
+  "currentStepId": "4-3",
+  "lastUpdatedAt": "2026-11-16T02:48:30+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -311,25 +311,30 @@
       "phase": 4,
       "title": "콜그래프 성능 분석 (UB1001, UB1002) + Awake() 자동 캐싱 Quick-Fix",
       "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "analyzers/UnityBrain.Analyzers/CallGraph/PerformanceCriticalContextAnalyzer.cs",
         "analyzers/UnityBrain.Analyzers/CodeFixes/CacheComponentInAwakeCodeFixProvider.cs",
         "analyzers/UnityBrain.Analyzers.Tests/PerformanceCriticalContextAnalyzerTests.cs"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "analyzers/UnityBrain.Analyzers/CallGraph/UnityCallGraphHelper.cs",
+        "analyzers/UnityBrain.Analyzers/CallGraph/PerformanceCriticalContextAnalyzer.cs",
+        "analyzers/UnityBrain.Analyzers/CodeFixes/CacheComponentInAwakeCodeFixProvider.cs",
+        "analyzers/UnityBrain.Analyzers.Tests/PerformanceCriticalContextAnalyzerTests.cs"
+      ],
       "verificationCommands": [
         "dotnet test analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false --filter PerformanceCritical"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 4-2 완료: 콜그래프 성능 분석 (UB1001/UB1002) 및 Awake() 자동 캐싱 CodeFix 4/4 테스트 통과"
     },
     {
       "id": "4-3",
       "phase": 4,
       "title": "문자열 ID 캐싱 (UB1003) + Shader.PropertyToID/Animator.StringToHash Quick-Fix",
       "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "analyzers/UnityBrain.Analyzers/Diagnostics/UncachedShaderOrAnimatorIdAnalyzer.cs",

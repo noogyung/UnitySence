@@ -52,7 +52,19 @@
     <Reference Include="$(RoslynToolsDir)/System.Composition.Hosting.dll">
       <Private>true</Private>
     </Reference>
+    <Reference Include="$(RoslynToolsDir)/System.Composition.Convention.dll">
+      <Private>true</Private>
+    </Reference>
     <Reference Include="$(RoslynToolsDir)/Humanizer.dll">
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="$(RoslynToolsDir)/Microsoft.DiaSymReader.dll">
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="$(RoslynToolsDir)/Microsoft.CodeAnalysis.Elfie.dll">
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="$(RoslynToolsDir)/Microsoft.Bcl.AsyncInterfaces.dll">
       <Private>true</Private>
     </Reference>
   </ItemGroup>
