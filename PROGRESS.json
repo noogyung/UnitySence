@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "2-4",
-  "lastUpdatedAt": "2026-11-16T02:36:45+09:00",
+  "currentStepId": "2-5",
+  "lastUpdatedAt": "2026-11-16T02:38:05+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -179,24 +179,27 @@
       "phase": 2,
       "title": "Shader / HLSL F12 정의 이동 프로바이더 (definitionProvider.ts)",
       "planFile": "docs/plans/02-shaderlab-hlsl-lsp.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "packages/shader-lsp/src/providers/definitionProvider.ts",
         "packages/shader-lsp/test/providers/definitionProvider.test.ts"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "packages/shader-lsp/src/providers/definitionProvider.ts",
+        "packages/shader-lsp/test/providers/definitionProvider.test.ts"
+      ],
       "verificationCommands": [
         "node tools/cli.mjs test shader-lsp"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 2-4 완료: #include/#pragma/멤버접근/Properties/크로스파일 심볼 F12 이동 구현 및 통과"
     },
     {
       "id": "2-5",
       "phase": 2,
       "title": "Hover, 자동완성, LSP 서버 본체 및 50ms 성능 검증",
       "planFile": "docs/plans/02-shaderlab-hlsl-lsp.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "packages/shader-lsp/src/providers/completionProvider.ts",
