@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "1-3",
-  "lastUpdatedAt": "2026-11-16T02:33:00+09:00",
+  "currentStepId": "2-1",
+  "lastUpdatedAt": "2026-11-16T02:34:10+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -92,7 +92,7 @@
       "phase": 1,
       "title": "tools/api-extractor 구현 및 unity-api.json 생성",
       "planFile": "docs/plans/01-core-and-virtual-vfs.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "tools/api-extractor/src/index.ts",
@@ -100,19 +100,24 @@
         "tools/api-extractor/test/apiExtractor.test.ts",
         "packages/extension/resources/unity-api.json"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "tools/api-extractor/src/index.ts",
+        "tools/api-extractor/test/fixtures/sample-api.xml",
+        "tools/api-extractor/test/apiExtractor.test.ts",
+        "packages/extension/resources/unity-api.json"
+      ],
       "verificationCommands": [
         "node tools/cli.mjs test api-extractor",
         "node -p \"require('fs').existsSync('packages/extension/resources/unity-api.json')\""
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 1-3 완료: tools/api-extractor 구현 및 packages/extension/resources/unity-api.json 생성(2/2 테스트 통과)"
     },
     {
       "id": "2-1",
       "phase": 2,
       "title": "ShaderLab 가상 문서 추출기 & Unity HLSL 매크로 전처리 프리패스",
       "planFile": "docs/plans/02-shaderlab-hlsl-lsp.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "packages/shader-lsp/src/parser/shaderLabVirtualDoc.ts",

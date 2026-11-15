@@ -1,0 +1,549 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-15T17:33:53.237Z",
+  "types": [
+    {
+      "fullName": "UnityEngine.MonoBehaviour",
+      "kind": "class",
+      "events": [
+        {
+          "name": "Awake",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Awake is called when an enabled script instance is being loaded.",
+          "parameters": []
+        },
+        {
+          "name": "Start",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Start is called on the frame when a script is enabled just before any of the Update methods are called the first time.",
+          "parameters": []
+        },
+        {
+          "name": "Update",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Update is called every frame, if the MonoBehaviour is enabled.",
+          "parameters": [],
+          "isPerformanceCritical": true
+        },
+        {
+          "name": "FixedUpdate",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Frame-rate independent MonoBehaviour.FixedUpdate message for physics calculations.",
+          "parameters": [],
+          "isPerformanceCritical": true
+        },
+        {
+          "name": "LateUpdate",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "LateUpdate is called every frame, if the Behaviour is enabled, after all Update functions have been called.",
+          "parameters": [],
+          "isPerformanceCritical": true
+        },
+        {
+          "name": "OnEnable",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "This function is called when the object becomes enabled and active.",
+          "parameters": []
+        },
+        {
+          "name": "OnDisable",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "This function is called when the behaviour becomes disabled or inactive.",
+          "parameters": []
+        },
+        {
+          "name": "OnDestroy",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Destroying the attached Behaviour will result in the game or Scene receiving OnDestroy.",
+          "parameters": []
+        },
+        {
+          "name": "OnTriggerEnter",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "When a GameObject collides with another GameObject, Unity calls OnTriggerEnter.",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collider",
+              "description": "The other Collider involved in this collision."
+            }
+          ]
+        },
+        {
+          "name": "OnTriggerStay",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnTriggerStay is called almost all the frames for every Collider other that is touching the trigger.",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collider"
+            }
+          ]
+        },
+        {
+          "name": "OnTriggerExit",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnTriggerExit is called when the Collider other has stopped touching the trigger.",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collider"
+            }
+          ]
+        },
+        {
+          "name": "OnTriggerEnter2D",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Sent when another object enters a trigger collider attached to this object (2D physics only).",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collider2D"
+            }
+          ]
+        },
+        {
+          "name": "OnCollisionEnter",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnCollisionEnter is called when this collider/rigidbody has begun touching another rigidbody/collider.",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collision"
+            }
+          ]
+        },
+        {
+          "name": "OnCollisionStay",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnCollisionStay is called once per frame for every collider/rigidbody that is touching rigidbody/collider.",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collision"
+            }
+          ]
+        },
+        {
+          "name": "OnCollisionExit",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnCollisionExit is called when this collider/rigidbody has stopped touching another rigidbody/collider.",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collision"
+            }
+          ]
+        },
+        {
+          "name": "OnCollisionEnter2D",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Sent when an incoming collider makes contact with this object's collider (2D physics only).",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collision2D"
+            }
+          ]
+        },
+        {
+          "name": "OnGUI",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "OnGUI is called for rendering and handling GUI events.",
+          "parameters": [],
+          "isPerformanceCritical": true
+        },
+        {
+          "name": "OnDrawGizmos",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Implement OnDrawGizmos if you want to draw gizmos that are also pickable and always drawn.",
+          "parameters": []
+        },
+        {
+          "name": "OnDrawGizmosSelected",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Implement OnDrawGizmosSelected to draw a gizmo if the object is selected.",
+          "parameters": []
+        },
+        {
+          "name": "OnValidate",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Editor-only function that Unity calls when the script is loaded or a value changes in the Inspector.",
+          "parameters": []
+        },
+        {
+          "name": "Reset",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Reset to default values.",
+          "parameters": []
+        },
+        {
+          "name": "OnApplicationPause",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Sent to all GameObjects when the application pauses.",
+          "parameters": [
+            {
+              "name": "pauseStatus",
+              "type": "bool"
+            }
+          ]
+        },
+        {
+          "name": "OnApplicationQuit",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Sent to all game objects before the application quits.",
+          "parameters": []
+        },
+        {
+          "name": "OnAnimatorIK",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Callback for setting up animation IK (inverse kinematics).",
+          "parameters": [
+            {
+              "name": "layerIndex",
+              "type": "int"
+            }
+          ],
+          "isPerformanceCritical": true
+        },
+        {
+          "name": "OnAnimatorMove",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Callback for processing animation movements for modifying root motion.",
+          "parameters": [],
+          "isPerformanceCritical": true
+        },
+        {
+          "name": "OnBecameVisible",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnBecameVisible is called when the renderer became visible by any camera.",
+          "parameters": []
+        },
+        {
+          "name": "OnBecameInvisible",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnBecameInvisible is called when the renderer is no longer visible by any camera.",
+          "parameters": []
+        },
+        {
+          "name": "OnRenderObject",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "OnRenderObject is called after camera has rendered the Scene.",
+          "parameters": [],
+          "isPerformanceCritical": true
+        },
+        {
+          "name": "OnMouseDown",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnMouseDown is called when the user has pressed the mouse button while over the Collider.",
+          "parameters": []
+        }
+      ],
+      "minimumUnityVersion": "2020.3"
+    },
+    {
+      "fullName": "UnityEngine.ScriptableObject",
+      "kind": "class",
+      "events": [
+        {
+          "name": "Awake",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "This function is called when the ScriptableObject script is started.",
+          "parameters": []
+        },
+        {
+          "name": "OnEnable",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "This function is called when the object is loaded.",
+          "parameters": []
+        },
+        {
+          "name": "OnDisable",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "This function is called when the scriptable object goes out of scope.",
+          "parameters": []
+        },
+        {
+          "name": "OnDestroy",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "This function is called when the scriptable object will be destroyed.",
+          "parameters": []
+        },
+        {
+          "name": "OnValidate",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Editor-only function that Unity calls when the script is loaded or a value changes in the Inspector.",
+          "parameters": []
+        },
+        {
+          "name": "Reset",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Reset to default values.",
+          "parameters": []
+        }
+      ],
+      "minimumUnityVersion": "2020.3"
+    },
+    {
+      "fullName": "UnityEngine.StateMachineBehaviour",
+      "kind": "class",
+      "events": [
+        {
+          "name": "OnStateEnter",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called on the first Update frame when a state machine evaluates this state.",
+          "parameters": [
+            {
+              "name": "animator",
+              "type": "UnityEngine.Animator"
+            },
+            {
+              "name": "stateInfo",
+              "type": "UnityEngine.AnimatorStateInfo"
+            },
+            {
+              "name": "layerIndex",
+              "type": "int"
+            }
+          ]
+        },
+        {
+          "name": "OnStateUpdate",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called on each Update frame between OnStateEnter and OnStateExit callbacks.",
+          "parameters": [
+            {
+              "name": "animator",
+              "type": "UnityEngine.Animator"
+            },
+            {
+              "name": "stateInfo",
+              "type": "UnityEngine.AnimatorStateInfo"
+            },
+            {
+              "name": "layerIndex",
+              "type": "int"
+            }
+          ]
+        },
+        {
+          "name": "OnStateExit",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called on the last Update frame when a state machine evaluates this state.",
+          "parameters": [
+            {
+              "name": "animator",
+              "type": "UnityEngine.Animator"
+            },
+            {
+              "name": "stateInfo",
+              "type": "UnityEngine.AnimatorStateInfo"
+            },
+            {
+              "name": "layerIndex",
+              "type": "int"
+            }
+          ]
+        }
+      ],
+      "minimumUnityVersion": "2020.3"
+    },
+    {
+      "fullName": "UnityEditor.Editor",
+      "kind": "class",
+      "events": [
+        {
+          "name": "OnEnable",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the Editor object becomes active.",
+          "parameters": []
+        },
+        {
+          "name": "OnDisable",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the Editor object becomes inactive.",
+          "parameters": []
+        },
+        {
+          "name": "OnInspectorGUI",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Implement this function to make a custom inspector.",
+          "parameters": []
+        },
+        {
+          "name": "OnSceneGUI",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Enables the Editor to handle an event in the Scene view.",
+          "parameters": []
+        },
+        {
+          "name": "CreateInspectorGUI",
+          "returnType": "UnityEngine.UIElements.VisualElement",
+          "supportsCoroutine": false,
+          "description": "Implement this method to make a custom UIElements inspector.",
+          "parameters": []
+        }
+      ],
+      "minimumUnityVersion": "2020.3"
+    },
+    {
+      "fullName": "UnityEditor.EditorWindow",
+      "kind": "class",
+      "events": [
+        {
+          "name": "OnEnable",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the window is loaded.",
+          "parameters": []
+        },
+        {
+          "name": "OnDisable",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the window is closed or disabled.",
+          "parameters": []
+        },
+        {
+          "name": "OnGUI",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Implement your own Editor GUI here.",
+          "parameters": [],
+          "isPerformanceCritical": true
+        },
+        {
+          "name": "CreateGUI",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "CreateGUI is called when the EditorWindow's root VisualElement is ready to be populated.",
+          "parameters": []
+        },
+        {
+          "name": "Update",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called 100 times per second on all visible windows.",
+          "parameters": [],
+          "isPerformanceCritical": true
+        }
+      ],
+      "minimumUnityVersion": "2020.3"
+    },
+    {
+      "fullName": "UnityEditor.AssetPostprocessor",
+      "kind": "class",
+      "events": [
+        {
+          "name": "OnPreprocessTexture",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Add this function in a subclass to get a notification before a texture imports.",
+          "parameters": []
+        },
+        {
+          "name": "OnPostprocessTexture",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Add this function in a subclass to get a notification when a texture asset has finished importing.",
+          "parameters": [
+            {
+              "name": "texture",
+              "type": "UnityEngine.Texture2D"
+            }
+          ]
+        },
+        {
+          "name": "OnPostprocessAllAssets",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "This is called after importing of any number of assets is complete.",
+          "parameters": [
+            {
+              "name": "importedAssets",
+              "type": "string[]"
+            },
+            {
+              "name": "deletedAssets",
+              "type": "string[]"
+            },
+            {
+              "name": "movedAssets",
+              "type": "string[]"
+            },
+            {
+              "name": "movedFromAssetPaths",
+              "type": "string[]"
+            }
+          ],
+          "isStatic": true
+        }
+      ],
+      "minimumUnityVersion": "2020.3"
+    },
+    {
+      "fullName": "Unity.Netcode.NetworkBehaviour",
+      "kind": "class",
+      "events": [
+        {
+          "name": "OnNetworkSpawn",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Gets called when the NetworkObject is spawned on the network.",
+          "parameters": []
+        },
+        {
+          "name": "OnNetworkDespawn",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Gets called when the NetworkObject is despawned.",
+          "parameters": []
+        }
+      ],
+      "minimumUnityVersion": "2021.3"
+    }
+  ],
+  "sourceCommit": "resharper-unity-snapshot"
+}

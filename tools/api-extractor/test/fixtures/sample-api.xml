@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="utf-8"?>
+<api minimumVersion="2020.3">
+  <type kind="class" name="MonoBehaviour" ns="UnityEngine" minimumVersion="2020.3">
+    <message name="Awake" static="false">
+      <summary>Awake is called when an enabled script instance is being loaded.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="Start" static="false" coroutine="true">
+      <summary>Start is called on the frame when a script is enabled just before any of the Update methods are called the first time.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="Update" static="false">
+      <summary>Update is called every frame, if the MonoBehaviour is enabled.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="FixedUpdate" static="false">
+      <summary>Frame-rate independent MonoBehaviour.FixedUpdate message for physics calculations.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="LateUpdate" static="false">
+      <summary>LateUpdate is called every frame, if the Behaviour is enabled, after all Update functions have been called.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnEnable" static="false">
+      <summary>This function is called when the object becomes enabled and active.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDisable" static="false">
+      <summary>This function is called when the behaviour becomes disabled or inactive.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDestroy" static="false">
+      <summary>Destroying the attached Behaviour will result in the game or Scene receiving OnDestroy.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnTriggerEnter" static="false" coroutine="true">
+      <summary>When a GameObject collides with another GameObject, Unity calls OnTriggerEnter.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collider" name="other" description="The other Collider involved in this collision." />
+      </parameters>
+    </message>
+    <message name="OnTriggerStay" static="false" coroutine="true">
+      <summary>OnTriggerStay is called almost all the frames for every Collider other that is touching the trigger.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collider" name="other" />
+      </parameters>
+    </message>
+    <message name="OnTriggerExit" static="false" coroutine="true">
+      <summary>OnTriggerExit is called when the Collider other has stopped touching the trigger.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collider" name="other" />
+      </parameters>
+    </message>
+    <message name="OnTriggerEnter2D" static="false" coroutine="true">
+      <summary>Sent when another object enters a trigger collider attached to this object (2D physics only).</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collider2D" name="other" />
+      </parameters>
+    </message>
+    <message name="OnCollisionEnter" static="false" coroutine="true">
+      <summary>OnCollisionEnter is called when this collider/rigidbody has begun touching another rigidbody/collider.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collision" name="other" />
+      </parameters>
+    </message>
+    <message name="OnCollisionStay" static="false" coroutine="true">
+      <summary>OnCollisionStay is called once per frame for every collider/rigidbody that is touching rigidbody/collider.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collision" name="other" />
+      </parameters>
+    </message>
+    <message name="OnCollisionExit" static="false" coroutine="true">
+      <summary>OnCollisionExit is called when this collider/rigidbody has stopped touching another rigidbody/collider.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collision" name="other" />
+      </parameters>
+    </message>
+    <message name="OnCollisionEnter2D" static="false" coroutine="true">
+      <summary>Sent when an incoming collider makes contact with this object's collider (2D physics only).</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collision2D" name="other" />
+      </parameters>
+    </message>
+    <message name="OnGUI" static="false">
+      <summary>OnGUI is called for rendering and handling GUI events.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDrawGizmos" static="false">
+      <summary>Implement OnDrawGizmos if you want to draw gizmos that are also pickable and always drawn.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDrawGizmosSelected" static="false">
+      <summary>Implement OnDrawGizmosSelected to draw a gizmo if the object is selected.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnValidate" static="false">
+      <summary>Editor-only function that Unity calls when the script is loaded or a value changes in the Inspector.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="Reset" static="false">
+      <summary>Reset to default values.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnApplicationPause" static="false">
+      <summary>Sent to all GameObjects when the application pauses.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="bool" name="pauseStatus" />
+      </parameters>
+    </message>
+    <message name="OnApplicationQuit" static="false">
+      <summary>Sent to all game objects before the application quits.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnAnimatorIK" static="false">
+      <summary>Callback for setting up animation IK (inverse kinematics).</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="int" name="layerIndex" />
+      </parameters>
+    </message>
+    <message name="OnAnimatorMove" static="false">
+      <summary>Callback for processing animation movements for modifying root motion.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnBecameVisible" static="false" coroutine="true">
+      <summary>OnBecameVisible is called when the renderer became visible by any camera.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnBecameInvisible" static="false" coroutine="true">
+      <summary>OnBecameInvisible is called when the renderer is no longer visible by any camera.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnRenderObject" static="false">
+      <summary>OnRenderObject is called after camera has rendered the Scene.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnMouseDown" static="false" coroutine="true">
+      <summary>OnMouseDown is called when the user has pressed the mouse button while over the Collider.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+  </type>
+  <type kind="class" name="ScriptableObject" ns="UnityEngine" minimumVersion="2020.3">
+    <message name="Awake" static="false">
+      <summary>This function is called when the ScriptableObject script is started.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnEnable" static="false">
+      <summary>This function is called when the object is loaded.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDisable" static="false">
+      <summary>This function is called when the scriptable object goes out of scope.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDestroy" static="false">
+      <summary>This function is called when the scriptable object will be destroyed.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnValidate" static="false">
+      <summary>Editor-only function that Unity calls when the script is loaded or a value changes in the Inspector.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="Reset" static="false">
+      <summary>Reset to default values.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+  </type>
+  <type kind="class" name="StateMachineBehaviour" ns="UnityEngine" minimumVersion="2020.3">
+    <message name="OnStateEnter" static="false">
+      <summary>Called on the first Update frame when a state machine evaluates this state.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Animator" name="animator" />
+        <parameter type="UnityEngine.AnimatorStateInfo" name="stateInfo" />
+        <parameter type="int" name="layerIndex" />
+      </parameters>
+    </message>
+    <message name="OnStateUpdate" static="false">
+      <summary>Called on each Update frame between OnStateEnter and OnStateExit callbacks.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Animator" name="animator" />
+        <parameter type="UnityEngine.AnimatorStateInfo" name="stateInfo" />
+        <parameter type="int" name="layerIndex" />
+      </parameters>
+    </message>
+    <message name="OnStateExit" static="false">
+      <summary>Called on the last Update frame when a state machine evaluates this state.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Animator" name="animator" />
+        <parameter type="UnityEngine.AnimatorStateInfo" name="stateInfo" />
+        <parameter type="int" name="layerIndex" />
+      </parameters>
+    </message>
+  </type>
+  <type kind="class" name="Editor" ns="UnityEditor" minimumVersion="2020.3">
+    <message name="OnEnable" static="false">
+      <summary>Called when the Editor object becomes active.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDisable" static="false">
+      <summary>Called when the Editor object becomes inactive.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnInspectorGUI" static="false">
+      <summary>Implement this function to make a custom inspector.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnSceneGUI" static="false">
+      <summary>Enables the Editor to handle an event in the Scene view.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="CreateInspectorGUI" static="false">
+      <summary>Implement this method to make a custom UIElements inspector.</summary>
+      <returns type="UnityEngine.UIElements.VisualElement" />
+      <parameters />
+    </message>
+  </type>
+  <type kind="class" name="EditorWindow" ns="UnityEditor" minimumVersion="2020.3">
+    <message name="OnEnable" static="false">
+      <summary>Called when the window is loaded.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDisable" static="false">
+      <summary>Called when the window is closed or disabled.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnGUI" static="false">
+      <summary>Implement your own Editor GUI here.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="CreateGUI" static="false">
+      <summary>CreateGUI is called when the EditorWindow's root VisualElement is ready to be populated.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="Update" static="false">
+      <summary>Called 100 times per second on all visible windows.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+  </type>
+  <type kind="class" name="AssetPostprocessor" ns="UnityEditor" minimumVersion="2020.3">
+    <message name="OnPreprocessTexture" static="false">
+      <summary>Add this function in a subclass to get a notification before a texture imports.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnPostprocessTexture" static="false">
+      <summary>Add this function in a subclass to get a notification when a texture asset has finished importing.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Texture2D" name="texture" />
+      </parameters>
+    </message>
+    <message name="OnPostprocessAllAssets" static="true">
+      <summary>This is called after importing of any number of assets is complete.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="string[]" name="importedAssets" />
+        <parameter type="string[]" name="deletedAssets" />
+        <parameter type="string[]" name="movedAssets" />
+        <parameter type="string[]" name="movedFromAssetPaths" />
+      </parameters>
+    </message>
+  </type>
+  <type kind="class" name="NetworkBehaviour" ns="Unity.Netcode" minimumVersion="2021.3">
+    <message name="OnNetworkSpawn" static="false">
+      <summary>Gets called when the NetworkObject is spawned on the network.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnNetworkDespawn" static="false">
+      <summary>Gets called when the NetworkObject is despawned.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+  </type>
+</api>
