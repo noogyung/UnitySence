@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "6-2",
-  "lastUpdatedAt": "2026-11-16T03:03:05+09:00",
+  "currentStepId": "6-3",
+  "lastUpdatedAt": "2026-11-16T03:04:00+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -488,24 +488,27 @@
       "phase": 6,
       "title": "Shader Keyword Context Status Bar & Variant Count CodeLens",
       "planFile": "docs/plans/06-meta-sync-and-integration.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "packages/extension/src/shader/shaderKeywordContextStatusBar.ts",
         "packages/extension/test/shader/shaderKeywordContextStatusBar.test.ts"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "packages/extension/src/shader/shaderKeywordContextStatusBar.ts",
+        "packages/extension/test/shader/shaderKeywordContextStatusBar.test.ts"
+      ],
       "verificationCommands": [
         "node tools/cli.mjs test extension"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 6-2 완료: ShaderVariantCodeLensProvider + ShaderKeywordContextStatusBar 19/19 확장 테스트 통과"
     },
     {
       "id": "6-3",
       "phase": 6,
       "title": "최종 통합 (extension.ts, package.json), E2E 테스트 & .vsix 패키징",
       "planFile": "docs/plans/06-meta-sync-and-integration.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "packages/extension/package.json",
