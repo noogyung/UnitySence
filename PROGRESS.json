@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "2-5",
-  "lastUpdatedAt": "2026-11-16T02:38:05+09:00",
+  "currentStepId": "3-1",
+  "lastUpdatedAt": "2026-11-16T02:39:35+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -199,7 +199,7 @@
       "phase": 2,
       "title": "Hover, 자동완성, LSP 서버 본체 및 50ms 성능 검증",
       "planFile": "docs/plans/02-shaderlab-hlsl-lsp.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "packages/shader-lsp/src/providers/completionProvider.ts",
@@ -207,18 +207,24 @@
         "packages/shader-lsp/src/server.ts",
         "packages/shader-lsp/test/server.benchmark.test.ts"
       ],
-      "completedFiles": [],
-      "verificationCommands": [
-        "node tools/cli.mjs test shader-lsp"
+      "completedFiles": [
+        "packages/shader-lsp/src/providers/completionProvider.ts",
+        "packages/shader-lsp/src/providers/hoverProvider.ts",
+        "packages/shader-lsp/src/server.ts",
+        "packages/shader-lsp/test/server.benchmark.test.ts"
       ],
-      "resumeNote": ""
+      "verificationCommands": [
+        "node tools/cli.mjs test shader-lsp",
+        "node tools/cli.mjs build:lsp"
+      ],
+      "resumeNote": "Step 2-5 완료: Completion/Hover/LSP Server RPC 구현, 50-file <50ms 벤치마크 포함 9/9 통과 및 dist/shader-lsp 빌드"
     },
     {
       "id": "3-1",
       "phase": 3,
       "title": "ProjectSettingsWatcher (Unity YAML 설정 감시 및 캐싱)",
       "planFile": "docs/plans/03-smart-domain-completion.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "packages/extension/src/watchers/projectSettingsWatcher.ts",
