@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "3-3",
-  "lastUpdatedAt": "2026-11-16T02:41:35+09:00",
+  "currentStepId": "4-1",
+  "lastUpdatedAt": "2026-11-16T02:42:40+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -264,24 +264,27 @@
       "phase": 3,
       "title": "Unity 이벤트 함수 스니펫 완성 & 일괄 생성 커맨드 (UnityEventGenerator)",
       "planFile": "docs/plans/03-smart-domain-completion.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "packages/extension/src/completion/unityEventGenerator.ts",
         "packages/extension/test/completion/unityEventGenerator.test.ts"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "packages/extension/src/completion/unityEventGenerator.ts",
+        "packages/extension/test/completion/unityEventGenerator.test.ts"
+      ],
       "verificationCommands": [
         "node tools/cli.mjs test extension"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 3-3 완료: UnityEventCompletionProvider & generateEventFunctions 구현 및 테스트(9/9 통과)"
     },
     {
       "id": "4-1",
       "phase": 4,
       "title": "Roslyn 프로젝트 스캐폴딩 & Directory.Build.props 비침습 주입기",
       "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "analyzers/UnityBrain.Analyzers/UnityBrain.Analyzers.csproj",
