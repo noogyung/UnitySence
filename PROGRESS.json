@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "4-4",
-  "lastUpdatedAt": "2026-11-16T02:51:15+09:00",
+  "currentStepId": "4-5",
+  "lastUpdatedAt": "2026-11-16T02:52:20+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -356,24 +356,27 @@
       "phase": 4,
       "title": "Burst Compiler 정적 검증기 (UB2001~UB2004)",
       "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "analyzers/UnityBrain.Analyzers/Diagnostics/BurstCompileAnalyzer.cs",
         "analyzers/UnityBrain.Analyzers.Tests/BurstCompileAnalyzerTests.cs"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "analyzers/UnityBrain.Analyzers/Diagnostics/BurstCompileAnalyzer.cs",
+        "analyzers/UnityBrain.Analyzers.Tests/BurstCompileAnalyzerTests.cs"
+      ],
       "verificationCommands": [
         "dotnet test analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false --filter BurstCompile"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 4-4 완료: BurstCompileAnalyzer (UB2001~UB2004) 및 [BurstDiscard] 예외 처리 4/4 테스트 통과"
     },
     {
       "id": "4-5",
       "phase": 4,
       "title": "문자열 정합성 검사 (UB3001~UB3003) & [FormerlySerializedAs] 리팩토링 (UB4001)",
       "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "analyzers/UnityBrain.Analyzers/Diagnostics/UnityStringValidationAnalyzer.cs",
