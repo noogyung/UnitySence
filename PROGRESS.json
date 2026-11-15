@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "2-3",
-  "lastUpdatedAt": "2026-11-16T02:35:30+09:00",
+  "currentStepId": "2-4",
+  "lastUpdatedAt": "2026-11-16T02:36:45+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -157,25 +157,29 @@
       "phase": 2,
       "title": "다단계 #include 의존성 그래프 및 Tree-sitter HLSL 심볼 인덱서",
       "planFile": "docs/plans/02-shaderlab-hlsl-lsp.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "packages/shader-lsp/src/indexer/hlslSymbolTable.ts",
         "packages/shader-lsp/src/indexer/hlslIncludeGraph.ts",
         "packages/shader-lsp/test/indexer/hlslIncludeGraph.test.ts"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "packages/shader-lsp/src/indexer/hlslSymbolTable.ts",
+        "packages/shader-lsp/src/indexer/hlslIncludeGraph.ts",
+        "packages/shader-lsp/test/indexer/hlslIncludeGraph.test.ts"
+      ],
       "verificationCommands": [
         "node tools/cli.mjs test shader-lsp"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 2-3 완료: IncludeDependencyGraph & HlslSymbolTable 구현 및 3단계 중첩/순환 참조 테스트(5/5 통과)"
     },
     {
       "id": "2-4",
       "phase": 2,
       "title": "Shader / HLSL F12 정의 이동 프로바이더 (definitionProvider.ts)",
       "planFile": "docs/plans/02-shaderlab-hlsl-lsp.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "packages/shader-lsp/src/providers/definitionProvider.ts",
