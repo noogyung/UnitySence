@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "4-1",
-  "lastUpdatedAt": "2026-11-16T02:42:40+09:00",
+  "currentStepId": "4-2",
+  "lastUpdatedAt": "2026-11-16T02:46:15+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -284,7 +284,7 @@
       "phase": 4,
       "title": "Roslyn 프로젝트 스캐폴딩 & Directory.Build.props 비침습 주입기",
       "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "analyzers/UnityBrain.Analyzers/UnityBrain.Analyzers.csproj",
@@ -293,19 +293,25 @@
         "packages/extension/src/analyzers/msbuildInjector.ts",
         "packages/extension/test/analyzers/msbuildInjector.test.ts"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "analyzers/UnityBrain.Analyzers/UnityBrain.Analyzers.csproj",
+        "analyzers/UnityBrain.Analyzers/DiagnosticIds.cs",
+        "analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj",
+        "packages/extension/src/analyzers/msbuildInjector.ts",
+        "packages/extension/test/analyzers/msbuildInjector.test.ts"
+      ],
       "verificationCommands": [
         "dotnet build analyzers/UnityBrain.Analyzers/UnityBrain.Analyzers.csproj -nodeReuse:false -p:UseSharedCompilation=false",
         "node tools/cli.mjs test extension"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 4-1 완료: 오프라인 Roslyn csproj/TestRunner 및 Directory.Build.props 비침습 주입기 완료"
     },
     {
       "id": "4-2",
       "phase": 4,
       "title": "콜그래프 성능 분석 (UB1001, UB1002) + Awake() 자동 캐싱 Quick-Fix",
       "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "analyzers/UnityBrain.Analyzers/CallGraph/PerformanceCriticalContextAnalyzer.cs",

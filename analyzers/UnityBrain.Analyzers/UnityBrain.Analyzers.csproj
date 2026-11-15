@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>UnityBrain.Analyzers</AssemblyName>
+    <RootNamespace>UnityBrain.Analyzers</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultItems>true</EnableDefaultItems>
+    <UseSharedCompilation>false</UseSharedCompilation>
+    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
+    <NoStdLib>true</NoStdLib>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
+    <Deterministic>true</Deterministic>
+    <RoslynToolsDir>C:/Program Files/dotnet/sdk/10.0.301/DotnetTools/dotnet-format</RoslynToolsDir>
+    <NetCoreRefDir>C:/Program Files/dotnet/packs/Microsoft.NETCore.App.Ref/10.0.9/ref/net10.0</NetCoreRefDir>
+  </PropertyGroup>
+
+  <Target Name="Restore" />
+
+  <ItemGroup>
+    <Reference Include="$(NetCoreRefDir)/*.dll" />
+    <Reference Include="$(RoslynToolsDir)/Microsoft.CodeAnalysis.dll" />
+    <Reference Include="$(RoslynToolsDir)/Microsoft.CodeAnalysis.CSharp.dll" />
+    <Reference Include="$(RoslynToolsDir)/Microsoft.CodeAnalysis.Workspaces.dll" />
+    <Reference Include="$(RoslynToolsDir)/Microsoft.CodeAnalysis.CSharp.Workspaces.dll" />
+    <Reference Include="$(RoslynToolsDir)/System.Composition.AttributedModel.dll" />
+    <Reference Include="$(RoslynToolsDir)/System.Composition.Runtime.dll" />
+    <Reference Include="$(RoslynToolsDir)/System.Composition.TypedParts.dll" />
+    <Reference Include="$(RoslynToolsDir)/System.Composition.Hosting.dll" />
+  </ItemGroup>
+
+  <Target Name="CopyToNetStandard20" AfterTargets="Build">
+    <MakeDir Directories="$(OutputPath)../netstandard2.0" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(OutputPath)../netstandard2.0/UnityBrain.Analyzers.dll" SkipUnchangedFiles="true" />
+  </Target>
+</Project>
