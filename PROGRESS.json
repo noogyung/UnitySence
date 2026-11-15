@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "overallStatus": "in_progress",
+  "overallStatus": "completed",
   "currentStepId": "6-3",
-  "lastUpdatedAt": "2026-11-16T03:04:00+09:00",
+  "lastUpdatedAt": "2026-11-16T03:10:00+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -508,7 +508,7 @@
       "phase": 6,
       "title": "최종 통합 (extension.ts, package.json), E2E 테스트 & .vsix 패키징",
       "planFile": "docs/plans/06-meta-sync-and-integration.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "packages/extension/package.json",
@@ -517,7 +517,14 @@
         "packages/extension/test/e2e/suite.test.ts",
         "package.json"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "packages/extension/package.json",
+        "packages/extension/syntaxes/unity-shaderlab.tmLanguage.json",
+        "packages/extension/src/extension.ts",
+        "packages/extension/test/e2e/suite.test.ts",
+        "package.json",
+        "UnityBrain.sln"
+      ],
       "verificationCommands": [
         "node tools/cli.mjs build:analyzers",
         "node tools/cli.mjs build:daemon",
@@ -527,7 +534,7 @@
         "dotnet test UnityBrain.sln -nodeReuse:false -p:UseSharedCompilation=false",
         "node tools/cli.mjs package:vsix"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 6-3 완료: extension.ts/package.json/tmLanguage/E2E/UnityBrain.sln 통합, Node/TS 31/31 + Analyzers 16/16 + Daemon 5/5 테스트 및 dist/unitybrain-0.1.0.vsix(315 entries, 5403433 bytes) 패키징 통과"
     }
   ]
 }

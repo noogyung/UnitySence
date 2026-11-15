@@ -15,7 +15,14 @@
     "Other"
   ],
   "activationEvents": [
-    "workspaceContains:ProjectSettings/ProjectVersion.txt"
+    "workspaceContains:ProjectSettings/ProjectVersion.txt",
+    "onLanguage:unity-shaderlab",
+    "onLanguage:hlsl",
+    "onLanguage:csharp",
+    "onCommand:unityBrain.generateEventFunctions",
+    "onCommand:unityBrain.switchShaderKeywords",
+    "onCommand:unityBrain.showAssetUsages",
+    "onCommand:unityBrain.rebuildAssetIndex"
   ],
   "extensionDependencies": [
     "ms-dotnettools.csharp",
@@ -34,5 +41,68 @@
     "vscode": "^1.90.0",
     "vitest": "^2.1.0"
   },
-  "contributes": {}
+  "contributes": {
+    "languages": [
+      {
+        "id": "unity-shaderlab",
+        "aliases": ["Unity ShaderLab", "ShaderLab"],
+        "extensions": [".shader", ".shadergraph", ".urtshader"]
+      },
+      {
+        "id": "hlsl",
+        "aliases": ["HLSL", "Unity HLSL"],
+        "extensions": [".hlsl", ".hlsli", ".cginc", ".cg", ".compute", ".hlslinc"]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "unity-shaderlab",
+        "scopeName": "source.shaderlab",
+        "path": "./syntaxes/unity-shaderlab.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "unityBrain.generateEventFunctions",
+        "title": "UnityBrain: Generate Unity Event Functions..."
+      },
+      {
+        "command": "unityBrain.switchShaderKeywords",
+        "title": "UnityBrain: Switch Shader Keywords Context..."
+      },
+      {
+        "command": "unityBrain.showAssetUsages",
+        "title": "UnityBrain: Show Unity Asset Usages"
+      },
+      {
+        "command": "unityBrain.rebuildAssetIndex",
+        "title": "UnityBrain: Rebuild Unity Asset Index"
+      }
+    ],
+    "configuration": {
+      "title": "UnityBrain",
+      "properties": {
+        "unityBrain.metaSync.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically rename, delete, and create Unity .meta files when assets change in Explorer."
+        },
+        "unityBrain.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Unity Asset Usage, Event Callback, Inspector Value, and Shader Variant CodeLenses."
+        },
+        "unityBrain.analyzers.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically inject UnityBrain Roslyn Analyzers and AdditionalFiles via Directory.Build.props."
+        },
+        "unityBrain.unityEditorPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional explicit path to the Unity Editor executable directory for resolving CGIncludes and built-in packages."
+        }
+      }
+    }
+  }
 }
