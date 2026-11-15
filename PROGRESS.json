@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "5-2",
-  "lastUpdatedAt": "2026-11-16T02:57:40+09:00",
+  "currentStepId": "5-3",
+  "lastUpdatedAt": "2026-11-16T02:59:40+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -424,7 +424,7 @@
       "phase": 5,
       "title": "바이너리 증분 캐시 & JSON-RPC 서버 + 1,000개 에셋 < 500ms 벤치마크",
       "planFile": "docs/plans/05-yaml-asset-indexer-and-codelens.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "packages/unity-daemon/Cache/BinaryIndexCache.cs",
@@ -432,18 +432,23 @@
         "packages/unity-daemon/Program.cs",
         "packages/unity-daemon/UnityBrain.Daemon.Tests/DaemonBenchmarkAndRpcTests.cs"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "packages/unity-daemon/Cache/BinaryIndexCache.cs",
+        "packages/unity-daemon/RpcServer.cs",
+        "packages/unity-daemon/Program.cs",
+        "packages/unity-daemon/UnityBrain.Daemon.Tests/DaemonBenchmarkAndRpcTests.cs"
+      ],
       "verificationCommands": [
         "dotnet test packages/unity-daemon/UnityBrain.Daemon.Tests/UnityBrain.Daemon.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 5-2 완료: UBIX 바이너리 캐시 + JSON-RPC stdio 서버 5/5 통과 (1,000 에셋 cold 199ms, 1파일 증분 warm 18.8ms)"
     },
     {
       "id": "5-3",
       "phase": 5,
       "title": "VS Code UnityDaemonClient & UnityAssetUsageCodeLensProvider 구현",
       "planFile": "docs/plans/05-yaml-asset-indexer-and-codelens.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "packages/extension/src/codelens/unityAssetUsageCodeLensProvider.ts",
