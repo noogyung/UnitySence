@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "5-3",
-  "lastUpdatedAt": "2026-11-16T02:59:40+09:00",
+  "currentStepId": "6-1",
+  "lastUpdatedAt": "2026-11-16T03:01:15+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -448,24 +448,27 @@
       "phase": 5,
       "title": "VS Code UnityDaemonClient & UnityAssetUsageCodeLensProvider 구현",
       "planFile": "docs/plans/05-yaml-asset-indexer-and-codelens.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "packages/extension/src/codelens/unityAssetUsageCodeLensProvider.ts",
         "packages/extension/test/codelens/unityAssetUsageCodeLensProvider.test.ts"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "packages/extension/src/codelens/unityAssetUsageCodeLensProvider.ts",
+        "packages/extension/test/codelens/unityAssetUsageCodeLensProvider.test.ts"
+      ],
       "verificationCommands": [
         "node tools/cli.mjs test extension"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 5-3 완료: UnityDaemonClient + UnityAssetUsageCodeLensProvider 13/13 확장 테스트 통과"
     },
     {
       "id": "6-1",
       "phase": 6,
       "title": ".meta 파일 생명주기 동기화 (MetaFileSyncManager)",
       "planFile": "docs/plans/06-meta-sync-and-integration.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "packages/extension/src/meta/metaFileSyncManager.ts",

@@ -1,0 +1,544 @@
+import { spawn, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { PassThrough } from 'node:stream';
+import * as vscode from 'vscode';
+import {
+  createMessageConnection,
+  StreamMessageReader,
+  StreamMessageWriter,
+  type MessageConnection,
+} from 'vscode-jsonrpc';
+import type {
+  AssetUsageLocation,
+  DaemonIndexStatus,
+  SerializedFieldValueEntry,
+} from '../contracts/index.ts';
+
+export interface DaemonClientTransport {
+  sendRequest<T = unknown>(method: string, params?: unknown): Promise<T>;
+  dispose(): void;
+}
+
+export interface UnityDaemonClientOptions {
+  projectRoot: string;
+  extensionPath: string;
+  cacheDir?: string;
+  transportFactory?: () => DaemonClientTransport;
+}
+
+export interface CSharpCodeDeclarations {
+  classes: Array<{ className: string; line: number }>;
+  serializedFields: Array<{ fieldName: string; line: number }>;
+  methods: Array<{ methodName: string; line: number }>;
+}
+
+export interface ShowAssetUsagesCommandArgs {
+  title: string;
+  projectRoot: string;
+  locations: AssetUsageLocation[];
+}
+
+export class UnityDaemonClient implements vscode.Disposable {
+  private readonly projectRoot: string;
+  private readonly extensionPath: string;
+  private readonly cacheDir: string;
+  private readonly transportFactory?: () => DaemonClientTransport;
+
+  private transport: DaemonClientTransport | null = null;
+  private childProcess: ChildProcess | null = null;
+  private connection: MessageConnection | null = null;
+  private startPromise: Promise<void> | null = null;
+
+  constructor(options: UnityDaemonClientOptions) {
+    this.projectRoot = path.resolve(options.projectRoot);
+    this.extensionPath = path.resolve(options.extensionPath);
+    this.cacheDir = path.resolve(
+      options.cacheDir ?? path.join(this.projectRoot, 'Library', 'UnityBrainCache'),
+    );
+    this.transportFactory = options.transportFactory;
+  }
+
+  public async start(): Promise<void> {
+    if (this.transport) {
+      return;
+    }
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+
+    this.startPromise = this.doStart();
+    try {
+      await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
+  }
+
+  private async doStart(): Promise<void> {
+    if (this.transportFactory) {
+      this.transport = this.transportFactory();
+      return;
+    }
+
+    const daemonDll = this.resolveDaemonDllPath();
+    if (!daemonDll) {
+      throw new Error('UnityBrain.Daemon.dll was not found in extension binaries.');
+    }
+
+    const child = spawn(
+      'dotnet',
+      [daemonDll, '--project-root', this.projectRoot, '--cache-dir', this.cacheDir],
+      {
+        cwd: this.projectRoot,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
+
+    if (!child.stdout || !child.stdin) {
+      child.kill();
+      throw new Error('Failed to attach stdio streams to UnityBrain.Daemon child process.');
+    }
+
+    const conn = createMessageConnection(
+      new StreamMessageReader(child.stdout),
+      new StreamMessageWriter(child.stdin),
+    );
+    conn.listen();
+
+    this.childProcess = child;
+    this.connection = conn;
+    this.transport = {
+      sendRequest: <T>(method: string, params?: unknown) => conn.sendRequest<T>(method, params),
+      dispose: () => {
+        try {
+          void conn.sendNotification('exit');
+        } catch {
+          // Ignore closing notification error
+        }
+        conn.dispose();
+        if (!child.killed) {
+          child.kill();
+        }
+      },
+    };
+  }
+
+  private resolveDaemonDllPath(): string | null {
+    const candidates = [
+      path.join(this.extensionPath, 'bin', 'daemon', 'UnityBrain.Daemon.dll'),
+      path.join(this.extensionPath, '..', 'unity-daemon', 'bin', 'Release', 'net10.0', 'UnityBrain.Daemon.dll'),
+      path.join(this.extensionPath, '..', 'unity-daemon', 'bin', 'Debug', 'net10.0', 'UnityBrain.Daemon.dll'),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  public async getStatus(): Promise<DaemonIndexStatus> {
+    await this.start();
+    return this.transport!.sendRequest<DaemonIndexStatus>('index/status', {});
+  }
+
+  public async rebuild(force = false): Promise<{ indexedAssets: number; elapsedMs: number }> {
+    await this.start();
+    return this.transport!.sendRequest<{ indexedAssets: number; elapsedMs: number }>(
+      'index/rebuild',
+      { force },
+    );
+  }
+
+  public async findByScriptGuid(scriptGuid: string): Promise<AssetUsageLocation[]> {
+    await this.start();
+    const res = await this.transport!.sendRequest<{ locations?: AssetUsageLocation[] }>(
+      'usage/findByScriptGuid',
+      { scriptGuid },
+    );
+    return res?.locations ?? [];
+  }
+
+  public async findByMethod(
+    scriptGuid: string | undefined,
+    className: string | undefined,
+    methodName: string,
+  ): Promise<AssetUsageLocation[]> {
+    await this.start();
+    const res = await this.transport!.sendRequest<{ locations?: AssetUsageLocation[] }>(
+      'usage/findByMethod',
+      { scriptGuid, className, methodName },
+    );
+    return res?.locations ?? [];
+  }
+
+  public async getSerializedValues(
+    scriptGuid: string,
+    fieldName?: string,
+  ): Promise<SerializedFieldValueEntry[]> {
+    await this.start();
+    const res = await this.transport!.sendRequest<{ fields?: SerializedFieldValueEntry[] }>(
+      'inspector/getSerializedValues',
+      { scriptGuid, fieldName },
+    );
+    return res?.fields ?? [];
+  }
+
+  public static createConnectionTransport(
+    readable: NodeJS.ReadableStream,
+    writable: NodeJS.WritableStream,
+  ): DaemonClientTransport {
+    const conn = createMessageConnection(
+      new StreamMessageReader(readable),
+      new StreamMessageWriter(writable),
+    );
+    conn.listen();
+    return {
+      sendRequest: <T>(method: string, params?: unknown) => conn.sendRequest<T>(method, params),
+      dispose: () => conn.dispose(),
+    };
+  }
+
+  public static createPassThroughPair(): {
+    clientReadable: PassThrough;
+    clientWritable: PassThrough;
+    serverReadable: PassThrough;
+    serverWritable: PassThrough;
+  } {
+    const clientToServer = new PassThrough();
+    const serverToClient = new PassThrough();
+    return {
+      clientReadable: serverToClient,
+      clientWritable: clientToServer,
+      serverReadable: clientToServer,
+      serverWritable: serverToClient,
+    };
+  }
+
+  public dispose(): void {
+    if (this.transport) {
+      this.transport.dispose();
+      this.transport = null;
+    }
+    if (this.connection) {
+      this.connection.dispose();
+      this.connection = null;
+    }
+    if (this.childProcess && !this.childProcess.killed) {
+      this.childProcess.kill();
+    }
+    this.childProcess = null;
+  }
+}
+
+export async function readMetaGuid(assetFilePath: string): Promise<string | null> {
+  const metaPath = `${assetFilePath}.meta`;
+  try {
+    const content = await fs.promises.readFile(metaPath, 'utf8');
+    const match = /^\s*guid:\s*([0-9a-fA-F]{32})\b/m.exec(content);
+    return match ? match[1].toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseCSharpDeclarations(sourceText: string): CSharpCodeDeclarations {
+  const classes: Array<{ className: string; line: number }> = [];
+  const serializedFields: Array<{ fieldName: string; line: number }> = [];
+  const methods: Array<{ methodName: string; line: number }> = [];
+
+  const lines = sourceText.split(/\r?\n/);
+  let pendingSerializeField = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed || trimmed.startsWith('//')) {
+      continue;
+    }
+
+    if (/\[[^\]]*\b(?:UnityEngine\.)?SerializeField\b[^\]]*\]/.test(trimmed)) {
+      pendingSerializeField = true;
+    }
+
+    const classMatch = /^(?:public|internal|private|protected|abstract|sealed|static|partial|\s)*\bclass\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(
+      trimmed,
+    );
+    if (classMatch) {
+      classes.push({ className: classMatch[1], line: i });
+      pendingSerializeField = false;
+      continue;
+    }
+
+    const methodMatch = /^(?:public|private|protected|internal|virtual|override|async|static|\s)+\s+[A-Za-z0-9_<>\[\],\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(
+      trimmed,
+    );
+    if (
+      methodMatch &&
+      !trimmed.startsWith('if') &&
+      !trimmed.startsWith('for') &&
+      !trimmed.startsWith('while') &&
+      !trimmed.startsWith('switch')
+    ) {
+      methods.push({ methodName: methodMatch[1], line: i });
+      pendingSerializeField = false;
+      continue;
+    }
+
+    const isPublicField = /\bpublic\b/.test(trimmed) && !/\b(?:static|const|readonly)\b/.test(trimmed);
+    const fieldMatch = /^(?:\[[^\]]+\]\s*)*(?:public|private|protected|internal|\s)+[A-Za-z0-9_<>\[\].,\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)/.exec(
+      trimmed,
+    );
+    if (fieldMatch && (pendingSerializeField || isPublicField) && !trimmed.includes('(')) {
+      serializedFields.push({ fieldName: fieldMatch[1], line: i });
+      pendingSerializeField = false;
+      continue;
+    }
+
+    if (!trimmed.startsWith('[')) {
+      pendingSerializeField = false;
+    }
+  }
+
+  return { classes, serializedFields, methods };
+}
+
+export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
+  private readonly projectRoot: string;
+  private readonly daemonClient: UnityDaemonClient;
+  private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
+
+  public readonly onDidChangeCodeLenses: vscode.Event<void> = this.onDidChangeEmitter.event;
+
+  constructor(projectRoot: string, daemonClient: UnityDaemonClient) {
+    this.projectRoot = path.resolve(projectRoot);
+    this.daemonClient = daemonClient;
+  }
+
+  public refresh(): void {
+    this.onDidChangeEmitter.fire();
+  }
+
+  public async provideCodeLenses(
+    document: vscode.TextDocument,
+    token: vscode.CancellationToken,
+  ): Promise<vscode.CodeLens[]> {
+    const enabled = vscode.workspace
+      .getConfiguration('unityBrain')
+      .get<boolean>('codeLens.enabled', true);
+    if (!enabled || document.languageId !== 'csharp' || token.isCancellationRequested) {
+      return [];
+    }
+
+    const scriptGuid = await readMetaGuid(document.fileName);
+    if (!scriptGuid || token.isCancellationRequested) {
+      return [];
+    }
+
+    const decls = parseCSharpDeclarations(document.getText());
+    if (decls.classes.length === 0) {
+      return [];
+    }
+
+    let scriptUsages: AssetUsageLocation[] = [];
+    let serializedValues: SerializedFieldValueEntry[] = [];
+    try {
+      [scriptUsages, serializedValues] = await Promise.all([
+        this.daemonClient.findByScriptGuid(scriptGuid),
+        this.daemonClient.getSerializedValues(scriptGuid),
+      ]);
+    } catch {
+      return [];
+    }
+
+    if (token.isCancellationRequested) {
+      return [];
+    }
+
+    const lenses: vscode.CodeLens[] = [];
+    const primaryClass = decls.classes[0].className;
+
+    // 1. Class-level Asset Usage CodeLenses
+    const classTitle = this.formatClassUsageSummary(scriptUsages);
+    for (const cls of decls.classes) {
+      const range = new vscode.Range(cls.line, 0, cls.line, 0);
+      lenses.push(
+        new vscode.CodeLens(range, {
+          title: classTitle,
+          command: 'unityBrain.showAssetUsages',
+          tooltip: 'Click to browse all Unity Scenes, Prefabs, and Assets referencing this script',
+          arguments: [
+            {
+              title: `${cls.className} Asset Usages`,
+              projectRoot: this.projectRoot,
+              locations: scriptUsages,
+            } satisfies ShowAssetUsagesCommandArgs,
+          ],
+        }),
+      );
+    }
+
+    // 2. Field-level Inspector Serialized Values CodeLenses
+    if (serializedValues.length > 0) {
+      const valuesByField = new Map<string, SerializedFieldValueEntry[]>();
+      for (const entry of serializedValues) {
+        const list = valuesByField.get(entry.fieldName) ?? [];
+        list.push(entry);
+        valuesByField.set(entry.fieldName, list);
+      }
+
+      for (const field of decls.serializedFields) {
+        const entries = valuesByField.get(field.fieldName);
+        if (!entries || entries.length === 0) {
+          continue;
+        }
+
+        const preview = entries
+          .slice(0, 3)
+          .map((e) => `${e.value} (${path.basename(e.assetPath, path.extname(e.assetPath))})`)
+          .join(', ');
+        const suffix = entries.length > 3 ? ` +${entries.length - 3} more` : '';
+        const fieldLocations: AssetUsageLocation[] = entries.map((e) => ({
+          assetPath: e.assetPath,
+          assetType: e.assetType,
+          assetGuid: '',
+          gameObjectPath: e.gameObjectPath,
+          fileId: e.fileId,
+          line: e.line,
+          usageKind: 'component',
+          serializedValues: { [e.fieldName]: e.value },
+        }));
+
+        const range = new vscode.Range(field.line, 0, field.line, 0);
+        lenses.push(
+          new vscode.CodeLens(range, {
+            title: `$(settings-gear) Inspector: ${preview}${suffix}`,
+            command: 'unityBrain.showAssetUsages',
+            tooltip: `Serialized values for '${field.fieldName}' across Unity assets`,
+            arguments: [
+              {
+                title: `${primaryClass}.${field.fieldName} Inspector Values`,
+                projectRoot: this.projectRoot,
+                locations: fieldLocations,
+              } satisfies ShowAssetUsagesCommandArgs,
+            ],
+          }),
+        );
+      }
+    }
+
+    // 3. Method-level UnityEvent callback CodeLenses
+    const candidateMethods = decls.methods.slice(0, 40);
+    const methodResults = await Promise.all(
+      candidateMethods.map(async (m) => ({
+        method: m,
+        locations: await this.daemonClient.findByMethod(scriptGuid, primaryClass, m.methodName).catch(() => []),
+      })),
+    );
+
+    if (token.isCancellationRequested) {
+      return [];
+    }
+
+    for (const item of methodResults) {
+      if (item.locations.length === 0) {
+        continue;
+      }
+      const range = new vscode.Range(item.method.line, 0, item.method.line, 0);
+      const count = item.locations.length;
+      lenses.push(
+        new vscode.CodeLens(range, {
+          title: `$(zap) ${count} Event Callback${count === 1 ? '' : 's'}`,
+          command: 'unityBrain.showAssetUsages',
+          tooltip: `UnityEvent bindings targeting ${item.method.methodName}()`,
+          arguments: [
+            {
+              title: `${primaryClass}.${item.method.methodName}() Event Callbacks`,
+              projectRoot: this.projectRoot,
+              locations: item.locations,
+            } satisfies ShowAssetUsagesCommandArgs,
+          ],
+        }),
+      );
+    }
+
+    return lenses;
+  }
+
+  private formatClassUsageSummary(locations: AssetUsageLocation[]): string {
+    if (locations.length === 0) {
+      return '$(symbol-reference) 0 Asset Usages';
+    }
+
+    let scenes = 0;
+    let prefabs = 0;
+    let assets = 0;
+    for (const loc of locations) {
+      if (loc.assetType === 'scene') scenes++;
+      else if (loc.assetType === 'prefab') prefabs++;
+      else assets++;
+    }
+
+    const parts: string[] = [];
+    if (scenes > 0) parts.push(`${scenes} Scene${scenes === 1 ? '' : 's'}`);
+    if (prefabs > 0) parts.push(`${prefabs} Prefab${prefabs === 1 ? '' : 's'}`);
+    if (assets > 0) parts.push(`${assets} Asset${assets === 1 ? '' : 's'}`);
+
+    const total = locations.length;
+    const noun = total === 1 ? 'Asset Usage' : 'Asset Usages';
+    return `$(symbol-reference) ${total} ${noun} (${parts.join(', ')})`;
+  }
+
+  public dispose(): void {
+    this.onDidChangeEmitter.dispose();
+  }
+}
+
+export function registerShowAssetUsagesCommand(defaultProjectRoot: string): vscode.Disposable {
+  return vscode.commands.registerCommand('unityBrain.showAssetUsages', async (rawArgs?: unknown) => {
+    const args = rawArgs as ShowAssetUsagesCommandArgs | undefined;
+    const locations = args?.locations ?? [];
+    const root = args?.projectRoot ?? defaultProjectRoot;
+
+    if (locations.length === 0) {
+      await vscode.window.showInformationMessage('No Unity asset usages found for this symbol.');
+      return undefined;
+    }
+
+    interface UsageQuickPickItem extends vscode.QuickPickItem {
+      location: AssetUsageLocation;
+    }
+
+    const items: UsageQuickPickItem[] = locations.map((loc) => ({
+      label: `${loc.assetPath}:${loc.line}`,
+      description: loc.gameObjectPath,
+      detail: loc.methodName
+        ? `UnityEvent -> ${loc.methodName}()`
+        : loc.usageKind === 'prefabOverride'
+          ? 'PrefabInstance Override'
+          : `Component usage (${loc.assetType})`,
+      location: loc,
+    }));
+
+    const picked = await vscode.window.showQuickPick<UsageQuickPickItem>(items, {
+      placeHolder: args?.title ?? 'Select Unity asset usage to inspect',
+    });
+
+    const selected = Array.isArray(picked) ? picked[0] : picked;
+    if (!selected) {
+      return undefined;
+    }
+
+    const targetPath = path.resolve(root, selected.location.assetPath);
+    const targetUri = vscode.Uri.file(targetPath);
+    const targetLine = Math.max(0, selected.location.line - 1);
+    const pos = new vscode.Position(targetLine, 0);
+
+    const doc = await vscode.workspace.openTextDocument(targetUri);
+    await vscode.window.showTextDocument(doc, {
+      selection: new vscode.Range(pos, pos),
+      preserveFocus: false,
+    });
+    return selected.location;
+  });
+}
