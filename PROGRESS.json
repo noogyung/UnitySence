@@ -1,0 +1,450 @@
+{
+  "schemaVersion": 1,
+  "overallStatus": "in_progress",
+  "currentStepId": "1-2",
+  "lastUpdatedAt": "2026-11-16T02:29:40+09:00",
+  "steps": [
+    {
+      "id": "1-1",
+      "phase": 1,
+      "title": "모노레포 스캐폴딩 & 공유 계약(contracts, schemas) 생성",
+      "planFile": "docs/plans/01-core-and-virtual-vfs.md",
+      "status": "completed",
+      "optional": false,
+      "targetFiles": [
+        "package.json",
+        "pnpm-workspace.yaml",
+        "tsconfig.base.json",
+        "UnityBrain.sln",
+        "tools/ts-loader.mjs",
+        "tools/cli.mjs",
+        "schemas/unity-context.schema.json",
+        "schemas/unity-api.schema.json",
+        "schemas/project-settings.schema.json",
+        "schemas/shader-index.schema.json",
+        "schemas/daemon-rpc.schema.json",
+        "packages/extension/package.json",
+        "packages/extension/tsconfig.json",
+        "packages/extension/src/contracts/index.ts",
+        "packages/shader-lsp/package.json",
+        "packages/shader-lsp/tsconfig.json",
+        "tools/api-extractor/package.json",
+        "tools/api-extractor/tsconfig.json"
+      ],
+      "completedFiles": [
+        "package.json",
+        "pnpm-workspace.yaml",
+        "tsconfig.base.json",
+        "UnityBrain.sln",
+        "tools/ts-loader.mjs",
+        "tools/cli.mjs",
+        "schemas/unity-context.schema.json",
+        "schemas/unity-api.schema.json",
+        "schemas/project-settings.schema.json",
+        "schemas/shader-index.schema.json",
+        "schemas/daemon-rpc.schema.json",
+        "packages/extension/package.json",
+        "packages/extension/tsconfig.json",
+        "packages/extension/src/contracts/index.ts",
+        "packages/shader-lsp/package.json",
+        "packages/shader-lsp/tsconfig.json",
+        "tools/api-extractor/package.json",
+        "tools/api-extractor/tsconfig.json"
+      ],
+      "verificationCommands": [
+        "node tools/cli.mjs install",
+        "node tools/cli.mjs typecheck"
+      ],
+      "resumeNote": "Step 1-1 완료: 오프라인 CLI/TS로더, 5개 JSON 스키마, contracts/index.ts 및 모노레포 설정 완료"
+    },
+    {
+      "id": "1-2",
+      "phase": 1,
+      "title": "UnityProjectContextManager & UnityVirtualPathResolver 구현",
+      "planFile": "docs/plans/01-core-and-virtual-vfs.md",
+      "status": "in_progress",
+      "optional": false,
+      "targetFiles": [
+        "packages/extension/src/core/unityProjectContext.ts",
+        "packages/extension/src/core/virtualPathResolver.ts",
+        "packages/shader-lsp/src/vfs/virtualPathResolver.ts",
+        "test-fixtures/SampleUnityProject/ProjectSettings/ProjectVersion.txt",
+        "test-fixtures/SampleUnityProject/Packages/manifest.json",
+        "test-fixtures/SampleUnityProject/Packages/packages-lock.json",
+        "packages/extension/test/core/virtualPathResolver.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test extension"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "1-3",
+      "phase": 1,
+      "title": "tools/api-extractor 구현 및 unity-api.json 생성",
+      "planFile": "docs/plans/01-core-and-virtual-vfs.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "tools/api-extractor/src/index.ts",
+        "tools/api-extractor/test/fixtures/sample-api.xml",
+        "tools/api-extractor/test/apiExtractor.test.ts",
+        "packages/extension/resources/unity-api.json"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test api-extractor",
+        "node -p \"require('fs').existsSync('packages/extension/resources/unity-api.json')\""
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "2-1",
+      "phase": 2,
+      "title": "ShaderLab 가상 문서 추출기 & Unity HLSL 매크로 전처리 프리패스",
+      "planFile": "docs/plans/02-shaderlab-hlsl-lsp.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/shader-lsp/src/parser/shaderLabVirtualDoc.ts",
+        "packages/shader-lsp/src/parser/unityHlslMacroPrepass.ts",
+        "packages/shader-lsp/test/parser/shaderLabVirtualDoc.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test shader-lsp"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "2-2",
+      "phase": 2,
+      "title": "(선택) REA를 이용한 Rider 셰이더 내장 매크로/스펙 보강",
+      "planFile": "docs/plans/02-shaderlab-hlsl-lsp.md",
+      "status": "pending",
+      "optional": true,
+      "targetFiles": [
+        "packages/shader-lsp/src/parser/unityHlslMacroPrepass.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test shader-lsp"
+      ],
+      "resumeNote": "Unity URP/HDRP/Built-in 매크로 테이블을 unityHlslMacroPrepass.ts에 내장 구현한다."
+    },
+    {
+      "id": "2-3",
+      "phase": 2,
+      "title": "다단계 #include 의존성 그래프 및 Tree-sitter HLSL 심볼 인덱서",
+      "planFile": "docs/plans/02-shaderlab-hlsl-lsp.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/shader-lsp/src/indexer/hlslSymbolTable.ts",
+        "packages/shader-lsp/src/indexer/hlslIncludeGraph.ts",
+        "packages/shader-lsp/test/indexer/hlslIncludeGraph.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test shader-lsp"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "2-4",
+      "phase": 2,
+      "title": "Shader / HLSL F12 정의 이동 프로바이더 (definitionProvider.ts)",
+      "planFile": "docs/plans/02-shaderlab-hlsl-lsp.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/shader-lsp/src/providers/definitionProvider.ts",
+        "packages/shader-lsp/test/providers/definitionProvider.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test shader-lsp"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "2-5",
+      "phase": 2,
+      "title": "Hover, 자동완성, LSP 서버 본체 및 50ms 성능 검증",
+      "planFile": "docs/plans/02-shaderlab-hlsl-lsp.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/shader-lsp/src/providers/completionProvider.ts",
+        "packages/shader-lsp/src/providers/hoverProvider.ts",
+        "packages/shader-lsp/src/server.ts",
+        "packages/shader-lsp/test/server.benchmark.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test shader-lsp"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "3-1",
+      "phase": 3,
+      "title": "ProjectSettingsWatcher (Unity YAML 설정 감시 및 캐싱)",
+      "planFile": "docs/plans/03-smart-domain-completion.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/extension/src/watchers/projectSettingsWatcher.ts",
+        "packages/extension/test/watchers/projectSettingsWatcher.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test extension"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "3-2",
+      "phase": 3,
+      "title": "C# 문자열 리터럴 컨텍스트 자동완성 (UnityStringCompletionProvider)",
+      "planFile": "docs/plans/03-smart-domain-completion.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/extension/src/completion/unityStringCompletionProvider.ts",
+        "packages/extension/test/completion/unityStringCompletionProvider.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test extension"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "3-3",
+      "phase": 3,
+      "title": "Unity 이벤트 함수 스니펫 완성 & 일괄 생성 커맨드 (UnityEventGenerator)",
+      "planFile": "docs/plans/03-smart-domain-completion.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/extension/src/completion/unityEventGenerator.ts",
+        "packages/extension/test/completion/unityEventGenerator.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test extension"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "4-1",
+      "phase": 4,
+      "title": "Roslyn 프로젝트 스캐폴딩 & Directory.Build.props 비침습 주입기",
+      "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "analyzers/UnityBrain.Analyzers/UnityBrain.Analyzers.csproj",
+        "analyzers/UnityBrain.Analyzers/DiagnosticIds.cs",
+        "analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj",
+        "packages/extension/src/analyzers/msbuildInjector.ts",
+        "packages/extension/test/analyzers/msbuildInjector.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "dotnet build analyzers/UnityBrain.Analyzers/UnityBrain.Analyzers.csproj -nodeReuse:false -p:UseSharedCompilation=false",
+        "node tools/cli.mjs test extension"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "4-2",
+      "phase": 4,
+      "title": "콜그래프 성능 분석 (UB1001, UB1002) + Awake() 자동 캐싱 Quick-Fix",
+      "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "analyzers/UnityBrain.Analyzers/CallGraph/PerformanceCriticalContextAnalyzer.cs",
+        "analyzers/UnityBrain.Analyzers/CodeFixes/CacheComponentInAwakeCodeFixProvider.cs",
+        "analyzers/UnityBrain.Analyzers.Tests/PerformanceCriticalContextAnalyzerTests.cs"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "dotnet test analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false --filter PerformanceCritical"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "4-3",
+      "phase": 4,
+      "title": "문자열 ID 캐싱 (UB1003) + Shader.PropertyToID/Animator.StringToHash Quick-Fix",
+      "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "analyzers/UnityBrain.Analyzers/Diagnostics/UncachedShaderOrAnimatorIdAnalyzer.cs",
+        "analyzers/UnityBrain.Analyzers/CodeFixes/ExtractPropertyToIdCodeFixProvider.cs",
+        "analyzers/UnityBrain.Analyzers.Tests/UncachedShaderOrAnimatorIdAnalyzerTests.cs"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "dotnet test analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false --filter ShaderOrAnimator"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "4-4",
+      "phase": 4,
+      "title": "Burst Compiler 정적 검증기 (UB2001~UB2004)",
+      "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "analyzers/UnityBrain.Analyzers/Diagnostics/BurstCompileAnalyzer.cs",
+        "analyzers/UnityBrain.Analyzers.Tests/BurstCompileAnalyzerTests.cs"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "dotnet test analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false --filter BurstCompile"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "4-5",
+      "phase": 4,
+      "title": "문자열 정합성 검사 (UB3001~UB3003) & [FormerlySerializedAs] 리팩토링 (UB4001)",
+      "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "analyzers/UnityBrain.Analyzers/Diagnostics/UnityStringValidationAnalyzer.cs",
+        "analyzers/UnityBrain.Analyzers/CodeFixes/FormerlySerializedAsRefactoringProvider.cs",
+        "analyzers/UnityBrain.Analyzers.Tests/UnityStringValidationAnalyzerTests.cs"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "dotnet test analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "5-1",
+      "phase": 5,
+      "title": "MetaGuidMap & 무할당 UnityYamlStreamParser 구현",
+      "planFile": "docs/plans/05-yaml-asset-indexer-and-codelens.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/unity-daemon/UnityBrain.Daemon.csproj",
+        "packages/unity-daemon/UnityBrain.Daemon.Tests/UnityBrain.Daemon.Tests.csproj",
+        "packages/unity-daemon/Indexing/MetaGuidMap.cs",
+        "packages/unity-daemon/Indexing/UnityYamlStreamParser.cs",
+        "packages/unity-daemon/UnityBrain.Daemon.Tests/UnityYamlStreamParserTests.cs"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "dotnet test packages/unity-daemon/UnityBrain.Daemon.Tests/UnityBrain.Daemon.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "5-2",
+      "phase": 5,
+      "title": "바이너리 증분 캐시 & JSON-RPC 서버 + 1,000개 에셋 < 500ms 벤치마크",
+      "planFile": "docs/plans/05-yaml-asset-indexer-and-codelens.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/unity-daemon/Cache/BinaryIndexCache.cs",
+        "packages/unity-daemon/RpcServer.cs",
+        "packages/unity-daemon/Program.cs",
+        "packages/unity-daemon/UnityBrain.Daemon.Tests/DaemonBenchmarkAndRpcTests.cs"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "dotnet test packages/unity-daemon/UnityBrain.Daemon.Tests/UnityBrain.Daemon.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "5-3",
+      "phase": 5,
+      "title": "VS Code UnityDaemonClient & UnityAssetUsageCodeLensProvider 구현",
+      "planFile": "docs/plans/05-yaml-asset-indexer-and-codelens.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/extension/src/codelens/unityAssetUsageCodeLensProvider.ts",
+        "packages/extension/test/codelens/unityAssetUsageCodeLensProvider.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test extension"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "6-1",
+      "phase": 6,
+      "title": ".meta 파일 생명주기 동기화 (MetaFileSyncManager)",
+      "planFile": "docs/plans/06-meta-sync-and-integration.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/extension/src/meta/metaFileSyncManager.ts",
+        "packages/extension/test/meta/metaFileSyncManager.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test extension"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "6-2",
+      "phase": 6,
+      "title": "Shader Keyword Context Status Bar & Variant Count CodeLens",
+      "planFile": "docs/plans/06-meta-sync-and-integration.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/extension/src/shader/shaderKeywordContextStatusBar.ts",
+        "packages/extension/test/shader/shaderKeywordContextStatusBar.test.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs test extension"
+      ],
+      "resumeNote": ""
+    },
+    {
+      "id": "6-3",
+      "phase": 6,
+      "title": "최종 통합 (extension.ts, package.json), E2E 테스트 & .vsix 패키징",
+      "planFile": "docs/plans/06-meta-sync-and-integration.md",
+      "status": "pending",
+      "optional": false,
+      "targetFiles": [
+        "packages/extension/package.json",
+        "packages/extension/syntaxes/unity-shaderlab.tmLanguage.json",
+        "packages/extension/src/extension.ts",
+        "packages/extension/test/e2e/suite.test.ts",
+        "package.json"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs build:analyzers",
+        "node tools/cli.mjs build:daemon",
+        "node tools/cli.mjs build:lsp",
+        "node tools/cli.mjs build:extension",
+        "node tools/cli.mjs test",
+        "dotnet test UnityBrain.sln -nodeReuse:false -p:UseSharedCompilation=false",
+        "node tools/cli.mjs package:vsix"
+      ],
+      "resumeNote": ""
+    }
+  ]
+}

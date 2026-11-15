@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unitybrain.local/schemas/daemon-rpc.schema.json",
+  "title": "DaemonRpcProtocol",
+  "type": "object",
+  "properties": {
+    "methods": {
+      "type": "object",
+      "properties": {
+        "index/status": {
+          "type": "object",
+          "required": ["state", "indexedAssets", "indexedMetas", "lastBuildMs"],
+          "properties": {
+            "state": { "enum": ["idle", "indexing", "ready", "error"] },
+            "indexedAssets": { "type": "integer" },
+            "indexedMetas": { "type": "integer" },
+            "lastBuildMs": { "type": "number" }
+          }
+        },
+        "index/rebuild": {
+          "type": "object",
+          "required": ["indexedAssets", "elapsedMs"],
+          "properties": {
+            "indexedAssets": { "type": "integer" },
+            "elapsedMs": { "type": "number" }
+          }
+        },
+        "usage/findByScriptGuid": {
+          "type": "object",
+          "required": ["locations"],
+          "properties": {
+            "locations": { "type": "array" }
+          }
+        },
+        "usage/findByMethod": {
+          "type": "object",
+          "required": ["locations"],
+          "properties": {
+            "locations": { "type": "array" }
+          }
+        },
+        "inspector/getSerializedValues": {
+          "type": "object",
+          "required": ["fields"],
+          "properties": {
+            "fields": { "type": "array" }
+          }
+        }
+      }
+    }
+  }
+}

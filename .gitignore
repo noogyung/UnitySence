@@ -1,0 +1,12 @@
+dist/
+bin/
+obj/
+.ref/
+*.vsix
+.vs/
+/Library/
+/Temp/
+test-output/
+coverage/
+UnityBrain.vsix
+!test-fixtures/SampleUnityProject/Library/

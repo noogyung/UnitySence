@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unitybrain.local/schemas/project-settings.schema.json",
+  "title": "ProjectSettingsCache",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "updatedAt",
+    "tags",
+    "layers",
+    "sortingLayers",
+    "inputAxes",
+    "buildScenes",
+    "animatorControllers"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "updatedAt": { "type": "string" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "layers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "name"],
+        "properties": {
+          "index": { "type": "integer" },
+          "name": { "type": "string" }
+        }
+      }
+    },
+    "sortingLayers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" }
+        }
+      }
+    },
+    "inputAxes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "properties": {
+          "name": { "type": "string" },
+          "descriptiveName": { "type": "string" },
+          "type": { "type": "number" }
+        }
+      }
+    },
+    "buildScenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "name", "guid", "buildIndex", "enabled"],
+        "properties": {
+          "path": { "type": "string" },
+          "name": { "type": "string" },
+          "guid": { "type": "string" },
+          "buildIndex": { "type": "integer" },
+          "enabled": { "type": "boolean" }
+        }
+      }
+    },
+    "animatorControllers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["assetPath", "guid", "parameters", "states"],
+        "properties": {
+          "assetPath": { "type": "string" },
+          "guid": { "type": "string" },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "type"],
+              "properties": {
+                "name": { "type": "string" },
+                "type": { "enum": ["Float", "Int", "Bool", "Trigger"] }
+              }
+            }
+          },
+          "states": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

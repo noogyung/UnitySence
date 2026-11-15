@@ -1,0 +1,38 @@
+{
+  "name": "unitybrain",
+  "displayName": "UnityBrain",
+  "description": "JetBrains Rider-grade Unity development intelligence for VS Code (ShaderLab/HLSL LSP, Roslyn Analyzers, YAML Asset Indexer, Meta Sync).",
+  "version": "0.1.0",
+  "publisher": "unitybrain",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "type": "module",
+  "main": "./dist/extension.js",
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "activationEvents": [
+    "workspaceContains:ProjectSettings/ProjectVersion.txt"
+  ],
+  "extensionDependencies": [
+    "ms-dotnettools.csharp",
+    "visualstudiotoolsforunity.vstuc"
+  ],
+  "scripts": {
+    "build": "node ../../tools/cli.mjs build:extension",
+    "typecheck": "node ../../tools/cli.mjs typecheck",
+    "test": "node ../../tools/cli.mjs test extension"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.0",
+    "vscode-jsonrpc": "^8.2.0"
+  },
+  "devDependencies": {
+    "vscode": "^1.90.0",
+    "vitest": "^2.1.0"
+  },
+  "contributes": {}
+}
