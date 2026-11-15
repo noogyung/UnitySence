@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "4-5",
-  "lastUpdatedAt": "2026-11-16T02:52:20+09:00",
+  "currentStepId": "5-1",
+  "lastUpdatedAt": "2026-11-16T02:53:50+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -376,25 +376,29 @@
       "phase": 4,
       "title": "문자열 정합성 검사 (UB3001~UB3003) & [FormerlySerializedAs] 리팩토링 (UB4001)",
       "planFile": "docs/plans/04-roslyn-analyzers-and-codefixes.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "analyzers/UnityBrain.Analyzers/Diagnostics/UnityStringValidationAnalyzer.cs",
         "analyzers/UnityBrain.Analyzers/CodeFixes/FormerlySerializedAsRefactoringProvider.cs",
         "analyzers/UnityBrain.Analyzers.Tests/UnityStringValidationAnalyzerTests.cs"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "analyzers/UnityBrain.Analyzers/Diagnostics/UnityStringValidationAnalyzer.cs",
+        "analyzers/UnityBrain.Analyzers/CodeFixes/FormerlySerializedAsRefactoringProvider.cs",
+        "analyzers/UnityBrain.Analyzers.Tests/UnityStringValidationAnalyzerTests.cs"
+      ],
       "verificationCommands": [
         "dotnet test analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 4-5 완료: UB3001~UB3003 및 FormerlySerializedAsRefactoringProvider (UB4001) 포함 전체 16/16 애널라이저 테스트 통과"
     },
     {
       "id": "5-1",
       "phase": 5,
       "title": "MetaGuidMap & 무할당 UnityYamlStreamParser 구현",
       "planFile": "docs/plans/05-yaml-asset-indexer-and-codelens.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "packages/unity-daemon/UnityBrain.Daemon.csproj",
