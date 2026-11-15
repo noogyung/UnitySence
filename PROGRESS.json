@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "1-2",
-  "lastUpdatedAt": "2026-11-16T02:29:40+09:00",
+  "currentStepId": "1-3",
+  "lastUpdatedAt": "2026-11-16T02:33:00+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -62,7 +62,7 @@
       "phase": 1,
       "title": "UnityProjectContextManager & UnityVirtualPathResolver 구현",
       "planFile": "docs/plans/01-core-and-virtual-vfs.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "packages/extension/src/core/unityProjectContext.ts",
@@ -73,18 +73,26 @@
         "test-fixtures/SampleUnityProject/Packages/packages-lock.json",
         "packages/extension/test/core/virtualPathResolver.test.ts"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "packages/extension/src/core/unityProjectContext.ts",
+        "packages/extension/src/core/virtualPathResolver.ts",
+        "packages/shader-lsp/src/vfs/virtualPathResolver.ts",
+        "test-fixtures/SampleUnityProject/ProjectSettings/ProjectVersion.txt",
+        "test-fixtures/SampleUnityProject/Packages/manifest.json",
+        "test-fixtures/SampleUnityProject/Packages/packages-lock.json",
+        "packages/extension/test/core/virtualPathResolver.test.ts"
+      ],
       "verificationCommands": [
         "node tools/cli.mjs test extension"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 1-2 완료: UnityProjectContextManager & UnityVirtualPathResolver 구현 및 3/3 테스트 통과"
     },
     {
       "id": "1-3",
       "phase": 1,
       "title": "tools/api-extractor 구현 및 unity-api.json 생성",
       "planFile": "docs/plans/01-core-and-virtual-vfs.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "tools/api-extractor/src/index.ts",

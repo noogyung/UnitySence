@@ -141,17 +141,38 @@ function cmdTest(filterArg) {
 }
 
 function rewriteJsImports(code, srcFilePath, srcRoot, distRoot) {
+  const shaderSrcRoot = path.join(ROOT, 'packages', 'shader-lsp', 'src');
+  const distShaderRoot = path.join(ROOT, 'packages', 'extension', 'dist', 'shader-lsp');
+  const relFromSrcRoot = path.relative(srcRoot, srcFilePath);
+  const outFile = path.join(distRoot, relFromSrcRoot.slice(0, -3) + '.js');
+
   return code.replace(
     /((?:import|export)\s+(?:[^'"`;]*?\s+from\s+)?['"])(\.[^'"]+)(['"])/g,
     (full, prefix, spec, suffix) => {
+      let absTarget = path.resolve(path.dirname(srcFilePath), spec);
+      if (absTarget.endsWith('.ts')) {
+        absTarget = absTarget.slice(0, -3);
+      }
+      if (absTarget.startsWith(shaderSrcRoot + path.sep) || absTarget === shaderSrcRoot) {
+        const relInsideShader = path.relative(shaderSrcRoot, absTarget);
+        let mappedOut = path.join(distShaderRoot, relInsideShader) + '.js';
+        if (fs.existsSync(absTarget) && fs.statSync(absTarget).isDirectory() && fs.existsSync(path.join(absTarget, 'index.ts'))) {
+          mappedOut = path.join(distShaderRoot, relInsideShader, 'index.js');
+        }
+        let relImport = path.relative(path.dirname(outFile), mappedOut).replace(/\\/g, '/');
+        if (!relImport.startsWith('.')) {
+          relImport = './' + relImport;
+        }
+        return `${prefix}${relImport}${suffix}`;
+      }
       if (spec.endsWith('.ts')) {
         return `${prefix}${spec.slice(0, -3)}.js${suffix}`;
       }
       if (spec.endsWith('.js') || spec.endsWith('.json')) {
         return full;
       }
-      const absTarget = path.resolve(path.dirname(srcFilePath), spec);
-      if (fs.existsSync(absTarget) && fs.statSync(absTarget).isDirectory() && fs.existsSync(path.join(absTarget, 'index.ts'))) {
+      const rawAbs = path.resolve(path.dirname(srcFilePath), spec);
+      if (fs.existsSync(rawAbs) && fs.statSync(rawAbs).isDirectory() && fs.existsSync(path.join(rawAbs, 'index.ts'))) {
         return `${prefix}${spec}/index.js${suffix}`;
       }
       return `${prefix}${spec}.js${suffix}`;

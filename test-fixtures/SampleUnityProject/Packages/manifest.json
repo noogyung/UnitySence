@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "com.unity.render-pipelines.universal": "17.0.3",
+    "com.unity.render-pipelines.core": "17.0.3",
+    "com.unity.custom.embedded": "1.0.0",
+    "com.unity.custom.localpkg": "file:../LocalPackages/com.unity.custom.localpkg",
+    "com.unity.custom.gitpkg": "https://example.invalid/custom-gitpkg.git",
+    "com.unity.modules.physics": "1.0.0"
+  }
+}
