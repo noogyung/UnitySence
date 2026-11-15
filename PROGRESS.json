@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "3-1",
-  "lastUpdatedAt": "2026-11-16T02:39:35+09:00",
+  "currentStepId": "3-2",
+  "lastUpdatedAt": "2026-11-16T02:40:40+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -224,24 +224,27 @@
       "phase": 3,
       "title": "ProjectSettingsWatcher (Unity YAML 설정 감시 및 캐싱)",
       "planFile": "docs/plans/03-smart-domain-completion.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "packages/extension/src/watchers/projectSettingsWatcher.ts",
         "packages/extension/test/watchers/projectSettingsWatcher.test.ts"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "packages/extension/src/watchers/projectSettingsWatcher.ts",
+        "packages/extension/test/watchers/projectSettingsWatcher.test.ts"
+      ],
       "verificationCommands": [
         "node tools/cli.mjs test extension"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 3-1 완료: ProjectSettingsWatcher YAML 파싱 및 project-settings.json 생성 완료(4/4 통과)"
     },
     {
       "id": "3-2",
       "phase": 3,
       "title": "C# 문자열 리터럴 컨텍스트 자동완성 (UnityStringCompletionProvider)",
       "planFile": "docs/plans/03-smart-domain-completion.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "packages/extension/src/completion/unityStringCompletionProvider.ts",
