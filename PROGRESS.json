@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "overallStatus": "in_progress",
-  "currentStepId": "5-1",
-  "lastUpdatedAt": "2026-11-16T02:53:50+09:00",
+  "currentStepId": "5-2",
+  "lastUpdatedAt": "2026-11-16T02:57:40+09:00",
   "steps": [
     {
       "id": "1-1",
@@ -398,7 +398,7 @@
       "phase": 5,
       "title": "MetaGuidMap & 무할당 UnityYamlStreamParser 구현",
       "planFile": "docs/plans/05-yaml-asset-indexer-and-codelens.md",
-      "status": "in_progress",
+      "status": "completed",
       "optional": false,
       "targetFiles": [
         "packages/unity-daemon/UnityBrain.Daemon.csproj",
@@ -407,18 +407,24 @@
         "packages/unity-daemon/Indexing/UnityYamlStreamParser.cs",
         "packages/unity-daemon/UnityBrain.Daemon.Tests/UnityYamlStreamParserTests.cs"
       ],
-      "completedFiles": [],
+      "completedFiles": [
+        "packages/unity-daemon/UnityBrain.Daemon.csproj",
+        "packages/unity-daemon/UnityBrain.Daemon.Tests/UnityBrain.Daemon.Tests.csproj",
+        "packages/unity-daemon/Indexing/MetaGuidMap.cs",
+        "packages/unity-daemon/Indexing/UnityYamlStreamParser.cs",
+        "packages/unity-daemon/UnityBrain.Daemon.Tests/UnityYamlStreamParserTests.cs"
+      ],
       "verificationCommands": [
         "dotnet test packages/unity-daemon/UnityBrain.Daemon.Tests/UnityBrain.Daemon.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false"
       ],
-      "resumeNote": ""
+      "resumeNote": "Step 5-1 완료: MetaGuidMap 및 UnityYamlStreamParser 3/3 테스트 통과 (경고 0)"
     },
     {
       "id": "5-2",
       "phase": 5,
       "title": "바이너리 증분 캐시 & JSON-RPC 서버 + 1,000개 에셋 < 500ms 벤치마크",
       "planFile": "docs/plans/05-yaml-asset-indexer-and-codelens.md",
-      "status": "pending",
+      "status": "in_progress",
       "optional": false,
       "targetFiles": [
         "packages/unity-daemon/Cache/BinaryIndexCache.cs",
