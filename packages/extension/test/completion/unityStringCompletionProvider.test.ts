@@ -96,11 +96,19 @@ describe('UnityStringCompletionProvider', () => {
   it('completes Tags, Layers (including multi-arg), SortingLayers, Input Axes, Build Scenes, Shader Properties, Animator params, Invoke, and StartCoroutine', async () => {
     const tagItems = await runAtSnippet('if (other.CompareTag("/*CURSOR*/")) {}');
     expect(tagItems?.map((i) => i.label)).toContain('Enemy');
-    expect(tagItems?.find((i) => i.label === 'Enemy')?.detail).toBe('Unity Tag');
+    expect(tagItems?.find((i) => i.label === 'Enemy')?.detail).toContain('Unity Tag');
+    expect(tagItems?.find((i) => i.label === 'Enemy')?.detail).toContain('[UnityBrain]');
+
+    // Also completes right after '(' before typing quotes, inserting quoted string and sorting at top
+    const parenTagItems = await runAtSnippet('if (other.CompareTag(/*CURSOR*/)) {}');
+    const enemyParen = parenTagItems?.find((i) => i.label === 'Enemy');
+    expect(enemyParen).toBeDefined();
+    expect(enemyParen?.insertText).toBe('"Enemy"');
+    expect(enemyParen?.sortText?.startsWith('\u0000')).toBe(true);
 
     const layerItems = await runAtSnippet('int mask = LayerMask.GetMask("Default", "/*CURSOR*/");');
     expect(layerItems?.map((i) => i.label)).toContain('Ground');
-    expect(layerItems?.find((i) => i.label === 'Ground')?.detail).toBe('Layer 8');
+    expect(layerItems?.find((i) => i.label === 'Ground')?.detail).toContain('Layer 8');
 
     const sortingItems = await runAtSnippet('int s = SortingLayer.NameToID("/*CURSOR*/");');
     expect(sortingItems?.map((i) => i.label)).toContain('Foreground');

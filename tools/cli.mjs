@@ -146,7 +146,12 @@ function rewriteJsImports(code, srcFilePath, srcRoot, distRoot) {
   const relFromSrcRoot = path.relative(srcRoot, srcFilePath);
   const outFile = path.join(distRoot, relFromSrcRoot.slice(0, -3) + '.js');
 
-  return code.replace(
+  const withVscodeBridge = code.replace(
+    /^\s*import\s+(?:\*\s+as\s+)?vscode\s+from\s+['"]vscode['"];?\s*$/gm,
+    "import { createRequire as __createVscodeRequire } from 'node:module'; const vscode = await (async () => { try { return __createVscodeRequire(import.meta.url)('vscode'); } catch { return await import('vscode'); } })();",
+  );
+
+  return withVscodeBridge.replace(
     /((?:import|export)\s+(?:[^'"`;]*?\s+from\s+)?['"])(\.[^'"]+)(['"])/g,
     (full, prefix, spec, suffix) => {
       let absTarget = path.resolve(path.dirname(srcFilePath), spec);
@@ -269,7 +274,26 @@ function cmdBuildExtension() {
   const distRoot = path.join(ROOT, 'packages', 'extension', 'dist');
   const count = compileTsDirectory(srcRoot, distRoot, ['shader-lsp']);
   fs.writeFileSync(path.join(distRoot, 'package.json'), JSON.stringify({ type: 'module' }, null, 2));
-  console.log(`Built extension (${count} files) -> packages/extension/dist/`);
+  const cjsEntry = [
+    "'use strict';",
+    '',
+    "const extensionModulePromise = import('./extension.js');",
+    '',
+    'exports.activate = async function activate(context, options) {',
+    '  const mod = await extensionModulePromise;',
+    '  return mod.activate(context, options);',
+    '};',
+    '',
+    'exports.deactivate = async function deactivate() {',
+    '  const mod = await extensionModulePromise;',
+    "  if (typeof mod.deactivate === 'function') {",
+    '    return mod.deactivate();',
+    '  }',
+    '};',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(distRoot, 'extension.cjs'), cjsEntry, 'utf8');
+  console.log(`Built extension (${count} files + extension.cjs) -> packages/extension/dist/`);
 }
 
 function crc32(buf) {
@@ -406,6 +430,7 @@ function cmdPackageVsix() {
 
   const requiredSuffixes = [
     'extension/package.json',
+    'extension/dist/extension.cjs',
     'extension/dist/extension.js',
     'extension/dist/shader-lsp/server.js',
     'extension/analyzers/UnityBrain.Analyzers.dll',

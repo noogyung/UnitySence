@@ -182,4 +182,72 @@ public class PlayerConfig : MonoBehaviour
         }
         AssertEx.True(threwNoAction, "Expected no FormerlySerializedAs refactoring on non-serialized private field.");
     }
+
+    [Fact]
+    public async Task ValidatesTagsLayersAndBuildScenesDirectlyFromUnityAssetYamlFiles()
+    {
+        const string tagManagerAsset = @"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!78 &1
+TagManager:
+  serializedVersion: 2
+  tags:
+  - Enemy
+  - Interactable
+  layers:
+  - Default
+  -
+  -
+  - Hitbox
+  m_SortingLayers:
+  - name: Default
+";
+        const string editorBuildSettingsAsset = @"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/MainMenu.unity
+    guid: 11111111111111111111111111111111
+  - enabled: 0
+    path: Assets/Scenes/DisabledTest.unity
+    guid: 22222222222222222222222222222222
+";
+        const string code = @"
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class DirectYamlValidation : MonoBehaviour
+{
+    private void Check(GameObject go)
+    {
+        if (go.CompareTag(""Player"")) {}
+        if (go.CompareTag(""Interactable"")) {}
+        if (go.CompareTag(""NoSuchTag"")) {}
+
+        int okLayer = LayerMask.NameToLayer(""Hitbox"");
+        int badLayer = LayerMask.NameToLayer(""MissingLayer"");
+
+        SceneManager.LoadScene(""MainMenu"");
+        SceneManager.LoadScene(""DisabledTest"");
+        SceneManager.LoadScene(""GhostScene"");
+    }
+}
+";
+        var tagFile = new InMemoryAdditionalText("D:/SampleUnityProject/ProjectSettings/TagManager.asset", tagManagerAsset);
+        var sceneFile = new InMemoryAdditionalText("D:/SampleUnityProject/ProjectSettings/EditorBuildSettings.asset", editorBuildSettingsAsset);
+
+        var diags = await RoslynTestHarness.GetAnalyzerDiagnosticsAsync(
+            code,
+            new UnityStringValidationAnalyzer(),
+            new[] { tagFile, sceneFile });
+
+        var ub3002 = diags.Where(d => d.Id == DiagnosticIds.UnknownUnityTagOrLayer).ToArray();
+        var ub3003 = diags.Where(d => d.Id == DiagnosticIds.SceneNotInBuildSettings).ToArray();
+        AssertEx.Equal(2, ub3002.Length, $"Expected 2 UB3002 diagnostics from TagManager.asset, got {ub3002.Length}");
+        AssertEx.Equal(2, ub3003.Length, $"Expected 2 UB3003 diagnostics from EditorBuildSettings.asset, got {ub3003.Length}");
+    }
 }

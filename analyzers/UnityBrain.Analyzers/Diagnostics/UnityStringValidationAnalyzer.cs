@@ -102,7 +102,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticIds.UB3002Rule,
                     lit.GetLocation(),
-                    "Tag",
+                    "태그",
                     lit.Token.ValueText));
             }
             return;
@@ -121,7 +121,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                     context.ReportDiagnostic(Diagnostic.Create(
                         DiagnosticIds.UB3002Rule,
                         lit.GetLocation(),
-                        "Layer",
+                        "레이어",
                         lit.Token.ValueText));
                 }
             }
@@ -163,7 +163,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(
                 DiagnosticIds.UB3002Rule,
                 lit.GetLocation(),
-                "Tag",
+                "태그",
                 lit.Token.ValueText));
         }
     }
@@ -197,7 +197,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(
                 DiagnosticIds.UB3002Rule,
                 lit.GetLocation(),
-                "Tag",
+                "태그",
                 lit.Token.ValueText));
         }
     }
@@ -244,7 +244,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(
                 DiagnosticIds.UB3001Rule,
                 lit.GetLocation(),
-                $"Method '{targetMethodName}' called via {apiName} does not exist on '{targetType.Name}' or its base types"));
+                $"[UnityBrain] '{targetType.Name}' 클래스(또는 부모 클래스)에 {apiName} 대상 메서드 '{targetMethodName}'가 존재하지 않습니다."));
             return;
         }
 
@@ -259,7 +259,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticIds.UB3001Rule,
                     lit.GetLocation(),
-                    $"StartCoroutine target '{targetMethodName}' on '{targetType.Name}' must return System.Collections.IEnumerator"));
+                    $"[UnityBrain] StartCoroutine 대상 메서드 '{targetMethodName}'('{targetType.Name}')는 반드시 IEnumerator를 반환해야 합니다."));
             }
         }
     }
@@ -282,10 +282,185 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
         return false;
     }
 
+    private static readonly string[] BuiltinUnityTags =
+    {
+        "Untagged",
+        "Respawn",
+        "Finish",
+        "EditorOnly",
+        "MainCamera",
+        "Player",
+        "GameController",
+    };
+
+    private static string StripYamlQuotes(string raw)
+    {
+        var trimmed = raw.Trim();
+        if (trimmed.Length >= 2 &&
+            ((trimmed[0] == '"' && trimmed[trimmed.Length - 1] == '"') ||
+             (trimmed[0] == '\'' && trimmed[trimmed.Length - 1] == '\'')))
+        {
+            return trimmed.Substring(1, trimmed.Length - 2);
+        }
+        return trimmed;
+    }
+
+    private static void ParseTagManagerAsset(
+        string yaml,
+        HashSet<string> tags,
+        HashSet<string> layers,
+        ref bool hasTags,
+        ref bool hasLayers)
+    {
+        var section = "none";
+        var lines = yaml.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+        foreach (var rawLine in lines)
+        {
+            var trimmed = rawLine.Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("%", StringComparison.Ordinal) || trimmed.StartsWith("---", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            int indent = 0;
+            while (indent < rawLine.Length && rawLine[indent] == ' ') indent++;
+
+            if (indent <= 2)
+            {
+                if (trimmed == "tags:" || trimmed == "tags: []")
+                {
+                    hasTags = true;
+                    foreach (var builtin in BuiltinUnityTags) tags.Add(builtin);
+                    section = trimmed.EndsWith("[]", StringComparison.Ordinal) ? "none" : "tags";
+                    continue;
+                }
+                if (trimmed == "layers:" || trimmed == "layers: []")
+                {
+                    hasLayers = true;
+                    section = trimmed.EndsWith("[]", StringComparison.Ordinal) ? "none" : "layers";
+                    continue;
+                }
+                if (trimmed.Contains(':'))
+                {
+                    section = "none";
+                    continue;
+                }
+            }
+
+            if (section == "tags" && trimmed.StartsWith("-", StringComparison.Ordinal))
+            {
+                var val = StripYamlQuotes(trimmed.Substring(1));
+                if (!string.IsNullOrEmpty(val)) tags.Add(val);
+            }
+            else if (section == "layers" && trimmed.StartsWith("-", StringComparison.Ordinal))
+            {
+                var val = StripYamlQuotes(trimmed.Substring(1));
+                if (!string.IsNullOrEmpty(val)) layers.Add(val);
+            }
+        }
+    }
+
+    private static void ParseEditorBuildSettingsAsset(
+        string yaml,
+        HashSet<string> enabledScenes,
+        ref bool hasBuildScenes)
+    {
+        bool inScenes = false;
+        bool currentHasEntry = false;
+        bool currentEnabled = false;
+        string? currentPath = null;
+
+        void Flush()
+        {
+            if (!currentHasEntry || !currentEnabled || string.IsNullOrEmpty(currentPath))
+            {
+                currentHasEntry = false;
+                currentEnabled = false;
+                currentPath = null;
+                return;
+            }
+
+            var norm = currentPath!.Replace('\\', '/');
+            enabledScenes.Add(norm);
+            if (norm.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
+            {
+                enabledScenes.Add(norm.Substring(0, norm.Length - ".unity".Length));
+            }
+            var fileNameNoExt = System.IO.Path.GetFileNameWithoutExtension(norm);
+            if (!string.IsNullOrEmpty(fileNameNoExt))
+            {
+                enabledScenes.Add(fileNameNoExt);
+            }
+
+            currentHasEntry = false;
+            currentEnabled = false;
+            currentPath = null;
+        }
+
+        var lines = yaml.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+        foreach (var rawLine in lines)
+        {
+            var trimmed = rawLine.Trim();
+            if (trimmed == "m_Scenes:" || trimmed == "m_Scenes: []")
+            {
+                hasBuildScenes = true;
+                inScenes = !trimmed.EndsWith("[]", StringComparison.Ordinal);
+                continue;
+            }
+            if (!inScenes) continue;
+
+            if (trimmed.StartsWith("- enabled:", StringComparison.Ordinal))
+            {
+                Flush();
+                var val = trimmed.Substring("- enabled:".Length).Trim();
+                currentHasEntry = true;
+                currentEnabled = val == "1" || string.Equals(val, "true", StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+
+            if (!currentHasEntry) continue;
+            if (trimmed.StartsWith("path:", StringComparison.Ordinal))
+            {
+                currentPath = StripYamlQuotes(trimmed.Substring("path:".Length));
+            }
+        }
+        Flush();
+    }
+
     private static ProjectSettingsSnapshot LoadProjectSettings(ImmutableArray<AdditionalText> additionalFiles)
     {
+        bool hasAnyFile = false;
+        bool hasTags = false;
+        bool hasLayers = false;
+        bool hasScenes = false;
+        var tags = new HashSet<string>(StringComparer.Ordinal);
+        var layers = new HashSet<string>(StringComparer.Ordinal);
+        var enabledScenes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var file in additionalFiles)
         {
+            if (file.Path.EndsWith("TagManager.asset", StringComparison.OrdinalIgnoreCase))
+            {
+                var yaml = file.GetText()?.ToString();
+                if (!string.IsNullOrWhiteSpace(yaml))
+                {
+                    hasAnyFile = true;
+                    ParseTagManagerAsset(yaml!, tags, layers, ref hasTags, ref hasLayers);
+                }
+                continue;
+            }
+
+            if (file.Path.EndsWith("EditorBuildSettings.asset", StringComparison.OrdinalIgnoreCase))
+            {
+                var yaml = file.GetText()?.ToString();
+                if (!string.IsNullOrWhiteSpace(yaml))
+                {
+                    hasAnyFile = true;
+                    ParseEditorBuildSettingsAsset(yaml!, enabledScenes, ref hasScenes);
+                }
+                continue;
+            }
+
             if (!file.Path.EndsWith("project-settings.json", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
@@ -301,13 +476,11 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
             {
                 using var doc = JsonDocument.Parse(text);
                 var root = doc.RootElement;
-                var tags = new HashSet<string>(StringComparer.Ordinal);
-                var layers = new HashSet<string>(StringComparer.Ordinal);
-                var enabledScenes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                hasAnyFile = true;
 
-                bool hasTags = root.TryGetProperty("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array;
-                if (hasTags)
+                if (root.TryGetProperty("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array)
                 {
+                    hasTags = true;
                     foreach (var el in tagsEl.EnumerateArray())
                     {
                         var val = el.GetString();
@@ -315,9 +488,9 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                     }
                 }
 
-                bool hasLayers = root.TryGetProperty("layers", out var layersEl) && layersEl.ValueKind == JsonValueKind.Array;
-                if (hasLayers)
+                if (root.TryGetProperty("layers", out var layersEl) && layersEl.ValueKind == JsonValueKind.Array)
                 {
+                    hasLayers = true;
                     foreach (var el in layersEl.EnumerateArray())
                     {
                         if (el.ValueKind == JsonValueKind.String)
@@ -334,11 +507,11 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                     }
                 }
 
-                bool hasScenes = (root.TryGetProperty("buildScenes", out var scenesEl) ||
-                                  root.TryGetProperty("scenes", out scenesEl)) &&
-                                 scenesEl.ValueKind == JsonValueKind.Array;
-                if (hasScenes)
+                if ((root.TryGetProperty("buildScenes", out var scenesEl) ||
+                     root.TryGetProperty("scenes", out scenesEl)) &&
+                    scenesEl.ValueKind == JsonValueKind.Array)
                 {
+                    hasScenes = true;
                     foreach (var el in scenesEl.EnumerateArray())
                     {
                         if (el.ValueKind == JsonValueKind.String)
@@ -372,8 +545,6 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                         }
                     }
                 }
-
-                return new ProjectSettingsSnapshot(true, hasTags, hasLayers, hasScenes, tags, layers, enabledScenes);
             }
             catch
             {
@@ -381,14 +552,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        return new ProjectSettingsSnapshot(
-            false,
-            false,
-            false,
-            false,
-            new HashSet<string>(),
-            new HashSet<string>(),
-            new HashSet<string>());
+        return new ProjectSettingsSnapshot(hasAnyFile, hasTags, hasLayers, hasScenes, tags, layers, enabledScenes);
     }
 
     private sealed record ProjectSettingsSnapshot(

@@ -17,14 +17,27 @@ import {
   registerGenerateEventFunctionsCommand,
   UnityEventCompletionProvider,
 } from './completion/unityEventGenerator.ts';
-import { UnityStringCompletionProvider } from './completion/unityStringCompletionProvider.ts';
+import {
+  detectApiParenOrStringContext,
+  UnityStringCompletionProvider,
+} from './completion/unityStringCompletionProvider.ts';
 import type {
+  ProjectSettingsCache,
   ShaderSymbolIndex,
   UnityApiDatabase,
   UnityProjectContext,
 } from './contracts/index.ts';
 import { UnityProjectContextManager } from './core/unityProjectContext.ts';
 import { MetaFileSyncManager } from './meta/metaFileSyncManager.ts';
+import {
+  SHADER_SEMANTIC_TOKEN_MODIFIERS,
+  SHADER_SEMANTIC_TOKEN_TYPES,
+  ShaderDocumentHighlightProvider,
+  ShaderDocumentSymbolProvider,
+  ShaderReferenceProvider,
+  ShaderSemanticTokensProvider,
+  ShaderSignatureHelpProvider,
+} from './shader/shaderEditorProviders.ts';
 import {
   isShaderDocument,
   ShaderKeywordContextStatusBar,
@@ -63,6 +76,8 @@ const SHADER_SELECTOR: vscode.DocumentSelector = [
   { language: 'unity-shaderlab' },
   { language: 'shaderlab' },
   { language: 'hlsl' },
+  { language: 'cg' },
+  { pattern: '**/*.{shader,hlsl,hlsli,cginc,cg,compute,urtshader,hlslinc}' },
 ];
 
 const CSHARP_SELECTOR: vscode.DocumentSelector = [{ language: 'csharp' }];
@@ -131,7 +146,7 @@ export async function activate(
   }
 
   const settingsWatcher = new ProjectSettingsWatcher(unityContext, { enableWatchers });
-  await settingsWatcher.start();
+  const initialCache = await settingsWatcher.start();
 
   const msbuildInjector = new MsbuildAnalyzerInjector({
     extensionPath: context.extensionPath,
@@ -140,7 +155,25 @@ export async function activate(
   });
   await msbuildInjector.ensureInjected();
 
+  const outputChannel = vscode.window.createOutputChannel?.('UnityBrain');
+  const mainStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  mainStatusBar.command = 'unityBrain.rebuildAssetIndex';
+  const refreshMainStatusBar = (ctx: UnityProjectContext, cache: ProjectSettingsCache) => {
+    mainStatusBar.text = `$(flame) [UnityBrain] 활성 (Unity ${ctx.editorVersion} | 태그 ${cache.tags.length} · 레이어 ${cache.layers.length} · 씬 ${cache.buildScenes.length})`;
+    mainStatusBar.tooltip = `[UnityBrain] 프로젝트: ${ctx.projectRoot}\n에디터 경로: ${ctx.editorInstallPath ?? '미감지 (PackageCache 기반 동작)'}\n클릭하여 에셋 인덱스를 다시 구축합니다.`;
+  };
+  refreshMainStatusBar(unityContext, initialCache);
+  mainStatusBar.show();
+
+  outputChannel?.appendLine(
+    `[UnityBrain] 활성화 완료 (Unity ${unityContext.editorVersion}) | 루트: ${unityContext.projectRoot}`,
+  );
+  outputChannel?.appendLine(
+    `[UnityBrain] 설정 로드: 태그 ${initialCache.tags.length}개, 레이어 ${initialCache.layers.length}개, 빌드 씬 ${initialCache.buildScenes.length}개`,
+  );
+
   const shaderGraph = new IncludeDependencyGraph(unityContext);
+  shaderGraph.registerWorkspaceShaderFiles(walkShaderFiles(path.join(unityContext.projectRoot, 'Assets')));
   const shaderDefinitionProvider = new ShaderDefinitionProvider(shaderGraph);
   const shaderCompletionProvider = new ShaderCompletionProvider(shaderGraph);
   const shaderHoverProvider = new ShaderHoverProvider(shaderGraph);
@@ -157,7 +190,7 @@ export async function activate(
         (u) =>
           new vscode.Diagnostic(
             new vscode.Range(u.line, u.startCol, u.line, u.endCol),
-            `Unresolved Unity shader include: "${u.rawPath}"`,
+            `[UnityBrain] 해석할 수 없는 유니티 셰이더 include 경로입니다: "${u.includePath}"`,
             vscode.DiagnosticSeverity.Error,
           ),
       );
@@ -207,6 +240,8 @@ export async function activate(
   });
 
   const disposables: vscode.Disposable[] = [
+    ...(outputChannel ? [outputChannel] : []),
+    mainStatusBar,
     contextManager,
     settingsWatcher,
     daemonClient,
@@ -219,9 +254,18 @@ export async function activate(
     contextManager.onDidChangeContext((nextCtx) => {
       if (nextCtx) {
         shaderGraph.updateContext(nextCtx);
+        shaderGraph.registerWorkspaceShaderFiles(walkShaderFiles(path.join(nextCtx.projectRoot, 'Assets')));
         settingsWatcher.updateContext(nextCtx);
         cachedShaderIndex = null;
+        refreshMainStatusBar(nextCtx, settingsWatcher.getCache());
+        for (const openDoc of vscode.workspace.textDocuments) {
+          updateShaderDiagnostics(openDoc);
+        }
       }
+    }),
+
+    settingsWatcher.onDidUpdateCache((nextCache) => {
+      refreshMainStatusBar(contextManager.context ?? unityContext, nextCache);
     }),
 
     vscode.workspace.onDidChangeConfiguration(async (e) => {
@@ -231,7 +275,40 @@ export async function activate(
     }),
 
     vscode.workspace.onDidOpenTextDocument((doc) => updateShaderDiagnostics(doc)),
-    vscode.workspace.onDidChangeTextDocument((e) => updateShaderDiagnostics(e.document)),
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      updateShaderDiagnostics(e.document);
+      if (
+        enableWatchers &&
+        e.document.languageId === 'csharp' &&
+        e.contentChanges.length > 0 &&
+        vscode.window.activeTextEditor?.document.uri.toString() === e.document.uri.toString()
+      ) {
+        const lastChange = e.contentChanges[e.contentChanges.length - 1];
+        if (
+          lastChange.text === '"' ||
+          lastChange.text === '""' ||
+          lastChange.text === '(' ||
+          lastChange.text === '()' ||
+          lastChange.text === ',' ||
+          lastChange.text === ', '
+        ) {
+          const afterOffset =
+            lastChange.text === '""' || lastChange.text === '()'
+              ? e.document.offsetAt(lastChange.range.start) + 1
+              : e.document.offsetAt(lastChange.range.start) + lastChange.text.length;
+          const cursorPos = e.document.positionAt(afterOffset);
+          const startLine = Math.max(0, cursorPos.line - 3);
+          const snippet = e.document.getText(
+            new vscode.Range(new vscode.Position(startLine, 0), cursorPos),
+          );
+          if (detectApiParenOrStringContext(snippet)) {
+            setTimeout(() => {
+              void vscode.commands.executeCommand('editor.action.triggerSuggest');
+            }, 20);
+          }
+        }
+      }
+    }),
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (isShaderDocument(doc)) {
         cachedShaderIndex = null;
@@ -316,6 +393,9 @@ export async function activate(
       CSHARP_SELECTOR,
       stringCompletionProvider,
       '"',
+      '(',
+      ',',
+      ' ',
     ),
     vscode.languages.registerCompletionItemProvider(
       CSHARP_SELECTOR,
@@ -329,9 +409,99 @@ export async function activate(
     vscode.commands.registerCommand('unityBrain.rebuildAssetIndex', async () => {
       const res = await daemonClient.rebuild(true);
       assetUsageCodeLensProvider.refresh();
+      void vscode.window.showInformationMessage(
+        `[UnityBrain] 에셋 인덱스 재구축 완료 (${res.indexedAssets}개 에셋, ${res.elapsedMs}ms)`,
+      );
       return res;
     }),
   ];
+
+  const langWithLinks = vscode.languages as unknown as {
+    registerDocumentLinkProvider?: (
+      selector: vscode.DocumentSelector,
+      provider: { provideDocumentLinks: (doc: vscode.TextDocument) => unknown[] },
+    ) => vscode.Disposable;
+  };
+  const DocLinkCtor = (vscode as unknown as {
+    DocumentLink?: new (
+      range: vscode.Range,
+      target?: vscode.Uri,
+    ) => { range: vscode.Range; target?: vscode.Uri; tooltip?: string };
+  }).DocumentLink;
+
+  if (typeof langWithLinks.registerDocumentLinkProvider === 'function') {
+    disposables.push(
+      langWithLinks.registerDocumentLinkProvider(SHADER_SELECTOR, {
+        provideDocumentLinks(doc: vscode.TextDocument) {
+          shaderGraph.setOpenDocumentContent(doc.uri.toString(), doc.getText());
+          const filePath = shaderGraph.normalizeFilePath(doc.uri.toString());
+          const parsed = shaderGraph.getOrParseFile(filePath);
+          if (!parsed) return [];
+          const links: unknown[] = [];
+          for (const inc of parsed.includes) {
+            const resolved = shaderGraph.getResolver().resolve(inc.rawPath, filePath);
+            if (!resolved.physicalPath) continue;
+            const range = new vscode.Range(
+              inc.line,
+              inc.pathStartColumn,
+              inc.line,
+              inc.pathEndColumn,
+            );
+            const target = vscode.Uri.file(resolved.physicalPath);
+            const link = DocLinkCtor
+              ? new DocLinkCtor(range, target)
+              : { range, target, tooltip: '' };
+            link.tooltip = `[UnityBrain] 클릭하여 셰이더 파일 열기: ${resolved.physicalPath}`;
+            links.push(link);
+          }
+          return links;
+        },
+      }),
+    );
+  }
+
+  const semanticLegend = new vscode.SemanticTokensLegend(
+    [...SHADER_SEMANTIC_TOKEN_TYPES],
+    [...SHADER_SEMANTIC_TOKEN_MODIFIERS],
+  );
+  const shaderSemanticTokensProvider = new ShaderSemanticTokensProvider(shaderGraph, semanticLegend);
+  const shaderDocumentSymbolProvider = new ShaderDocumentSymbolProvider(shaderGraph);
+  const shaderSignatureHelpProvider = new ShaderSignatureHelpProvider(shaderGraph);
+  const shaderHighlightProvider = new ShaderDocumentHighlightProvider();
+  const shaderReferenceProvider = new ShaderReferenceProvider(shaderGraph);
+
+  disposables.push(
+    vscode.languages.registerDocumentSemanticTokensProvider(
+      SHADER_SELECTOR,
+      shaderSemanticTokensProvider,
+      semanticLegend,
+    ),
+    vscode.languages.registerDocumentSymbolProvider(SHADER_SELECTOR, shaderDocumentSymbolProvider),
+    vscode.languages.registerSignatureHelpProvider(SHADER_SELECTOR, shaderSignatureHelpProvider, '(', ','),
+    vscode.languages.registerDocumentHighlightProvider(SHADER_SELECTOR, shaderHighlightProvider),
+    vscode.languages.registerReferenceProvider(SHADER_SELECTOR, shaderReferenceProvider),
+  );
+
+  if (enableWatchers) {
+    for (const pat of ['Packages/**/*', 'Library/PackageCache/*']) {
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(unityContext.projectRoot, pat),
+      );
+      const onPackageChanged = () => {
+        shaderGraph.getResolver().invalidateCache();
+        cachedShaderIndex = null;
+        for (const openDoc of vscode.workspace.textDocuments) {
+          updateShaderDiagnostics(openDoc);
+        }
+      };
+      disposables.push(
+        watcher,
+        watcher.onDidChange(onPackageChanged),
+        watcher.onDidCreate(onPackageChanged),
+        watcher.onDidDelete(onPackageChanged),
+      );
+    }
+  }
 
   for (const d of disposables) {
     context.subscriptions.push(d);
@@ -340,6 +510,10 @@ export async function activate(
   for (const openDoc of vscode.workspace.textDocuments) {
     updateShaderDiagnostics(openDoc);
   }
+
+  void vscode.window.showInformationMessage(
+    `[UnityBrain] 유니티 프로젝트 활성화 완료! (Unity ${unityContext.editorVersion} | 태그 ${initialCache.tags.length}개 · 레이어 ${initialCache.layers.length}개 · 씬 ${initialCache.buildScenes.length}개 로드됨)`,
+  );
 
   const api: UnityBrainExtensionApi = {
     context: unityContext,

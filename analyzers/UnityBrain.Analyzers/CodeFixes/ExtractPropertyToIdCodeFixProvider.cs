@@ -45,7 +45,7 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
         var propertyName = literal.Token.ValueText;
         context.RegisterCodeFix(
             CodeAction.Create(
-                title: $"Extract \"{propertyName}\" to static readonly int ({hashMethod})",
+                title: $"[UnityBrain] \"{propertyName}\" 문자열을 static readonly int 필드로 캐싱 ({hashMethod})",
                 createChangedDocument: ct => ExtractToStaticFieldAsync(context.Document, literal, kind, propertyName, ct),
                 equivalenceKey: nameof(ExtractPropertyToIdCodeFixProvider)),
             diag);

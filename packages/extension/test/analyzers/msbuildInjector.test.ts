@@ -36,8 +36,10 @@ describe('MsbuildAnalyzerInjector', () => {
     expect(content).toContain(BEGIN_MARKER);
     expect(content).toContain(END_MARKER);
     expect(content).toContain('UnityBrain.Analyzers.dll');
-    expect(content).toContain('project-settings.json');
+    expect(content).toContain('TagManager.asset');
+    expect(content).toContain('EditorBuildSettings.asset');
     expect(content).toContain('unity-api.json');
+    expect(content).not.toContain('project-settings.json');
 
     // Second run is idempotent
     expect(await injector.ensureInjected()).toBe('unchanged');

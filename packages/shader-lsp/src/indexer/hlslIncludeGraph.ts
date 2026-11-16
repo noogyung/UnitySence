@@ -33,16 +33,21 @@ interface CacheRecord {
 }
 
 export class IncludeDependencyGraph {
+  private context: UnityProjectContext;
   private resolver: UnityVirtualPathResolver;
   private readonly prepass = new UnityHlslMacroPrepass();
   private readonly diskCache = new Map<string, CacheRecord>();
   private readonly memoryOverrides = new Map<string, { content: string; parsed: ParsedHlslFile }>();
+  private readonly reverseDependencies = new Map<string, Set<string>>();
+  private reverseIndexBuilt = false;
 
   constructor(context: UnityProjectContext) {
+    this.context = context;
     this.resolver = new UnityVirtualPathResolver(context);
   }
 
   public updateContext(newContext: UnityProjectContext): void {
+    this.context = newContext;
     this.resolver.updateContext(newContext);
     this.clearCache();
   }
@@ -54,6 +59,8 @@ export class IncludeDependencyGraph {
   public clearCache(): void {
     this.diskCache.clear();
     this.memoryOverrides.clear();
+    this.reverseDependencies.clear();
+    this.reverseIndexBuilt = false;
   }
 
   public normalizeFilePath(uriOrPath: string): string {
@@ -72,6 +79,7 @@ export class IncludeDependencyGraph {
     const uri = uriOrPath.startsWith('file://') ? uriOrPath : this.toUri(norm);
     const parsed = parseHlslSymbols(content, norm, uri, this.prepass);
     this.memoryOverrides.set(norm, { content, parsed });
+    this.recordReverseEdges(norm, parsed);
     return parsed;
   }
 
@@ -84,6 +92,92 @@ export class IncludeDependencyGraph {
     const norm = this.normalizeFilePath(uriOrPath);
     this.diskCache.delete(norm);
     this.memoryOverrides.delete(norm);
+    this.reverseIndexBuilt = false;
+  }
+
+  public registerWorkspaceShaderFiles(shaderFilePaths: string[]): void {
+    for (const filePath of shaderFilePaths) {
+      const parsed = this.getOrParseFile(filePath);
+      if (parsed) {
+        this.recordReverseEdges(this.normalizeFilePath(filePath), parsed);
+      }
+    }
+    this.reverseIndexBuilt = true;
+  }
+
+  private recordReverseEdges(parentNorm: string, parsed: ParsedHlslFile): void {
+    if (parentNorm.replace(/\\/g, '/').toLowerCase().includes('/library/packagecache/')) {
+      return;
+    }
+    for (const inc of parsed.includes) {
+      const mapped = this.resolver.resolve(inc.rawPath, parentNorm);
+      if (mapped.physicalPath) {
+        const childNorm = this.normalizeFilePath(mapped.physicalPath);
+        let parents = this.reverseDependencies.get(childNorm);
+        if (!parents) {
+          parents = new Set<string>();
+          this.reverseDependencies.set(childNorm, parents);
+        }
+        parents.add(parentNorm);
+      }
+    }
+  }
+
+  private ensureReverseIndexPopulated(): void {
+    if (this.reverseIndexBuilt) return;
+    this.reverseIndexBuilt = true;
+
+    const assetsDir = path.join(this.context.projectRoot, 'Assets');
+    if (!fs.existsSync(assetsDir)) return;
+
+    const stack = [assetsDir];
+    const shaderExts = new Set(['.shader', '.hlsl', '.cginc', '.hlsli', '.compute']);
+    while (stack.length > 0) {
+      const dir = stack.pop();
+      if (!dir) continue;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(full);
+        } else if (entry.isFile() && shaderExts.has(path.extname(entry.name).toLowerCase())) {
+          const parsed = this.getOrParseFile(full);
+          if (parsed) {
+            this.recordReverseEdges(this.normalizeFilePath(full), parsed);
+          }
+        }
+      }
+    }
+  }
+
+  public findParentIncludeFiles(entryUriOrPath: string): ParsedHlslFile[] {
+    const entryNorm = this.normalizeFilePath(entryUriOrPath);
+    this.ensureReverseIndexPopulated();
+
+    const parentFiles: ParsedHlslFile[] = [];
+    const seenParents = new Set<string>();
+    const queue = [entryNorm];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) continue;
+      const parents = this.reverseDependencies.get(current);
+      if (!parents) continue;
+      for (const parentNorm of parents) {
+        if (seenParents.has(parentNorm)) continue;
+        seenParents.add(parentNorm);
+        const parsed = this.getOrParseFile(parentNorm);
+        if (parsed) {
+          parentFiles.push(parsed);
+          queue.push(parentNorm);
+        }
+      }
+    }
+    return parentFiles;
   }
 
   public getOrParseFile(uriOrPath: string): ParsedHlslFile | null {
@@ -120,7 +214,7 @@ export class IncludeDependencyGraph {
     const files: ParsedHlslFile[] = [];
     const unresolvedIncludes: UnresolvedIncludeDiagnostic[] = [];
 
-    const visit = (filePath: string) => {
+    const visit = (filePath: string, collectUnresolved: boolean) => {
       const norm = this.normalizeFilePath(filePath);
       if (visited.has(norm)) return;
       visited.add(norm);
@@ -128,26 +222,43 @@ export class IncludeDependencyGraph {
       const parsed = this.getOrParseFile(norm);
       if (!parsed) return;
       files.push(parsed);
+      this.recordReverseEdges(norm, parsed);
 
       for (const inc of parsed.includes) {
         const mapped = this.resolver.resolve(inc.rawPath, norm);
         if (mapped.physicalPath) {
-          visit(mapped.physicalPath);
-        } else {
-          unresolvedIncludes.push({
-            includePath: inc.rawPath,
-            fromFile: norm,
-            fromUri: parsed.uri,
-            line: inc.line,
-            column: inc.column,
-            startCol: inc.pathStartColumn,
-            endCol: inc.pathEndColumn,
-          });
+          visit(mapped.physicalPath, collectUnresolved);
+        } else if (collectUnresolved) {
+          const isInsidePackageCache = norm.replace(/\\/g, '/').toLowerCase().includes('/library/packagecache/');
+          if (norm === entryNorm || !isInsidePackageCache) {
+            unresolvedIncludes.push({
+              includePath: inc.rawPath,
+              fromFile: norm,
+              fromUri: parsed.uri,
+              line: inc.line,
+              column: inc.column,
+              startCol: inc.pathStartColumn,
+              endCol: inc.pathEndColumn,
+            });
+          }
         }
       }
     };
 
-    visit(entryNorm);
+    visit(entryNorm, true);
+
+    // Reverse include graph: when inspecting a standalone .hlsl/.cginc/.hlsli header,
+    // inherit visible symbols from parent .shader / .hlsl files that #include this header.
+    const ext = path.extname(entryNorm).toLowerCase();
+    const isHeaderFile = ext === '.hlsl' || ext === '.cginc' || ext === '.hlsli';
+    const isInsidePackageCache = entryNorm.replace(/\\/g, '/').toLowerCase().includes('/library/packagecache/');
+    if (isHeaderFile && !isInsidePackageCache) {
+      const parentFiles = this.findParentIncludeFiles(entryNorm);
+      for (const parent of parentFiles) {
+        visit(parent.filePath, false);
+      }
+    }
+
     return { files, unresolvedIncludes };
   }
 

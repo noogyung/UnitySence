@@ -3,24 +3,24 @@ import type { IncludeDependencyGraph } from '../indexer/hlslIncludeGraph.ts';
 import { UNITY_BUILTIN_MACROS } from '../parser/unityHlslMacroPrepass.ts';
 
 const HLSL_SEMANTICS_AND_TYPES = [
-  { label: 'SV_Position', kind: CompletionItemKind.Constant, detail: 'HLSL Clip-space vertex output / fragment position semantic' },
-  { label: 'SV_Target', kind: CompletionItemKind.Constant, detail: 'HLSL Fragment render target output semantic' },
-  { label: 'SV_Depth', kind: CompletionItemKind.Constant, detail: 'HLSL Fragment depth output semantic' },
-  { label: 'SV_InstanceID', kind: CompletionItemKind.Constant, detail: 'HLSL GPU instance identifier semantic' },
-  { label: 'POSITION', kind: CompletionItemKind.Constant, detail: 'Vertex attribute position semantic' },
-  { label: 'NORMAL', kind: CompletionItemKind.Constant, detail: 'Vertex attribute normal semantic' },
-  { label: 'TANGENT', kind: CompletionItemKind.Constant, detail: 'Vertex attribute tangent semantic' },
-  { label: 'TEXCOORD0', kind: CompletionItemKind.Constant, detail: 'Texture coordinate channel 0 semantic' },
-  { label: 'TEXCOORD1', kind: CompletionItemKind.Constant, detail: 'Texture coordinate channel 1 semantic' },
-  { label: 'float2', kind: CompletionItemKind.Keyword, detail: 'HLSL 2-component 32-bit float vector' },
-  { label: 'float3', kind: CompletionItemKind.Keyword, detail: 'HLSL 3-component 32-bit float vector' },
-  { label: 'float4', kind: CompletionItemKind.Keyword, detail: 'HLSL 4-component 32-bit float vector' },
-  { label: 'half', kind: CompletionItemKind.Keyword, detail: 'Unity 16-bit half-precision float' },
-  { label: 'half3', kind: CompletionItemKind.Keyword, detail: 'Unity 3-component half vector' },
-  { label: 'half4', kind: CompletionItemKind.Keyword, detail: 'Unity 4-component half vector' },
-  { label: 'real3', kind: CompletionItemKind.Keyword, detail: 'Unity precision-adaptive 3D vector' },
-  { label: 'real4', kind: CompletionItemKind.Keyword, detail: 'Unity precision-adaptive 4D vector' },
-  { label: 'float4x4', kind: CompletionItemKind.Keyword, detail: 'HLSL 4x4 matrix' },
+  { label: 'SV_Position', kind: CompletionItemKind.Constant, detail: '[UnityBrain] HLSL 클립 공간 정점 출력 / 프래그먼트 위치 시맨틱' },
+  { label: 'SV_Target', kind: CompletionItemKind.Constant, detail: '[UnityBrain] HLSL 프래그먼트 렌더 타겟 출력 시맨틱' },
+  { label: 'SV_Depth', kind: CompletionItemKind.Constant, detail: '[UnityBrain] HLSL 프래그먼트 깊이 출력 시맨틱' },
+  { label: 'SV_InstanceID', kind: CompletionItemKind.Constant, detail: '[UnityBrain] HLSL GPU 인스턴스 식별자 시맨틱' },
+  { label: 'POSITION', kind: CompletionItemKind.Constant, detail: '[UnityBrain] 정점 애트리뷰트 위치(Position) 시맨틱' },
+  { label: 'NORMAL', kind: CompletionItemKind.Constant, detail: '[UnityBrain] 정점 애트리뷰트 노멀(Normal) 시맨틱' },
+  { label: 'TANGENT', kind: CompletionItemKind.Constant, detail: '[UnityBrain] 정점 애트리뷰트 탄젠트(Tangent) 시맨틱' },
+  { label: 'TEXCOORD0', kind: CompletionItemKind.Constant, detail: '[UnityBrain] 텍스처 좌표 채널 0 시맨틱' },
+  { label: 'TEXCOORD1', kind: CompletionItemKind.Constant, detail: '[UnityBrain] 텍스처 좌표 채널 1 시맨틱' },
+  { label: 'float2', kind: CompletionItemKind.Keyword, detail: '[UnityBrain] HLSL 2성분 32비트 부동소수점 벡터' },
+  { label: 'float3', kind: CompletionItemKind.Keyword, detail: '[UnityBrain] HLSL 3성분 32비트 부동소수점 벡터' },
+  { label: 'float4', kind: CompletionItemKind.Keyword, detail: '[UnityBrain] HLSL 4성분 32비트 부동소수점 벡터' },
+  { label: 'half', kind: CompletionItemKind.Keyword, detail: '[UnityBrain] 유니티 16비트 반정밀도 실수 타입' },
+  { label: 'half3', kind: CompletionItemKind.Keyword, detail: '[UnityBrain] 유니티 3성분 반정밀도 벡터' },
+  { label: 'half4', kind: CompletionItemKind.Keyword, detail: '[UnityBrain] 유니티 4성분 반정밀도 벡터' },
+  { label: 'real3', kind: CompletionItemKind.Keyword, detail: '[UnityBrain] 유니티 정밀도 적응형 3D 벡터' },
+  { label: 'real4', kind: CompletionItemKind.Keyword, detail: '[UnityBrain] 유니티 정밀도 적응형 4D 벡터' },
+  { label: 'float4x4', kind: CompletionItemKind.Keyword, detail: '[UnityBrain] HLSL 4x4 행렬 타입' },
 ];
 
 export class ShaderCompletionProvider {
@@ -54,7 +54,7 @@ export class ShaderCompletionProvider {
         .map((e) => ({
           label: e.name,
           kind: e.isDirectory ? CompletionItemKind.Folder : CompletionItemKind.File,
-          detail: e.virtualPath,
+          detail: `[UnityBrain] 셰이더 경로 (${e.virtualPath})`,
           insertText: e.isDirectory ? `${e.name}/` : e.name,
         }));
     }
@@ -74,8 +74,8 @@ export class ShaderCompletionProvider {
             .map((f) => ({
               label: f.name,
               kind: CompletionItemKind.Field,
-              detail: f.signature ?? `${f.returnType ?? ''} ${f.name}`.trim(),
-              documentation: `Member of struct ${cleanType}`,
+              detail: `[UnityBrain] ${cleanType} 구조체 멤버 · ${f.signature ?? `${f.returnType ?? ''} ${f.name}`.trim()}`,
+              documentation: `[UnityBrain] 구조체 ${cleanType}의 필드입니다.`,
             }));
         }
       }
@@ -106,8 +106,10 @@ export class ShaderCompletionProvider {
       items.push({
         label: sym.name,
         kind: kindMap[sym.kind] ?? CompletionItemKind.Text,
-        detail: sym.signature ?? sym.returnType,
-        documentation: sym.documentation,
+        detail: `[UnityBrain] HLSL 심볼 · ${sym.signature ?? sym.returnType ?? sym.name}`,
+        documentation: sym.documentation
+          ? `[UnityBrain] ${sym.documentation}`
+          : `[UnityBrain] ${sym.kind} 심볼입니다.`,
       });
     }
 
@@ -118,8 +120,8 @@ export class ShaderCompletionProvider {
       items.push({
         label: macro.name,
         kind: CompletionItemKind.Snippet,
-        detail: `[${macro.pipeline}] ${macro.signature}`,
-        documentation: macro.description,
+        detail: `[UnityBrain] [${macro.pipeline}] ${macro.signature}`,
+        documentation: `[UnityBrain] ${macro.description}`,
       });
     }
 

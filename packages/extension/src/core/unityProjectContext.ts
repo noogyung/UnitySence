@@ -59,36 +59,114 @@ export class UnityProjectContextManager implements vscode.Disposable {
   }
 
   private detectUnityProjectRoot(): string | null {
-    const candidates: string[] = [];
     if (this._options.workspaceRoot) {
-      candidates.push(this._options.workspaceRoot);
+      const fromOption = this.findUnityProjectInSubtree(this._options.workspaceRoot, 3);
+      if (fromOption) {
+        return fromOption;
+      }
+      const upwardOption = this.findUnityProjectUpward(this._options.workspaceRoot);
+      if (upwardOption) {
+        return upwardOption;
+      }
     }
+
+    const openPaths: string[] = [];
+    const activeUri = vscode.window.activeTextEditor?.document?.uri;
+    if (activeUri && activeUri.scheme === 'file' && activeUri.fsPath) {
+      openPaths.push(activeUri.fsPath);
+    }
+    for (const doc of vscode.workspace.textDocuments ?? []) {
+      if (doc?.uri?.scheme === 'file' && doc.uri.fsPath) {
+        openPaths.push(doc.uri.fsPath);
+      }
+    }
+    for (const openPath of openPaths) {
+      const found = this.findUnityProjectUpward(openPath);
+      if (found) {
+        return found;
+      }
+    }
+
     if (vscode.workspace.workspaceFolders) {
       for (const folder of vscode.workspace.workspaceFolders) {
-        candidates.push(folder.uri.fsPath);
+        const folderPath = folder.uri.fsPath;
+        const foundSubtree = this.findUnityProjectInSubtree(folderPath, 3);
+        if (foundSubtree) {
+          return foundSubtree;
+        }
+        const foundUpward = this.findUnityProjectUpward(folderPath);
+        if (foundUpward) {
+          return foundUpward;
+        }
       }
     }
 
-    for (const root of candidates) {
-      if (this.isUnityProjectDir(root)) {
-        return path.resolve(root);
-      }
+    return null;
+  }
+
+  private findUnityProjectUpward(startPath: string): string | null {
+    try {
+      let current = path.resolve(startPath);
       try {
-        const entries = fs.readdirSync(root, { withFileTypes: true });
-        for (const entry of entries) {
-          if (!entry.isDirectory() || entry.name.startsWith('.')) {
-            continue;
-          }
-          const sub = path.join(root, entry.name);
-          if (this.isUnityProjectDir(sub)) {
-            return path.resolve(sub);
-          }
+        if (fs.existsSync(current) && fs.statSync(current).isFile()) {
+          current = path.dirname(current);
         }
       } catch {
-        // Ignore unreadable root
+        current = path.dirname(current);
+      }
+
+      for (let i = 0; i < 16; i++) {
+        if (this.isUnityProjectDir(current)) {
+          return path.resolve(current);
+        }
+        const parent = path.dirname(current);
+        if (!parent || parent === current) {
+          break;
+        }
+        current = parent;
+      }
+    } catch {
+      // Ignore invalid paths
+    }
+    return null;
+  }
+
+  private findUnityProjectInSubtree(rootPath: string, maxDepth: number): string | null {
+    const IGNORED_DIRS = new Set([
+      'node_modules',
+      'library',
+      'temp',
+      'logs',
+      'usersettings',
+      'obj',
+      'bin',
+      'dist',
+      '.git',
+      '.ref',
+    ]);
+
+    const queue: Array<{ dir: string; depth: number }> = [{ dir: path.resolve(rootPath), depth: 0 }];
+    while (queue.length > 0) {
+      const item = queue.shift()!;
+      if (this.isUnityProjectDir(item.dir)) {
+        return item.dir;
+      }
+      if (item.depth >= maxDepth) {
+        continue;
+      }
+      try {
+        const entries = fs.readdirSync(item.dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          if (entry.name.startsWith('.') || IGNORED_DIRS.has(entry.name.toLowerCase())) {
+            continue;
+          }
+          queue.push({ dir: path.join(item.dir, entry.name), depth: item.depth + 1 });
+        }
+      } catch {
+        // Ignore unreadable directories
       }
     }
-
     return null;
   }
 

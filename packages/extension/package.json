@@ -1,32 +1,32 @@
 {
   "name": "unitybrain",
   "displayName": "UnityBrain",
-  "description": "JetBrains Rider-grade Unity development intelligence for VS Code (ShaderLab/HLSL LSP, Roslyn Analyzers, YAML Asset Indexer, Meta Sync).",
+  "description": "JetBrains Rider 수준의 Unity 개발 지능형 지원 확장 (ShaderLab/HLSL LSP, Roslyn 분석기, YAML 에셋 인덱서, .meta 자동 동기화).",
   "version": "0.1.0",
   "publisher": "unitybrain",
   "engines": {
     "vscode": "^1.90.0"
   },
   "type": "module",
-  "main": "./dist/extension.js",
+  "main": "./dist/extension.cjs",
   "categories": [
     "Programming Languages",
     "Linters",
     "Other"
   ],
   "activationEvents": [
+    "*",
+    "onStartupFinished",
     "workspaceContains:ProjectSettings/ProjectVersion.txt",
+    "workspaceContains:Assets",
     "onLanguage:unity-shaderlab",
+    "onLanguage:shaderlab",
     "onLanguage:hlsl",
     "onLanguage:csharp",
     "onCommand:unityBrain.generateEventFunctions",
     "onCommand:unityBrain.switchShaderKeywords",
     "onCommand:unityBrain.showAssetUsages",
     "onCommand:unityBrain.rebuildAssetIndex"
-  ],
-  "extensionDependencies": [
-    "ms-dotnettools.csharp",
-    "visualstudiotoolsforunity.vstuc"
   ],
   "scripts": {
     "build": "node ../../tools/cli.mjs build:extension",
@@ -59,24 +59,34 @@
         "language": "unity-shaderlab",
         "scopeName": "source.shaderlab",
         "path": "./syntaxes/unity-shaderlab.tmLanguage.json"
+      },
+      {
+        "language": "shaderlab",
+        "scopeName": "source.shaderlab",
+        "path": "./syntaxes/unity-shaderlab.tmLanguage.json"
+      },
+      {
+        "language": "hlsl",
+        "scopeName": "source.shaderlab",
+        "path": "./syntaxes/unity-shaderlab.tmLanguage.json"
       }
     ],
     "commands": [
       {
         "command": "unityBrain.generateEventFunctions",
-        "title": "UnityBrain: Generate Unity Event Functions..."
+        "title": "[UnityBrain] 유니티 이벤트 함수 자동 생성..."
       },
       {
         "command": "unityBrain.switchShaderKeywords",
-        "title": "UnityBrain: Switch Shader Keywords Context..."
+        "title": "[UnityBrain] 셰이더 키워드 컨텍스트 전환..."
       },
       {
         "command": "unityBrain.showAssetUsages",
-        "title": "UnityBrain: Show Unity Asset Usages"
+        "title": "[UnityBrain] 유니티 에셋 참조 위치 보기"
       },
       {
         "command": "unityBrain.rebuildAssetIndex",
-        "title": "UnityBrain: Rebuild Unity Asset Index"
+        "title": "[UnityBrain] 유니티 에셋 인덱스 다시 구축"
       }
     ],
     "configuration": {
@@ -85,22 +95,22 @@
         "unityBrain.metaSync.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically rename, delete, and create Unity .meta files when assets change in Explorer."
+          "description": "[UnityBrain] 탐색기에서 에셋을 생성/변경/삭제할 때 .meta 파일 및 GUID를 자동으로 동기화합니다."
         },
         "unityBrain.codeLens.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Show Unity Asset Usage, Event Callback, Inspector Value, and Shader Variant CodeLenses."
+          "description": "[UnityBrain] 유니티 에셋 참조, 이벤트 콜백, 인스펙터 직렬화 값 및 셰이더 배리언트 CodeLens를 표시합니다."
         },
         "unityBrain.analyzers.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically inject UnityBrain Roslyn Analyzers and AdditionalFiles via Directory.Build.props."
+          "description": "[UnityBrain] Directory.Build.props를 통해 UnityBrain Roslyn 분석기 및 AdditionalFiles를 자동으로 주입합니다."
         },
         "unityBrain.unityEditorPath": {
           "type": "string",
           "default": "",
-          "description": "Optional explicit path to the Unity Editor executable directory for resolving CGIncludes and built-in packages."
+          "description": "[UnityBrain] CGIncludes 및 빌트인 패키지를 찾기 위한 Unity Editor 설치 디렉터리 수동 지정 경로(선택 사항)입니다."
         }
       }
     }

@@ -30,7 +30,7 @@ export class ShaderDefinitionProvider {
 
     // Case A: #include "..." or #include <...>
     const inc = parsed.includes.find((item) => item.line === position.line);
-    if (inc && position.character >= inc.column) {
+    if (inc) {
       const resolved = this.graph.getResolver().resolve(inc.rawPath, filePath);
       if (resolved.physicalPath) {
         return [
@@ -92,6 +92,26 @@ export class ShaderDefinitionProvider {
             ];
           }
         }
+      }
+    }
+
+    // Case C-2: Function parameters & local variables in enclosing scope
+    const isMemberAccess = wordSpan.start > 0 && lineText[wordSpan.start - 1] === '.';
+    if (!isMemberAccess) {
+      const scope = parsed.localVarScopes.find(
+        (sc) => position.line >= sc.startLine && position.line <= sc.endLine && sc.declarations.has(word),
+      );
+      const localDecl = scope?.declarations.get(word);
+      if (localDecl) {
+        return [
+          {
+            uri: parsed.uri,
+            range: {
+              start: { line: localDecl.line, character: localDecl.column },
+              end: { line: localDecl.line, character: localDecl.column + word.length },
+            },
+          },
+        ];
       }
     }
 

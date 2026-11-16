@@ -32,14 +32,20 @@ export class MsbuildAnalyzerInjector {
 
   public buildManagedBlock(): string {
     const analyzerDll = path.join(this.extensionPath, 'analyzers', 'UnityBrain.Analyzers.dll');
-    const settingsJson = path.join(this.cacheDir, 'project-settings.json');
+    const tagManagerAsset = path.join(this.projectRoot, 'ProjectSettings', 'TagManager.asset');
+    const buildSettingsAsset = path.join(
+      this.projectRoot,
+      'ProjectSettings',
+      'EditorBuildSettings.asset',
+    );
     const unityApiJson = path.join(this.extensionPath, 'resources', 'unity-api.json');
 
     return [
       `  ${BEGIN_MARKER}`,
       `  <ItemGroup>`,
       `    <Analyzer Include="${this.escapeXml(analyzerDll)}" Condition="Exists('${this.escapeXml(analyzerDll)}')" />`,
-      `    <AdditionalFiles Include="${this.escapeXml(settingsJson)}" Condition="Exists('${this.escapeXml(settingsJson)}')" />`,
+      `    <AdditionalFiles Include="${this.escapeXml(tagManagerAsset)}" Condition="Exists('${this.escapeXml(tagManagerAsset)}')" />`,
+      `    <AdditionalFiles Include="${this.escapeXml(buildSettingsAsset)}" Condition="Exists('${this.escapeXml(buildSettingsAsset)}')" />`,
       `    <AdditionalFiles Include="${this.escapeXml(unityApiJson)}" Condition="Exists('${this.escapeXml(unityApiJson)}')" />`,
       `  </ItemGroup>`,
       `  ${END_MARKER}`,

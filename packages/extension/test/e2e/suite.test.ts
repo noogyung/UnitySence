@@ -6,13 +6,23 @@ import { activate, deactivate } from '../../src/extension.ts';
 
 const tempDirs: string[] = [];
 
-function copyDirRecursive(src: string, dst: string): void {
+const EXCLUDED_TOP_DIRS = new Set(['Temp', 'Logs', 'UserSettings', 'obj', '.git', '.unitybrain']);
+
+function copyDirRecursive(src: string, dst: string, relBase = ''): void {
   fs.mkdirSync(dst, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const relPath = relBase ? `${relBase}/${entry.name}` : entry.name;
+    if (!relBase && EXCLUDED_TOP_DIRS.has(entry.name)) {
+      continue;
+    }
+    if (relBase === 'Library' && entry.name !== 'PackageCache') {
+      continue;
+    }
+
     const srcPath = path.join(src, entry.name);
     const dstPath = path.join(dst, entry.name);
     if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, dstPath);
+      copyDirRecursive(srcPath, dstPath, relPath);
     } else {
       fs.copyFileSync(srcPath, dstPath);
     }
@@ -97,20 +107,21 @@ describe('UnityBrain Extension End-to-End Integration Suite', () => {
     expect(api).toBeDefined();
     expect(api!.context.editorVersion).toContain('6000.');
 
-    // 1. Verify Directory.Build.props & project-settings.json auto-creation
+    // 1. Verify Directory.Build.props points directly to ProjectSettings YAML without disk cache duplication
     const propsPath = path.join(sampleRoot, 'Directory.Build.props');
     expect(fs.existsSync(propsPath)).toBe(true);
     const propsText = fs.readFileSync(propsPath, 'utf8');
     expect(propsText).toContain('<!-- UnityBrain:Begin -->');
     expect(propsText).toContain('UnityBrain.Analyzers.dll');
-    expect(propsText).toContain('project-settings.json');
+    expect(propsText).toContain('TagManager.asset');
+    expect(propsText).toContain('EditorBuildSettings.asset');
     expect(propsText).toContain('unity-api.json');
+    expect(propsText).not.toContain('project-settings.json');
 
-    const settingsJsonPath = path.join(api!.context.cacheDir, 'project-settings.json');
-    expect(fs.existsSync(settingsJsonPath)).toBe(true);
-    const settingsJson = JSON.parse(fs.readFileSync(settingsJsonPath, 'utf8'));
-    expect(settingsJson.tags).toContain('Enemy');
-    expect(settingsJson.layers.some((l: { name: string }) => l.name === 'Hitbox')).toBe(true);
+    expect(fs.existsSync(api!.context.cacheDir)).toBe(false);
+    const memCache = api!.settingsWatcher.getCache();
+    expect(memCache.tags).toContain('Enemy');
+    expect(memCache.layers.some((l: { name: string }) => l.name === 'Hitbox')).toBe(true);
 
     // 2. Verify ShaderLab #include "Packages/..." Go-to-Definition + Shader Variant CodeLens
     const testLitPath = path.join(sampleRoot, 'Assets', 'Shaders', 'TestLit.shader');
@@ -129,13 +140,13 @@ describe('UnityBrain Extension End-to-End Integration Suite', () => {
     const coreIncludeLine = testLitText.split(/\r?\n/).findIndex((l) => l.includes('Core.hlsl'));
     const defs = defProvider.provideDefinition(shaderDoc, new vscode.Position(coreIncludeLine, 25));
     expect(defs.length).toBeGreaterThan(0);
-    expect(defs[0].uri.fsPath.replace(/\\/g, '/')).toContain(
-      'Library/PackageCache/com.unity.render-pipelines.universal@17.0.3/ShaderLibrary/Core.hlsl',
+    expect(defs[0].uri.fsPath.replace(/\\/g, '/')).toMatch(
+      /Library\/PackageCache\/com\.unity\.render-pipelines\.universal@[^/]+\/ShaderLibrary\/Core\.hlsl$/,
     );
 
     const variantLenses = api!.shaderVariantCodeLensProvider.provideCodeLenses(shaderDoc);
     expect(variantLenses.length).toBe(1);
-    expect(variantLenses[0].command?.title).toBe('$(layers) 6 Shader Variants');
+    expect(variantLenses[0].command?.title).toBe('$(layers) [UnityBrain] 셰이더 배리언트 6개');
 
     // 3. Verify C# CompareTag("") completion + Asset Usage CodeLens
     const scriptsDir = path.join(sampleRoot, 'Assets', 'Scripts');
@@ -169,7 +180,7 @@ describe('UnityBrain Extension End-to-End Integration Suite', () => {
       new vscode.CancellationTokenSource().token,
     );
     expect(usageLenses.length).toBeGreaterThan(0);
-    expect(usageLenses[0].command?.title).toBe('$(symbol-reference) 1 Asset Usage (1 Scene)');
+    expect(usageLenses[0].command?.title).toBe('$(symbol-reference) [UnityBrain] 에셋 참조 1곳 (씬 1개)');
 
     // 4. Verify .meta lifecycle sync on newly created file
     const spawnedCs = path.join(scriptsDir, 'NewItem.cs');

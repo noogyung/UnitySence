@@ -14,6 +14,14 @@ export interface HlslIncludeDirective {
   pathEndColumn: number;
 }
 
+export interface LocalVarDeclaration {
+  type: string;
+  line: number;
+  column: number;
+  kind: 'parameter' | 'localVariable';
+  signature: string;
+}
+
 export interface ParsedHlslFile {
   uri: string;
   filePath: string;
@@ -27,6 +35,7 @@ export interface ParsedHlslFile {
     startLine: number;
     endLine: number;
     variables: Map<string, string>;
+    declarations: Map<string, LocalVarDeclaration>;
   }>;
   virtualHlsl: string;
 }
@@ -255,7 +264,7 @@ export function parseHlslSymbols(
     });
 
     const bodyText = cleanNormalized.slice(openBraceIdx + 1, closeBraceIdx);
-    const fieldRegex = /(?:^|;|\n)\s*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*:\s*([A-Za-z0-9_]+))?\s*;/g;
+    const fieldRegex = /(?:^|(?<=[;\n]))\s*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*:\s*([A-Za-z0-9_]+))?\s*;/g;
     const fieldList: HlslSymbolEntry[] = [];
     let fMatch: RegExpExecArray | null;
     while ((fMatch = fieldRegex.exec(bodyText)) !== null) {
@@ -299,7 +308,7 @@ export function parseHlslSymbols(
 
     const cPos = offsetToLineCol(normStarts, cMatch.index);
     const bodyText = cleanNormalized.slice(openBraceIdx + 1, closeBraceIdx);
-    const varRegex = /(?:^|;|\n)\s*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;/g;
+    const varRegex = /(?:^|(?<=[;\n]))\s*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;/g;
     let vMatch: RegExpExecArray | null;
     while ((vMatch = varRegex.exec(bodyText)) !== null) {
       const vType = vMatch[1].trim();
@@ -377,9 +386,43 @@ export function parseHlslSymbols(
       const startPos = offsetToLineCol(normStarts, fnMatch.index);
       const endPos = offsetToLineCol(normStarts, closeBraceIdx);
       const scopeVars = new Map<string, string>();
-      for (const p of parsedParams) {
-        scopeVars.set(p.name, p.type);
+      const scopeDecls = new Map<string, LocalVarDeclaration>();
+
+      const openParenOffset = fnMatch.index + fnMatch[0].indexOf('(');
+      const closeParenOffset = fnMatch.index + fnMatch[0].indexOf(')', fnMatch[0].indexOf('('));
+      const paramSlice = cleanNormalized.slice(openParenOffset + 1, closeParenOffset);
+      let segOffset = 0;
+      for (const rawPart of paramSlice.split(',')) {
+        const partStart = openParenOffset + 1 + segOffset;
+        segOffset += rawPart.length + 1;
+        const withoutDefault = rawPart.split('=')[0].split(':')[0];
+        const cleaned = withoutDefault
+          .trim()
+          .replace(/^(?:in|out|inout|uniform|const)\s+/g, '')
+          .trim();
+        const pm = /^(.+?)\s+([A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?)$/.exec(cleaned);
+        if (!pm) continue;
+        const pType = pm[1].trim();
+        const pName = pm[2].replace(/\[.*$/, '');
+        scopeVars.set(pName, pType);
+        const nameInPart = withoutDefault.lastIndexOf(pName);
+        const absParamOffset = partStart + (nameInPart >= 0 ? nameInPart : 0);
+        const pPos = offsetToLineCol(normStarts, absParamOffset);
+        const origParamLine = rawLines[pPos.line] ?? '';
+        const typePosInLine = origParamLine.indexOf(pType);
+        const exactParamCol =
+          typePosInLine >= 0
+            ? origParamLine.indexOf(pName, typePosInLine + pType.length)
+            : origParamLine.indexOf(pName);
+        scopeDecls.set(pName, {
+          type: pType,
+          line: pPos.line,
+          column: exactParamCol >= 0 ? exactParamCol : pPos.column,
+          kind: 'parameter',
+          signature: `${pType} ${pName}`,
+        });
       }
+
       const bodySlice = cleanNormalized.slice(openBraceIdx + 1, closeBraceIdx);
       const localVarRegex = /(?:^|;|\n)\s*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)/g;
       let lvMatch: RegExpExecArray | null;
@@ -388,12 +431,29 @@ export function parseHlslSymbols(
         const lName = lvMatch[2];
         if (!CONTROL_KEYWORDS.has(lType)) {
           scopeVars.set(lName, lType);
+          const nameInMatch = lvMatch[0].lastIndexOf(lName);
+          const absVarOffset = openBraceIdx + 1 + lvMatch.index + nameInMatch;
+          const lvPos = offsetToLineCol(normStarts, absVarOffset);
+          const origVarLine = rawLines[lvPos.line] ?? '';
+          const typePosInLine = origVarLine.indexOf(lType);
+          const exactVarCol =
+            typePosInLine >= 0
+              ? origVarLine.indexOf(lName, typePosInLine + lType.length)
+              : origVarLine.indexOf(lName);
+          scopeDecls.set(lName, {
+            type: lType,
+            line: lvPos.line,
+            column: exactVarCol >= 0 ? exactVarCol : lvPos.column,
+            kind: 'localVariable',
+            signature: `${lType} ${lName}`,
+          });
         }
       }
       localVarScopes.push({
         startLine: startPos.line,
         endLine: endPos.line,
         variables: scopeVars,
+        declarations: scopeDecls,
       });
     }
   }

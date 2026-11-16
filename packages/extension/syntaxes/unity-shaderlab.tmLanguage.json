@@ -1,17 +1,22 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "Unity ShaderLab",
-  "scopeName": "source.shaderlab",
+  "name": "Unity ShaderLab / HLSL",
+  "scopeName": "source.unity-shaderlab",
   "patterns": [
     { "include": "#comments" },
-    { "include": "#strings" },
     { "include": "#preprocessor" },
-    { "include": "#hlsl-blocks" },
-    { "include": "#shaderlab-keywords" },
-    { "include": "#render-states" },
-    { "include": "#property-types" },
+    { "include": "#strings" },
+    { "include": "#shaderlab-blocks" },
+    { "include": "#hlsl-control-keywords" },
     { "include": "#hlsl-types" },
-    { "include": "#numbers" }
+    { "include": "#hlsl-semantics" },
+    { "include": "#unity-macros" },
+    { "include": "#hlsl-builtins" },
+    { "include": "#shaderlab-commands" },
+    { "include": "#shader-property-identifiers" },
+    { "include": "#function-calls" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
   ],
   "repository": {
     "comments": {
@@ -27,56 +32,169 @@
         }
       ]
     },
-    "strings": {
-      "name": "string.quoted.double.shaderlab",
-      "begin": "\"",
-      "end": "\"",
-      "patterns": [
-        {
-          "name": "constant.character.escape.shaderlab",
-          "match": "\\\\."
-        }
-      ]
-    },
     "preprocessor": {
       "patterns": [
         {
-          "name": "meta.preprocessor.include.shaderlab",
-          "match": "^\\s*(#\\s*include)\\b(.*)$",
+          "name": "meta.preprocessor.include.hlsl",
+          "match": "^\\s*(#\\s*include(?:_with_pragmas)?)\\s+(\"[^\"]+\"|<[^>]+>)",
           "captures": {
-            "1": { "name": "keyword.control.directive.include.shaderlab" },
-            "2": { "patterns": [{ "include": "#strings" }] }
+            "1": { "name": "keyword.control.directive.include.hlsl" },
+            "2": { "name": "string.quoted.other.include.hlsl" }
           }
         },
         {
-          "name": "keyword.control.directive.shaderlab",
-          "match": "^\\s*#\\s*(?:pragma|define|undef|if|ifdef|ifndef|elif|else|endif|line|error)\\b"
+          "name": "meta.preprocessor.pragma.hlsl",
+          "match": "^\\s*(#\\s*pragma)\\s+([A-Za-z_][A-Za-z0-9_]*)(.*)$",
+          "captures": {
+            "1": { "name": "keyword.control.directive.pragma.hlsl" },
+            "2": { "name": "entity.name.function.preprocessor.hlsl" },
+            "3": { "name": "constant.other.pragma-argument.hlsl" }
+          }
+        },
+        {
+          "name": "keyword.control.directive.hlsl",
+          "match": "^\\s*#\\s*(define|undef|if|ifdef|ifndef|elif|else|endif|error|warning|line)\\b"
         }
       ]
     },
-    "hlsl-blocks": {
-      "name": "keyword.control.shaderlab.block",
-      "match": "\\b(?:HLSLPROGRAM|ENDHLSL|HLSLINCLUDE|CGPROGRAM|ENDCG|CGINCLUDE)\\b"
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.shaderlab",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.shaderlab",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
     },
-    "shaderlab-keywords": {
-      "name": "keyword.other.shaderlab",
-      "match": "\\b(?:Shader|Properties|SubShader|Pass|UsePass|GrabPass|Tags|LOD|Fallback|CustomEditor|Category|Name|BindChannels|Bind|PackageRequirements)\\b"
+    "shaderlab-blocks": {
+      "patterns": [
+        {
+          "name": "keyword.control.shaderlab.block",
+          "match": "\\b(Shader|Properties|SubShader|Pass|Category|UsePass|GrabPass|Fallback|CustomEditor|Dependency|PackageRequirements|HLSLPROGRAM|ENDHLSL|HLSLINCLUDE|CGPROGRAM|ENDCG|CGINCLUDE|GLSLPROGRAM|ENDGLSL)\\b"
+        },
+        {
+          "name": "keyword.other.shaderlab.tag-and-lod",
+          "match": "(?<!\\.)\\b(Tags|Name|LOD)\\b(?!\\s*(?:=|\\+=|-=|\\*=|/=|;|\\)|,|\\[|\\.))"
+        }
+      ]
     },
-    "render-states": {
-      "name": "support.constant.renderstate.shaderlab",
-      "match": "\\b(?:Cull|ZWrite|ZTest|Offset|Blend|BlendOp|ColorMask|Stencil|Ref|ReadMask|WriteMask|Comp|Fail|ZFail|AlphaToMask|Conservative)\\b"
+    "shaderlab-commands": {
+      "patterns": [
+        {
+          "name": "keyword.other.shaderlab.renderstate",
+          "match": "(?<!\\.)\\b(Cull|ZWrite|ZTest|Offset|Blend|BlendOp|AlphaToMask|ColorMask|Stencil|Ref|ReadMask|WriteMask|Comp|CompBack|CompFront|PassFront|PassBack|Fail|ZFail|Conservative)\\b(?!\\s*(?:=|\\+=|-=|\\*=|/=|;|\\)|,|\\[|\\.))"
+        },
+        {
+          "name": "support.type.shaderlab.property",
+          "match": "(?<!\\.)\\b(Range|Float|Int|Integer|Color|Vector|2D|2DArray|Cube|CubeArray|3D|Any)\\b(?!\\s*(?:=|\\+=|-=|\\*=|/=|;|\\)|,|\\[|\\.))"
+        },
+        {
+          "name": "constant.language.shaderlab.option",
+          "match": "(?<!\\.)\\b(Off|On|Back|Front|Zero|One|SrcColor|SrcAlpha|DstColor|DstAlpha|OneMinusSrcColor|OneMinusSrcAlpha|OneMinusDstColor|OneMinusDstAlpha|LEqual|GEqual|Equal|NotEqual|Less|Greater|Always|Never|Keep|Replace|IncrSat|DecrSat|Invert|IncrWrap|DecrWrap)\\b(?!\\s*(?:=|\\+=|-=|\\*=|/=|;|\\)|,|\\[|\\.))"
+        }
+      ]
     },
-    "property-types": {
-      "name": "support.type.property.shaderlab",
-      "match": "\\b(?:Range|Float|Int|Integer|Color|Vector|2D|2DArray|3D|Cube|CubeArray|Any)\\b"
+    "hlsl-control-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.hlsl",
+          "match": "\\b(if|else|for|while|do|switch|case|default|break|continue|return|discard)\\b"
+        },
+        {
+          "name": "storage.modifier.hlsl",
+          "match": "\\b(struct|cbuffer|tbuffer|uniform|static|const|inline|in|out|inout|groupshared|precise|nointerpolation|linear|centroid|noperspective|sample|unorm|snorm|earlydepthstencil|domain|partitioning|outputtopology|outputcontrolpoints|patchconstantfunc|maxvertexcount|numthreads)\\b"
+        },
+        {
+          "name": "constant.language.boolean.hlsl",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
     },
     "hlsl-types": {
-      "name": "storage.type.hlsl",
-      "match": "\\b(?:void|bool|int|uint|dword|half|float|double|min16float|float[234](?:x[234])?|half[234](?:x[234])?|int[234]|uint[234]|bool[234]|struct|cbuffer|tbuffer|Texture2D|Texture3D|TextureCube|Texture2DArray|SamplerState|TEXTURE2D|SAMPLER|CBUFFER_START|CBUFFER_END|return|uniform|in|out|inout)\\b"
+      "patterns": [
+        {
+          "name": "storage.type.hlsl.primitive",
+          "match": "\\b(void|bool|bool2|bool3|bool4|int|int2|int3|int4|int2x2|int3x3|int4x4|uint|uint2|uint3|uint4|uint2x2|uint3x3|uint4x4|float|float2|float3|float4|float2x2|float3x3|float3x4|float4x3|float4x4|half|half2|half3|half4|half2x2|half3x3|half4x4|real|real2|real3|real4|real2x2|real3x3|real4x4|fixed|fixed2|fixed3|fixed4|fixed2x2|fixed3x3|fixed4x4|double|min16float|min10float|min16int|min12int|min16uint)\\b"
+        },
+        {
+          "name": "storage.type.hlsl.resource",
+          "match": "\\b(sampler|sampler1D|sampler2D|sampler3D|samplerCUBE|SamplerState|SamplerComparisonState|Texture1D|Texture1DArray|Texture2D|Texture2DArray|Texture2DMS|Texture3D|TextureCube|TextureCubeArray|RWTexture1D|RWTexture2D|RWTexture2DArray|RWTexture3D|Buffer|RWBuffer|StructuredBuffer|RWStructuredBuffer|AppendStructuredBuffer|ConsumeStructuredBuffer|ByteAddressBuffer|RWByteAddressBuffer|InputPatch|OutputPatch|TriangleStream|PointStream|LineStream)\\b"
+        },
+        {
+          "name": "entity.name.type.struct.unity",
+          "match": "\\b(Attributes|Varyings|SurfaceData|InputData|Light|VertexPositionInputs|VertexNormalInputs|BRDFData|appdata_base|appdata_tan|appdata_full|v2f)\\b"
+        }
+      ]
+    },
+    "hlsl-semantics": {
+      "patterns": [
+        {
+          "name": "support.variable.semantic.hlsl",
+          "match": "\\b(POSITION[0-9]*|NORMAL[0-9]*|TANGENT[0-9]*|BINORMAL[0-9]*|COLOR[0-9]*|TEXCOORD[0-9]+|PSIZE[0-9]*|BLENDWEIGHT[0-9]*|BLENDINDICES[0-9]*|SV_POSITION|SV_Position|SV_Target[0-7]?|SV_TARGET[0-7]?|SV_Depth|SV_DEPTH|SV_InstanceID|SV_VertexID|SV_PrimitiveID|SV_IsFrontFace|SV_DispatchThreadID|SV_GroupID|SV_GroupThreadID|SV_GroupIndex|VPOS|VFACE|UNITY_VERTEX_INPUT_INSTANCE_ID|UNITY_VERTEX_OUTPUT_STEREO)\\b"
+        }
+      ]
+    },
+    "unity-macros": {
+      "patterns": [
+        {
+          "name": "support.function.macro.unity",
+          "match": "\\b(TEXTURE2D|TEXTURE2D_X|TEXTURE2D_ARRAY|TEXTURE3D|TEXTURECUBE|SAMPLER|SAMPLE_TEXTURE2D|SAMPLE_TEXTURE2D_LOD|SAMPLE_TEXTURE2D_BIAS|SAMPLE_TEXTURE2D_GRAD|SAMPLE_TEXTURE2D_X|SAMPLE_TEXTURE2D_ARRAY|SAMPLE_TEXTURECUBE|SAMPLE_TEXTURECUBE_LOD|LOAD_TEXTURE2D|UNITY_DECLARE_TEX2D|UNITY_DECLARE_TEX2DARRAY|UNITY_DECLARE_TEXCUBE|UNITY_DECLARE_SCREENSPACE_TEXTURE|UNITY_SAMPLE_TEX2D|UNITY_SAMPLE_TEX2D_SAMPLER|TEXTURE2D_SHADOW_PARAM|TEXTURE2D_SHADOW_ARGS|CBUFFER_START|CBUFFER_START_WITH_SRP|CBUFFER_END|UNITY_SETUP_INSTANCE_ID|UNITY_TRANSFER_INSTANCE_ID|UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO|UNITY_TRANSFER_VERTEX_OUTPUT_STEREO|UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX|UNITY_BRANCH|UNITY_FLATTEN|UNITY_UNROLL|UNITY_LOOP)\\b"
+        },
+        {
+          "name": "constant.language.unity.matrix",
+          "match": "\\b(UNITY_MATRIX_MVP|UNITY_MATRIX_MV|UNITY_MATRIX_M|UNITY_MATRIX_V|UNITY_MATRIX_P|UNITY_MATRIX_VP|UNITY_MATRIX_I_M|UNITY_MATRIX_I_V|UNITY_MATRIX_I_P|UNITY_MATRIX_I_VP|UNITY_MATRIX_T_MV|UNITY_MATRIX_IT_MV|UNITY_PREV_MATRIX_M|UNITY_PREV_MATRIX_I_M)\\b"
+        }
+      ]
+    },
+    "hlsl-builtins": {
+      "patterns": [
+        {
+          "name": "support.function.intrinsic.hlsl",
+          "match": "\\b(abs|acos|all|any|asin|atan|atan2|ceil|clamp|clip|cos|cosh|cross|ddx|ddy|degrees|determinant|distance|dot|exp|exp2|faceforward|floor|fmod|frac|fwidth|isfinite|isinf|isnan|ldexp|length|lerp|lit|log|log10|log2|mad|max|min|modf|mul|noise|normalize|pow|radians|rcp|reflect|refract|round|rsqrt|saturate|sign|sin|sincos|sinh|smoothstep|sqrt|step|tan|tanh|tex1D|tex2D|tex2Dlod|tex2Dbias|tex2Dgrad|tex3D|texCUBE|transpose|trunc|InterlockedAdd|InterlockedMin|InterlockedMax|InterlockedAnd|InterlockedOr|InterlockedXor|InterlockedCompareStore|InterlockedCompareExchange|InterlockedExchange|GroupMemoryBarrier|GroupMemoryBarrierWithGroupSync|DeviceMemoryBarrier|DeviceMemoryBarrierWithGroupSync|AllMemoryBarrier|AllMemoryBarrierWithGroupSync|TransformObjectToHClip|TransformObjectToWorld|TransformWorldToHClip|TransformObjectToWorldNormal|TransformWorldToView|TransformWorldToObject|GetVertexPositionInputs|GetVertexNormalInputs|GetCameraPositionWS|GetMainLight|GetAdditionalLight|GetAdditionalLightsCount|UniversalFragmentPBR|UniversalFragmentBlinnPhong|LightingLambert|LightingSpecular|ComputeScreenPos|ComputeFogFactor|MixFog|Sample|SampleLevel|SampleBias|SampleGrad|SampleCmp|SampleCmpLevelZero|Load|GetDimensions)\\b"
+        }
+      ]
+    },
+    "shader-property-identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.property.unity",
+          "match": "\\b_[A-Za-z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "function-calls": {
+      "patterns": [
+        {
+          "name": "entity.name.function.hlsl",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+        }
+      ]
     },
     "numbers": {
-      "name": "constant.numeric.shaderlab",
-      "match": "\\b(?:0x[0-9a-fA-F]+|[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?[fFhH]?)\\b"
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.hlsl",
+          "match": "\\b0[xX][0-9a-fA-F]+[uUlL]*\\b"
+        },
+        {
+          "name": "constant.numeric.float.hlsl",
+          "match": "\\b(?:[0-9]+\\.[0-9]*|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?[fFhH]?\\b|\\b[0-9]+(?:[eE][+-]?[0-9]+[fFhH]?|[fFhH]|[uUlL]+)?\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.hlsl",
+          "match": "(\\+\\+|--|==|!=|<=|>=|&&|\\|\\||<<|>>|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|[+\\-*/%&|^~!<>?:=])"
+        }
+      ]
     }
   }
 }

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "overallStatus": "completed",
-  "currentStepId": "6-3",
-  "lastUpdatedAt": "2026-11-16T03:10:00+09:00",
+  "overallStatus": "in_progress",
+  "currentStepId": "7-2",
+  "lastUpdatedAt": "2026-11-16T13:02:24.166Z",
   "steps": [
     {
       "id": "1-1",
@@ -535,6 +535,111 @@
         "node tools/cli.mjs package:vsix"
       ],
       "resumeNote": "Step 6-3 완료: extension.ts/package.json/tmLanguage/E2E/UnityBrain.sln 통합, Node/TS 31/31 + Analyzers 16/16 + Daemon 5/5 테스트 및 dist/unitybrain-0.1.0.vsix(315 entries, 5403433 bytes) 패키징 통과"
+    },
+    {
+      "id": "7-1",
+      "phase": 7,
+      "name": "Shader Highlighting Precision, Preprocessor Dimming, Reverse Include Graph & Editor Providers",
+      "status": "completed",
+      "optional": false,
+      "startedAt": "2026-11-16T12:54:19.634Z",
+      "completedAt": "2026-11-16T13:02:24.166Z",
+      "targetFiles": [
+        "node_modules/vscode/index.mjs",
+        "node_modules/vscode/index.d.ts",
+        "packages/extension/syntaxes/unity-shaderlab.tmLanguage.json",
+        "packages/shader-lsp/src/indexer/hlslIncludeGraph.ts",
+        "packages/extension/src/shader/shaderKeywordContextStatusBar.ts",
+        "packages/extension/src/extension.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs typecheck",
+        "node tools/cli.mjs test"
+      ],
+      "resumeNote": "Step 7-1 완료: TextMate/Semantic Highlighting 정밀화, 비활성 전처리기 Dimming, Reverse Include Graph, DocumentSymbol/SignatureHelp/Highlight/Reference Provider 추가 (34/34 통과)"
+    },
+    {
+      "id": "7-2",
+      "phase": 7,
+      "name": "HLSL Parser Upgrade (Multi-Pass Scope, Constants, Multi-Var, Arrays, Loop Vars, Expression Chaining, CBUFFER Priority)",
+      "status": "in_progress",
+      "optional": false,
+      "startedAt": "2026-11-16T13:02:24.166Z",
+      "completedAt": null,
+      "targetFiles": [
+        "packages/shader-lsp/src/parser/unityHlslMacroPrepass.ts",
+        "packages/shader-lsp/src/indexer/hlslSymbolTable.ts",
+        "packages/shader-lsp/src/indexer/hlslIncludeGraph.ts",
+        "packages/shader-lsp/src/providers/definitionProvider.ts",
+        "packages/shader-lsp/src/providers/hoverProvider.ts",
+        "packages/shader-lsp/src/providers/completionProvider.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs typecheck",
+        "node tools/cli.mjs build:lsp",
+        "node tools/cli.mjs test"
+      ],
+      "resumeNote": "Step 7-1 완료 후 HLSL 파서 다중 Pass 격리/체이닝/CBUFFER 우선순위 구현 예정"
+    },
+    {
+      "id": "7-3",
+      "phase": 7,
+      "name": "C# Event Function CodeLens & Full API DB, String Completion Fixes & New Contexts, VS Code CodeActionProvider Bridge",
+      "status": "pending",
+      "optional": false,
+      "startedAt": null,
+      "completedAt": null,
+      "targetFiles": [
+        "tools/api-extractor/test/fixtures/sample-api.xml",
+        "packages/extension/resources/unity-api.json",
+        "packages/extension/src/completion/unityEventGenerator.ts",
+        "packages/extension/src/codelens/unityAssetUsageCodeLensProvider.ts",
+        "packages/extension/src/watchers/projectSettingsWatcher.ts",
+        "packages/extension/src/completion/unityStringCompletionProvider.ts",
+        "packages/extension/src/analyzers/csharpCodeActionProvider.ts",
+        "packages/extension/src/extension.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs extract:api",
+        "node tools/cli.mjs typecheck",
+        "node tools/cli.mjs test"
+      ],
+      "resumeNote": "Step 7-2 완료 후 C# 이벤트 CodeLens, API DB 확장, 문자열 완성 개선, CodeActionProvider 브리지 구현 예정"
+    },
+    {
+      "id": "7-4",
+      "phase": 7,
+      "name": "Roslyn Analyzer Fixes, Real-Time YAML Asset Watcher, Prefab Override Resolution & Meta Sync Hardening",
+      "status": "pending",
+      "optional": false,
+      "startedAt": null,
+      "completedAt": null,
+      "targetFiles": [
+        "analyzers/UnityBrain.Analyzers/CallGraph/PerformanceCriticalContextAnalyzer.cs",
+        "analyzers/UnityBrain.Analyzers/CodeFixes/CacheComponentInAwakeCodeFixProvider.cs",
+        "analyzers/UnityBrain.Analyzers/Diagnostics/BurstCompileAnalyzer.cs",
+        "analyzers/UnityBrain.Analyzers/Diagnostics/UnityStringValidationAnalyzer.cs",
+        "packages/unity-daemon/Indexing/UnityYamlStreamParser.cs",
+        "packages/unity-daemon/Cache/BinaryIndexCache.cs",
+        "packages/extension/src/meta/metaFileSyncManager.ts",
+        "packages/extension/src/extension.ts",
+        "packages/extension/package.json"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs typecheck",
+        "node tools/cli.mjs build:analyzers",
+        "node tools/cli.mjs build:daemon",
+        "node tools/cli.mjs build:lsp",
+        "node tools/cli.mjs build:extension",
+        "node tools/cli.mjs test",
+        "dotnet test UnityBrain.sln -nodeReuse:false -p:UseSharedCompilation=false -m:1",
+        "node tools/cli.mjs package:vsix"
+      ],
+      "resumeNote": "Step 7-3 완료 후 Roslyn 분석기/데몬 Prefab Override/.meta 정리 및 전체 패키징 검증 예정"
     }
   ]
 }

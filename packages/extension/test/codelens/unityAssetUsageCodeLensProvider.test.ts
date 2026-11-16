@@ -179,14 +179,14 @@ describe('UnityAssetUsageCodeLensProvider', () => {
 
       const classLens = lenses.find((l) => l.range.start.line === 2);
       expect(classLens?.command?.title).toBe(
-        '$(symbol-reference) 3 Asset Usages (2 Scenes, 1 Prefab)',
+        '$(symbol-reference) [UnityBrain] 에셋 참조 3곳 (씬 2개, 프리팹 1개)',
       );
 
       const fieldLens = lenses.find((l) => l.range.start.line === 5);
-      expect(fieldLens?.command?.title).toContain('Inspector: 8.5 (MainMenu), 12 (Hero)');
+      expect(fieldLens?.command?.title).toContain('[UnityBrain] 인스펙터 값: 8.5 (MainMenu), 12 (Hero)');
 
       const methodLens = lenses.find((l) => l.range.start.line === 7);
-      expect(methodLens?.command?.title).toBe('$(zap) 1 Event Callback');
+      expect(methodLens?.command?.title).toBe('$(zap) [UnityBrain] 이벤트 콜백 1곳');
 
       await vscode.commands.executeCommand(
         classLens!.command!.command,

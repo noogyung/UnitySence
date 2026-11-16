@@ -35,7 +35,7 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
 
         context.RegisterCodeFix(
             CodeAction.Create(
-                title: $"Cache {typeArg} component in Awake()",
+                title: $"[UnityBrain] Awake()에서 {typeArg} 컴포넌트 캐싱하기",
                 createChangedDocument: ct => CacheComponentAsync(context.Document, invocation, typeArg, ct),
                 equivalenceKey: nameof(CacheComponentInAwakeCodeFixProvider)),
             diag);

@@ -89,7 +89,7 @@ export function createShaderLanguageServer(
         },
         source: 'unitybrain-shader-lsp',
         code: 'UB-SHADER-001',
-        message: `Unresolved Unity #include path: "${u.includePath}"`,
+        message: `[UnityBrain] 해석할 수 없는 유니티 셰이더 include 경로입니다: "${u.includePath}"`,
       }));
     void connection.sendDiagnostics({ uri: doc.uri, diagnostics });
   };

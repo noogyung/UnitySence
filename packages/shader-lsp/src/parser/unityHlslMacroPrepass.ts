@@ -140,6 +140,54 @@ export const UNITY_BUILTIN_MACROS: readonly UnityMacroSpec[] = [
     description: 'Declares stereoTargetEyeIndex field for single-pass instanced VR.',
     pipeline: 'CoreRP',
   },
+  {
+    name: 'UNITY_DECLARE_TEX2D',
+    signature: 'UNITY_DECLARE_TEX2D(tex)',
+    description: 'Legacy Built-in RP macro declaring both Texture2D and SamplerState.',
+    pipeline: 'Built-in',
+  },
+  {
+    name: 'UNITY_DECLARE_TEX2DARRAY',
+    signature: 'UNITY_DECLARE_TEX2DARRAY(tex)',
+    description: 'Legacy Built-in RP macro declaring Texture2DArray and SamplerState.',
+    pipeline: 'Built-in',
+  },
+  {
+    name: 'UNITY_DECLARE_TEXCUBE',
+    signature: 'UNITY_DECLARE_TEXCUBE(tex)',
+    description: 'Legacy Built-in RP macro declaring TextureCube and SamplerState.',
+    pipeline: 'Built-in',
+  },
+  {
+    name: 'UNITY_DECLARE_SCREENSPACE_TEXTURE',
+    signature: 'UNITY_DECLARE_SCREENSPACE_TEXTURE(tex)',
+    description: 'Declares XR/Single-Pass stereo-compatible screen space texture.',
+    pipeline: 'Built-in',
+  },
+  {
+    name: 'UNITY_SAMPLE_TEX2D',
+    signature: 'UNITY_SAMPLE_TEX2D(tex, coord)',
+    description: 'Samples a UNITY_DECLARE_TEX2D texture using its paired sampler.',
+    pipeline: 'Built-in',
+  },
+  {
+    name: 'UNITY_SAMPLE_TEX2D_SAMPLER',
+    signature: 'UNITY_SAMPLE_TEX2D_SAMPLER(tex, samplertex, coord)',
+    description: 'Samples a UNITY_DECLARE_TEX2D texture using another texture sampler.',
+    pipeline: 'Built-in',
+  },
+  {
+    name: 'TEXTURE2D_SHADOW_PARAM',
+    signature: 'TEXTURE2D_SHADOW_PARAM(shadowMap, sampler_shadowMap)',
+    description: 'Expands into Texture2D and SamplerComparisonState parameters.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'TEXTURE2D_SHADOW_ARGS',
+    signature: 'TEXTURE2D_SHADOW_ARGS(shadowMap, sampler_shadowMap)',
+    description: 'Forwards shadow Texture2D and SamplerComparisonState arguments.',
+    pipeline: 'CoreRP',
+  },
 ];
 
 export interface MacroPrepassResult {
@@ -168,7 +216,7 @@ export class UnityHlslMacroPrepass {
       let normalized = line;
 
       const texMatch =
-        /^(\s*)(TEXTURE2D(?:_X|_ARRAY|_SHADOW|_FLOAT|_HALF)?|TEXTURE3D|TEXTURECUBE(?:_ARRAY)?)\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;(.*)$/.exec(
+        /^(\s*)(TEXTURE2D(?:_X|_ARRAY|_SHADOW|_FLOAT|_HALF)?|TEXTURE3D|TEXTURECUBE(?:_ARRAY)?|UNITY_DECLARE_TEX2D(?:_NOSAMPLER|_ARRAY|ARRAY)?|UNITY_DECLARE_TEXCUBE|UNITY_DECLARE_SCREENSPACE_TEXTURE)\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;(.*)$/.exec(
           line,
         );
       if (texMatch) {
@@ -176,11 +224,15 @@ export class UnityHlslMacroPrepass {
         const typeMap: Record<string, string> = {
           TEXTURE3D: 'Texture3D',
           TEXTURECUBE: 'TextureCube',
+          UNITY_DECLARE_TEXCUBE: 'TextureCube',
           TEXTURECUBE_ARRAY: 'TextureCubeArray',
           TEXTURE2D_ARRAY: 'Texture2DArray',
+          UNITY_DECLARE_TEX2DARRAY: 'Texture2DArray',
+          UNITY_DECLARE_TEX2D_ARRAY: 'Texture2DArray',
         };
         const hlslType = typeMap[macroName] ?? 'Texture2D';
-        normalized = `${indent}${hlslType} ${texName};${trailing}`;
+        const needsLegacySampler =
+          macroName.startsWith('UNITY_DECLARE_') && !macroName.endsWith('_NOSAMPLER');
         const col = line.indexOf(texName);
         synthesizedSymbols.push({
           name: texName,
@@ -192,6 +244,22 @@ export class UnityHlslMacroPrepass {
           line: i,
           column: col >= 0 ? col : 0,
         });
+        if (needsLegacySampler) {
+          const smpName = `sampler${texName}`;
+          synthesizedSymbols.push({
+            name: smpName,
+            kind: 'variable',
+            returnType: 'SamplerState',
+            signature: `SamplerState ${smpName}`,
+            documentation: `Paired sampler synthesized from ${macroName}(${texName})`,
+            uri: fileUri,
+            line: i,
+            column: col >= 0 ? col : 0,
+          });
+          normalized = `${indent}${hlslType} ${texName}; SamplerState ${smpName};${trailing}`;
+        } else {
+          normalized = `${indent}${hlslType} ${texName};${trailing}`;
+        }
         outLines.push(hasCr ? `${normalized}\r` : normalized);
         continue;
       }
@@ -216,7 +284,7 @@ export class UnityHlslMacroPrepass {
       }
 
       const cbStartMatch =
-        /^(\s*)(?:CBUFFER_START|UNITY_INSTANCING_BUFFER_START)\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)(.*)$/.exec(
+        /^(\s*)(?:CBUFFER_START(?:_WITH_SRP)?|UNITY_INSTANCING_BUFFER_START)\(\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s*,\s*[^)]*)?\)\s*(.*)$/.exec(
           line,
         );
       if (cbStartMatch) {
@@ -272,7 +340,11 @@ export class UnityHlslMacroPrepass {
           'Texture2D $1, SamplerState $2',
         )
         .replace(
-          /\bTEXTURE2D_ARGS\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g,
+          /\bTEXTURE2D_SHADOW_PARAM\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g,
+          'Texture2D $1, SamplerComparisonState $2',
+        )
+        .replace(
+          /\b(?:TEXTURE2D_ARGS|TEXTURE2D_SHADOW_ARGS)\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g,
           '$1, $2',
         )
         .replace(/\bhalf([234](?:x[234])?)?\b/g, 'float$1')

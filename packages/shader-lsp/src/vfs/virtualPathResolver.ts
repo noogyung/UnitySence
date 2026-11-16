@@ -43,6 +43,7 @@ export class UnityVirtualPathResolver {
   private packageMap: Map<string, ResolvedPackageEntry> = new Map();
   private manifestSignature = '';
   private lockSignature = '';
+  private packageCacheSignature = '';
   private embeddedFolderByPkgName: Map<string, string> = new Map();
 
   constructor(context: UnityProjectContext) {
@@ -59,6 +60,7 @@ export class UnityVirtualPathResolver {
   public invalidateCache(): void {
     this.manifestSignature = '';
     this.lockSignature = '';
+    this.packageCacheSignature = '';
     this.packageMap.clear();
     this.embeddedFolderByPkgName.clear();
   }
@@ -80,6 +82,19 @@ export class UnityVirtualPathResolver {
     }
   }
 
+  private getDirectorySignature(dirPath: string): string {
+    if (!dirPath || !fs.existsSync(dirPath)) {
+      return 'missing';
+    }
+    try {
+      const st = fs.statSync(dirPath);
+      const count = fs.readdirSync(dirPath).length;
+      return `${st.mtimeMs}:${count}`;
+    } catch {
+      return 'error';
+    }
+  }
+
   private detectLockPath(): string | null {
     if (this.context.packagesLockPath && fs.existsSync(this.context.packagesLockPath)) {
       return this.context.packagesLockPath;
@@ -96,13 +111,22 @@ export class UnityVirtualPathResolver {
     const lockPath = this.detectLockPath();
     const curManifestSig = this.getFileSignature(this.context.manifestPath);
     const curLockSig = this.getFileSignature(lockPath);
+    const curCacheSig = this.getDirectorySignature(
+      path.join(this.context.projectRoot, 'Library', 'PackageCache'),
+    );
 
-    if (!force && curManifestSig === this.manifestSignature && curLockSig === this.lockSignature) {
+    if (
+      !force &&
+      curManifestSig === this.manifestSignature &&
+      curLockSig === this.lockSignature &&
+      curCacheSig === this.packageCacheSignature
+    ) {
       return this.packageMap;
     }
 
     this.manifestSignature = curManifestSig;
     this.lockSignature = curLockSig;
+    this.packageCacheSignature = curCacheSig;
     this.packageMap.clear();
     this.embeddedFolderByPkgName.clear();
     this.scanEmbeddedPackages();
@@ -215,6 +239,8 @@ export class UnityVirtualPathResolver {
       return null;
     }
 
+    const cacheRoot = path.join(this.context.projectRoot, 'Library', 'PackageCache');
+
     if (rawSource === 'builtin') {
       if (this.context.builtInPackagesPath) {
         const target = path.join(this.context.builtInPackagesPath, pkgName);
@@ -222,11 +248,29 @@ export class UnityVirtualPathResolver {
           return { packageName: pkgName, version, source: 'builtin', physicalRoot: target };
         }
       }
+      if (version) {
+        const exactDir = path.join(cacheRoot, `${pkgName}@${version}`);
+        if (fs.existsSync(exactDir)) {
+          return { packageName: pkgName, version, source: 'builtin', physicalRoot: exactDir };
+        }
+      }
+      const fallbackDir = this.findPackageCacheFallback(cacheRoot, pkgName);
+      if (fallbackDir) {
+        return {
+          packageName: pkgName,
+          version: version || 'cached',
+          source: 'packageCacheFallback',
+          physicalRoot: fallbackDir,
+        };
+      }
+      const directCacheDir = path.join(cacheRoot, pkgName);
+      if (fs.existsSync(directCacheDir)) {
+        return { packageName: pkgName, version, source: 'builtin', physicalRoot: directCacheDir };
+      }
       return null;
     }
 
     const source: PackageResolutionSource = rawSource === 'git' ? 'git' : 'registry';
-    const cacheRoot = path.join(this.context.projectRoot, 'Library', 'PackageCache');
     if (version) {
       const exactDir = path.join(cacheRoot, `${pkgName}@${version}`);
       if (fs.existsSync(exactDir)) {

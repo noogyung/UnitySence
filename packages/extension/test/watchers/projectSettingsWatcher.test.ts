@@ -73,10 +73,8 @@ describe('ProjectSettingsWatcher', () => {
     expect(ctrl.parameters).toContainEqual({ name: 'Attack', type: 'Trigger' });
     expect(ctrl.states).toEqual(['Idle', 'Run', 'Jump']);
 
-    const jsonPath = path.join(TEMP_CACHE_DIR, 'project-settings.json');
-    expect(fs.existsSync(jsonPath)).toBe(true);
-    const onDisk = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-    expect(onDisk.tags).toEqual(cache.tags);
+    // ProjectSettings 원본을 메모리로만 읽으며 디스크에 중복 캐시를 쓰지 않아야 함
+    expect(fs.existsSync(TEMP_CACHE_DIR)).toBe(false);
     watcher.dispose();
   });
 });

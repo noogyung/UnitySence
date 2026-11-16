@@ -378,9 +378,6 @@ export class ProjectSettingsWatcher implements vscode.Disposable {
       animatorControllers,
     };
 
-    fs.mkdirSync(this.context.cacheDir, { recursive: true });
-    const cacheFile = path.join(this.context.cacheDir, 'project-settings.json');
-    fs.writeFileSync(cacheFile, JSON.stringify(this.cache, null, 2), 'utf8');
     this._onDidUpdateCache.fire(this.cache);
 
     return this.cache;

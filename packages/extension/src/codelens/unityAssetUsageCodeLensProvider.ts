@@ -366,10 +366,10 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
         new vscode.CodeLens(range, {
           title: classTitle,
           command: 'unityBrain.showAssetUsages',
-          tooltip: 'Click to browse all Unity Scenes, Prefabs, and Assets referencing this script',
+          tooltip: '[UnityBrain] 클릭하여 이 스크립트를 참조하는 유니티 씬/프리팹/에셋 목록으로 이동합니다',
           arguments: [
             {
-              title: `${cls.className} Asset Usages`,
+              title: `[UnityBrain] ${cls.className} 에셋 참조 위치`,
               projectRoot: this.projectRoot,
               locations: scriptUsages,
             } satisfies ShowAssetUsagesCommandArgs,
@@ -397,7 +397,7 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
           .slice(0, 3)
           .map((e) => `${e.value} (${path.basename(e.assetPath, path.extname(e.assetPath))})`)
           .join(', ');
-        const suffix = entries.length > 3 ? ` +${entries.length - 3} more` : '';
+        const suffix = entries.length > 3 ? ` 외 ${entries.length - 3}곳` : '';
         const fieldLocations: AssetUsageLocation[] = entries.map((e) => ({
           assetPath: e.assetPath,
           assetType: e.assetType,
@@ -412,12 +412,12 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
         const range = new vscode.Range(field.line, 0, field.line, 0);
         lenses.push(
           new vscode.CodeLens(range, {
-            title: `$(settings-gear) Inspector: ${preview}${suffix}`,
+            title: `$(settings-gear) [UnityBrain] 인스펙터 값: ${preview}${suffix}`,
             command: 'unityBrain.showAssetUsages',
-            tooltip: `Serialized values for '${field.fieldName}' across Unity assets`,
+            tooltip: `[UnityBrain] 유니티 에셋에 직렬화된 '${field.fieldName}' 필드 값 보기`,
             arguments: [
               {
-                title: `${primaryClass}.${field.fieldName} Inspector Values`,
+                title: `[UnityBrain] ${primaryClass}.${field.fieldName} 인스펙터 직렬화 값`,
                 projectRoot: this.projectRoot,
                 locations: fieldLocations,
               } satisfies ShowAssetUsagesCommandArgs,
@@ -448,12 +448,12 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
       const count = item.locations.length;
       lenses.push(
         new vscode.CodeLens(range, {
-          title: `$(zap) ${count} Event Callback${count === 1 ? '' : 's'}`,
+          title: `$(zap) [UnityBrain] 이벤트 콜백 ${count}곳`,
           command: 'unityBrain.showAssetUsages',
-          tooltip: `UnityEvent bindings targeting ${item.method.methodName}()`,
+          tooltip: `[UnityBrain] ${item.method.methodName}()를 호출하는 UnityEvent 바인딩 보기`,
           arguments: [
             {
-              title: `${primaryClass}.${item.method.methodName}() Event Callbacks`,
+              title: `[UnityBrain] ${primaryClass}.${item.method.methodName}() 이벤트 콜백 목록`,
               projectRoot: this.projectRoot,
               locations: item.locations,
             } satisfies ShowAssetUsagesCommandArgs,
@@ -467,7 +467,7 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
 
   private formatClassUsageSummary(locations: AssetUsageLocation[]): string {
     if (locations.length === 0) {
-      return '$(symbol-reference) 0 Asset Usages';
+      return '$(symbol-reference) [UnityBrain] 에셋 참조 0곳';
     }
 
     let scenes = 0;
@@ -480,13 +480,12 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
     }
 
     const parts: string[] = [];
-    if (scenes > 0) parts.push(`${scenes} Scene${scenes === 1 ? '' : 's'}`);
-    if (prefabs > 0) parts.push(`${prefabs} Prefab${prefabs === 1 ? '' : 's'}`);
-    if (assets > 0) parts.push(`${assets} Asset${assets === 1 ? '' : 's'}`);
+    if (scenes > 0) parts.push(`씬 ${scenes}개`);
+    if (prefabs > 0) parts.push(`프리팹 ${prefabs}개`);
+    if (assets > 0) parts.push(`에셋 ${assets}개`);
 
     const total = locations.length;
-    const noun = total === 1 ? 'Asset Usage' : 'Asset Usages';
-    return `$(symbol-reference) ${total} ${noun} (${parts.join(', ')})`;
+    return `$(symbol-reference) [UnityBrain] 에셋 참조 ${total}곳 (${parts.join(', ')})`;
   }
 
   public dispose(): void {
@@ -501,7 +500,7 @@ export function registerShowAssetUsagesCommand(defaultProjectRoot: string): vsco
     const root = args?.projectRoot ?? defaultProjectRoot;
 
     if (locations.length === 0) {
-      await vscode.window.showInformationMessage('No Unity asset usages found for this symbol.');
+      await vscode.window.showInformationMessage('[UnityBrain] 이 심볼을 참조하는 유니티 씬/프리팹/에셋이 없습니다.');
       return undefined;
     }
 
@@ -513,15 +512,15 @@ export function registerShowAssetUsagesCommand(defaultProjectRoot: string): vsco
       label: `${loc.assetPath}:${loc.line}`,
       description: loc.gameObjectPath,
       detail: loc.methodName
-        ? `UnityEvent -> ${loc.methodName}()`
+        ? `[UnityBrain] UnityEvent 콜백 -> ${loc.methodName}()`
         : loc.usageKind === 'prefabOverride'
-          ? 'PrefabInstance Override'
-          : `Component usage (${loc.assetType})`,
+          ? '[UnityBrain] 프리팹 오버라이드'
+          : `[UnityBrain] 컴포넌트 참조 (${loc.assetType})`,
       location: loc,
     }));
 
     const picked = await vscode.window.showQuickPick<UsageQuickPickItem>(items, {
-      placeHolder: args?.title ?? 'Select Unity asset usage to inspect',
+      placeHolder: args?.title ?? '[UnityBrain] 이동할 유니티 에셋 참조 위치를 선택하세요',
     });
 
     const selected = Array.isArray(picked) ? picked[0] : picked;

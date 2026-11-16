@@ -45,14 +45,14 @@ export class ShaderHoverProvider {
         return {
           contents: {
             kind: MarkupKind.Markdown,
-            value: `**Include**: \`${inc.rawPath}\`\n\nResolved via \`${mapped.resolvedVia}\`:\n\`${mapped.physicalPath}\``,
+            value: `**[UnityBrain] 셰이더 인클루드 경로**: \`${inc.rawPath}\`\n\n해석 방식(\`${mapped.resolvedVia}\`):\n\`${mapped.physicalPath}\``,
           },
         };
       }
       return {
         contents: {
           kind: MarkupKind.Markdown,
-          value: `**Unresolved Include**: \`${inc.rawPath}\``,
+          value: `**[UnityBrain] 미해석 셰이더 인클루드**: \`${inc.rawPath}\``,
         },
       };
     }
@@ -65,7 +65,7 @@ export class ShaderHoverProvider {
       return {
         contents: {
           kind: MarkupKind.Markdown,
-          value: `Shader Keyword \`${kw}\`: **${enabled ? 'ACTIVE' : 'INACTIVE'}** in current keyword context.`,
+          value: `**[UnityBrain] 셰이더 키워드** \`${kw}\`: 현재 컨텍스트에서 **${enabled ? '활성(ACTIVE)' : '비활성(INACTIVE)'}** 상태입니다.`,
         },
       };
     }
@@ -88,11 +88,29 @@ export class ShaderHoverProvider {
             return {
               contents: {
                 kind: MarkupKind.Markdown,
-                value: `\`\`\`hlsl\n${field.signature ?? `${field.returnType ?? ''} ${field.name}`}\n\`\`\`\n\nMember of \`${cleanType}\`\n\nDeclared in \`${declaredIn}\``,
+                value: `\`\`\`hlsl\n${field.signature ?? `${field.returnType ?? ''} ${field.name}`}\n\`\`\`\n\n**[UnityBrain]** 구조체 \`${cleanType}\`의 멤버\n\n선언 위치: \`${declaredIn}\``,
               },
             };
           }
         }
+      }
+    }
+
+    // 3-2. Local variables & function parameters in enclosing scope
+    if (!(span.start > 0 && lineText[span.start - 1] === '.')) {
+      const scope = parsed.localVarScopes.find(
+        (sc) => position.line >= sc.startLine && position.line <= sc.endLine && sc.declarations.has(word),
+      );
+      const localDecl = scope?.declarations.get(word);
+      if (localDecl) {
+        const declaredIn = this.formatVirtualLocation(parsed.uri, projectRoot);
+        const roleLabel = localDecl.kind === 'parameter' ? '함수 파라미터' : '로컬 변수';
+        return {
+          contents: {
+            kind: MarkupKind.Markdown,
+            value: `\`\`\`hlsl\n${localDecl.signature}\n\`\`\`\n\n**[UnityBrain]** ${roleLabel}\n\n선언 위치: \`${declaredIn}:${localDecl.line + 1}\``,
+          },
+        };
       }
     }
 
@@ -107,7 +125,7 @@ export class ShaderHoverProvider {
       if (sym.documentation) {
         parts.push(sym.documentation);
       }
-      parts.push(`Declared in \`${declaredIn}\``);
+      parts.push(`**[UnityBrain]** 선언 위치: \`${declaredIn}\``);
       return {
         contents: {
           kind: MarkupKind.Markdown,
@@ -122,7 +140,7 @@ export class ShaderHoverProvider {
       return {
         contents: {
           kind: MarkupKind.Markdown,
-          value: `\`\`\`hlsl\n${builtin.signature}\n\`\`\`\n\n${builtin.description} (*${builtin.pipeline}*)`,
+          value: `\`\`\`hlsl\n${builtin.signature}\n\`\`\`\n\n**[UnityBrain]** ${builtin.description} (*${builtin.pipeline}*)`,
         },
       };
     }
