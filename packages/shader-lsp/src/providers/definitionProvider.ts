@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import type { Location, Position } from 'vscode-languageserver';
-import { IncludeDependencyGraph } from '../indexer/hlslIncludeGraph.ts';
+import {
+  extractMemberChainExpression,
+  IncludeDependencyGraph,
+} from '../indexer/hlslIncludeGraph.ts';
 
 export class ShaderDefinitionProvider {
   private readonly graph: IncludeDependencyGraph;
@@ -54,7 +57,7 @@ export class ShaderDefinitionProvider {
         position.character <= ep.column + ep.name.length,
     );
     if (pragmaEntry) {
-      const hits = this.graph.findSymbolsVisibleFrom(filePath, pragmaEntry.name);
+      const hits = this.graph.findSymbolsVisibleFrom(filePath, pragmaEntry.name, position.line);
       return hits.map((s) => ({
         uri: s.uri,
         range: {
@@ -68,41 +71,36 @@ export class ShaderDefinitionProvider {
     if (!wordSpan) return [];
     const word = wordSpan.word;
 
-    // Case C: Member access (e.g. data.normalWS, input.positionOS.xyz)
-    if (wordSpan.start > 0 && lineText[wordSpan.start - 1] === '.') {
-      const baseIdentMatch = /([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*$/.exec(
-        lineText.slice(0, wordSpan.start),
-      );
-      if (baseIdentMatch) {
-        const baseName = baseIdentMatch[1];
-        const varType = this.graph.inferVariableType(filePath, baseName, position.line);
-        if (varType) {
-          const cleanType = varType.replace(/<.*>$/, '').trim();
-          const fields = this.graph.findStructFields(filePath, cleanType);
-          const matchedField = fields.find((f) => f.name === word);
-          if (matchedField) {
-            return [
-              {
-                uri: matchedField.uri,
-                range: {
-                  start: { line: matchedField.line, character: matchedField.column },
-                  end: { line: matchedField.line, character: matchedField.column + matchedField.name.length },
+    // Case C: Chained member access (e.g. data.normalWS, a.b.c, _Lights[i].color, GetMainLight().direction)
+    const isMemberAccess = wordSpan.start > 0 && lineText[wordSpan.start - 1] === '.';
+    if (isMemberAccess) {
+      const chainExpr = extractMemberChainExpression(lineText.slice(0, wordSpan.end));
+      if (chainExpr) {
+        const resolved = this.graph.resolveExpressionChain(filePath, chainExpr, position.line);
+        if (resolved.field) {
+          return [
+            {
+              uri: resolved.field.uri,
+              range: {
+                start: { line: resolved.field.line, character: resolved.field.column },
+                end: {
+                  line: resolved.field.line,
+                  character: resolved.field.column + resolved.field.name.length,
                 },
               },
-            ];
-          }
+            },
+          ];
         }
       }
     }
 
     // Case C-2: Function parameters & local variables in enclosing scope
-    const isMemberAccess = wordSpan.start > 0 && lineText[wordSpan.start - 1] === '.';
     if (!isMemberAccess) {
       const scope = parsed.localVarScopes.find(
         (sc) => position.line >= sc.startLine && position.line <= sc.endLine && sc.declarations.has(word),
       );
       const localDecl = scope?.declarations.get(word);
-      if (localDecl) {
+      if (localDecl && position.line >= localDecl.line) {
         return [
           {
             uri: parsed.uri,
@@ -115,8 +113,8 @@ export class ShaderDefinitionProvider {
       }
     }
 
-    // Case D: General symbol lookup (functions, structs, macros, variables, ShaderLab Properties)
-    const symbols = this.graph.findSymbolsVisibleFrom(filePath, word);
+    // Case D: General symbol lookup (Pass-scoped + HLSL CBUFFER/variable prioritized over ShaderLab Properties)
+    const symbols = this.graph.findSymbolsVisibleFrom(filePath, word, position.line);
     if (symbols.length === 0) return [];
 
     // Sort definitions nicely: functions/structs/macros/properties first

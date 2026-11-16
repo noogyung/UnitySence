@@ -1,6 +1,7 @@
 import type { HlslSymbolEntry, ShaderPropertyEntry } from '../../../extension/src/contracts/index.ts';
 import {
   extractVirtualHlslDocument,
+  type ShaderCodeBlock,
   type ShaderPragmaInfo,
 } from '../parser/shaderLabVirtualDoc.ts';
 import { UnityHlslMacroPrepass } from '../parser/unityHlslMacroPrepass.ts';
@@ -22,6 +23,11 @@ export interface LocalVarDeclaration {
   signature: string;
 }
 
+export interface ScopedStructFieldGroup {
+  blockIndex: number;
+  fields: HlslSymbolEntry[];
+}
+
 export interface ParsedHlslFile {
   uri: string;
   filePath: string;
@@ -31,6 +37,8 @@ export interface ParsedHlslFile {
   properties: ShaderPropertyEntry[];
   pragmas: ShaderPragmaInfo;
   structFieldsByStruct: Map<string, HlslSymbolEntry[]>;
+  scopedStructFields?: Map<string, ScopedStructFieldGroup[]>;
+  blocks?: ShaderCodeBlock[];
   localVarScopes: Array<{
     startLine: number;
     endLine: number;
@@ -38,6 +46,81 @@ export interface ParsedHlslFile {
     declarations: Map<string, LocalVarDeclaration>;
   }>;
   virtualHlsl: string;
+}
+
+export function findBlockIndexAtLine(blocks: readonly ShaderCodeBlock[] | undefined, line: number): number {
+  if (!blocks || blocks.length === 0) return -1;
+  for (let i = 0; i < blocks.length; i++) {
+    if (line >= blocks[i].startLine && line <= blocks[i].endLine) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+export function isLineVisibleInPass(
+  blocks: readonly ShaderCodeBlock[] | undefined,
+  symLine: number,
+  cursorLine: number | undefined,
+): boolean {
+  if (cursorLine === undefined || !blocks || blocks.length <= 1) return true;
+  const cursorBlk = findBlockIndexAtLine(blocks, cursorLine);
+  const symBlk = findBlockIndexAtLine(blocks, symLine);
+  if (cursorBlk < 0 || symBlk < 0) return true;
+  if (symBlk === cursorBlk) return true;
+  return blocks[cursorBlk].includeBlockIndices.includes(symBlk);
+}
+
+function splitTopLevelCommas(text: string): Array<{ segment: string; offset: number }> {
+  const out: Array<{ segment: string; offset: number }> = [];
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '(') parenDepth++;
+    else if (ch === ')' && parenDepth > 0) parenDepth--;
+    else if (ch === '[') bracketDepth++;
+    else if (ch === ']' && bracketDepth > 0) bracketDepth--;
+    else if (ch === '{') braceDepth++;
+    else if (ch === '}' && braceDepth > 0) braceDepth--;
+    else if (ch === ',' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+      out.push({ segment: text.slice(start, i), offset: start });
+      start = i + 1;
+    }
+  }
+  out.push({ segment: text.slice(start), offset: start });
+  return out;
+}
+
+function parseDeclaratorItems(
+  declListText: string,
+  baseType: string,
+): Array<{ name: string; type: string; arraySuffix: string; semantic: string; relOffset: number }> {
+  const items: Array<{ name: string; type: string; arraySuffix: string; semantic: string; relOffset: number }> = [];
+  for (const part of splitTopLevelCommas(declListText)) {
+    const leadWs = part.segment.length - part.segment.trimStart().length;
+    const trimmed = part.segment.trim();
+    if (!trimmed) continue;
+    const beforeEq = trimmed.split('=')[0].trim();
+    const semSplit = beforeEq.split(':');
+    const declPart = semSplit[0].trim();
+    const semantic = semSplit[1] ? semSplit[1].trim() : '';
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*(\[[^\]]*\])?$/.exec(declPart);
+    if (!m) continue;
+    const name = m[1];
+    const arraySuffix = m[2] ? m[2].replace(/\s+/g, '') : '';
+    const nameInSegment = part.segment.indexOf(name, leadWs);
+    items.push({
+      name,
+      type: arraySuffix ? `${baseType}${arraySuffix}` : baseType,
+      arraySuffix,
+      semantic,
+      relOffset: part.offset + (nameInSegment >= 0 ? nameInSegment : leadWs),
+    });
+  }
+  return items;
 }
 
 const CONTROL_KEYWORDS = new Set([
@@ -161,13 +244,18 @@ function parseParameterList(paramStr: string): Array<{ name: string; type: strin
 function extractDefines(lines: string[], rawLines: string[], uri: string): HlslSymbolEntry[] {
   const out: HlslSymbolEntry[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const m = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)(\([^)]*\))?(?:\s+(.*))?$/.exec(line);
+    let joined = lines[i];
+    if (!/^\s*#\s*define\b/.test(joined)) continue;
+    const startLine = i;
+    while (joined.trimEnd().endsWith('\\') && i + 1 < lines.length) {
+      joined = joined.replace(/\\\s*$/, '').trimEnd() + ' ' + lines[++i].trim();
+    }
+    const m = /^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)(\([^)]*\))?(?:\s+(.*))?$/.exec(joined);
     if (!m) continue;
     const name = m[1];
     const params = m[2] ?? '';
     const body = (m[3] ?? '').trim();
-    const origLine = rawLines[i] ?? line;
+    const origLine = rawLines[startLine] ?? lines[startLine];
     const col = origLine.indexOf(name);
     out.push({
       name,
@@ -175,7 +263,7 @@ function extractDefines(lines: string[], rawLines: string[], uri: string): HlslS
       signature: `#define ${name}${params}${body ? ' ' + body : ''}`,
       documentation: body ? `Expands to \`${body}\`` : `Preprocessor macro \`${name}\``,
       uri,
-      line: i,
+      line: startLine,
       column: col >= 0 ? col : 0,
     });
   }
@@ -224,6 +312,7 @@ export function parseHlslSymbols(
   const macroSymbols = extractDefines(cleanOrigLines, rawLines, uri);
   const symbols: HlslSymbolEntry[] = [...macroSymbols, ...prepassRes.synthesizedSymbols];
   const structFieldsByStruct = new Map<string, HlslSymbolEntry[]>();
+  const scopedStructFields = new Map<string, ScopedStructFieldGroup[]>();
   const localVarScopes: ParsedHlslFile['localVarScopes'] = [];
 
   for (const prop of extracted.properties) {
@@ -239,7 +328,7 @@ export function parseHlslSymbols(
     });
   }
 
-  // 1. Parse structs & struct fields
+  // 1. Parse structs & struct fields (isolated per Pass/code block)
   const structRegex = /\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{/g;
   const structRanges: Array<{ start: number; end: number }> = [];
   let sMatch: RegExpExecArray | null;
@@ -264,36 +353,46 @@ export function parseHlslSymbols(
     });
 
     const bodyText = cleanNormalized.slice(openBraceIdx + 1, closeBraceIdx);
-    const fieldRegex = /(?:^|(?<=[;\n]))\s*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*:\s*([A-Za-z0-9_]+))?\s*;/g;
+    const fieldRegex = /(?:^|(?<=[;\n]))\s*([A-Za-z_][A-Za-z0-9_<>]*)\s+([^;{}]+);/g;
     const fieldList: HlslSymbolEntry[] = [];
     let fMatch: RegExpExecArray | null;
     while ((fMatch = fieldRegex.exec(bodyText)) !== null) {
       const fieldType = fMatch[1].trim();
-      const fieldName = fMatch[2].trim();
-      const semantic = fMatch[3] ? ` : ${fMatch[3]}` : '';
-      if (CONTROL_KEYWORDS.has(fieldType)) continue;
+      const declTail = fMatch[2];
+      if (CONTROL_KEYWORDS.has(fieldType) || declTail.includes('(')) continue;
 
-      const relNameIdx = fMatch[0].lastIndexOf(fieldName);
-      const absOffset = openBraceIdx + 1 + fMatch.index + relNameIdx;
-      const fPos = offsetToLineCol(normStarts, absOffset);
-      const origLine = rawLines[fPos.line] ?? '';
-      const origTypeField = (cleanOrigLines[fPos.line] ?? origLine).trim();
-      const col = origLine.indexOf(fieldName);
+      const tailStartInMatch = fMatch[0].indexOf(declTail);
+      const declItems = parseDeclaratorItems(declTail, fieldType);
+      for (const item of declItems) {
+        const absOffset = openBraceIdx + 1 + fMatch.index + tailStartInMatch + item.relOffset;
+        const fPos = offsetToLineCol(normStarts, absOffset);
+        const origLine = rawLines[fPos.line] ?? '';
+        const origTypeField = (cleanOrigLines[fPos.line] ?? origLine).trim();
+        const col = origLine.indexOf(item.name);
+        const semStr = item.semantic ? ` : ${item.semantic}` : '';
 
-      const fieldEntry: HlslSymbolEntry = {
-        name: fieldName,
-        kind: 'field',
-        returnType: fieldType,
-        signature: `${origTypeField.replace(/;.*$/, '') || `${fieldType} ${fieldName}${semantic}`}`,
-        containerName: structName,
-        uri,
-        line: fPos.line,
-        column: col >= 0 ? col : fPos.column,
-      };
-      symbols.push(fieldEntry);
-      fieldList.push(fieldEntry);
+        const fieldEntry: HlslSymbolEntry = {
+          name: item.name,
+          kind: 'field',
+          returnType: item.type,
+          signature: `${origTypeField.replace(/;.*$/, '') || `${item.type} ${item.name}${semStr}`}`,
+          containerName: structName,
+          uri,
+          line: fPos.line,
+          column: col >= 0 ? col : fPos.column,
+        };
+        symbols.push(fieldEntry);
+        fieldList.push(fieldEntry);
+      }
     }
-    structFieldsByStruct.set(structName, fieldList);
+
+    const blockIndex = findBlockIndexAtLine(extracted.blocks, sPos.line);
+    const existingGroups = scopedStructFields.get(structName) ?? [];
+    existingGroups.push({ blockIndex, fields: fieldList });
+    scopedStructFields.set(structName, existingGroups);
+    if (!structFieldsByStruct.has(structName)) {
+      structFieldsByStruct.set(structName, fieldList);
+    }
   }
 
   // 2. Parse cbuffers and variables inside cbuffers
@@ -308,25 +407,29 @@ export function parseHlslSymbols(
 
     const cPos = offsetToLineCol(normStarts, cMatch.index);
     const bodyText = cleanNormalized.slice(openBraceIdx + 1, closeBraceIdx);
-    const varRegex = /(?:^|(?<=[;\n]))\s*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;/g;
+    const varRegex = /(?:^|(?<=[;\n]))\s*(?:(?:static|const|uniform)\s+)*([A-Za-z_][A-Za-z0-9_<>]*)\s+([^;{}]+);/g;
     let vMatch: RegExpExecArray | null;
     while ((vMatch = varRegex.exec(bodyText)) !== null) {
       const vType = vMatch[1].trim();
-      const vName = vMatch[2].trim();
-      const absOffset = openBraceIdx + 1 + vMatch.index + vMatch[0].lastIndexOf(vName);
-      const vPos = offsetToLineCol(normStarts, absOffset);
-      const origLine = rawLines[vPos.line] ?? '';
-      const col = origLine.indexOf(vName);
-      symbols.push({
-        name: vName,
-        kind: 'variable',
-        returnType: vType,
-        signature: `${vType} ${vName}`,
-        containerName: cbName,
-        uri,
-        line: vPos.line,
-        column: col >= 0 ? col : vPos.column,
-      });
+      const declTail = vMatch[2];
+      if (CONTROL_KEYWORDS.has(vType) || declTail.includes('(')) continue;
+      const tailStartInMatch = vMatch[0].indexOf(declTail);
+      for (const item of parseDeclaratorItems(declTail, vType)) {
+        const absOffset = openBraceIdx + 1 + vMatch.index + tailStartInMatch + item.relOffset;
+        const vPos = offsetToLineCol(normStarts, absOffset);
+        const origLine = rawLines[vPos.line] ?? '';
+        const col = origLine.indexOf(item.name);
+        symbols.push({
+          name: item.name,
+          kind: 'variable',
+          returnType: item.type,
+          signature: `${vType} ${item.name}${item.arraySuffix}`,
+          containerName: cbName,
+          uri,
+          line: vPos.line,
+          column: col >= 0 ? col : vPos.column,
+        });
+      }
     }
     if (!symbols.some((s) => s.name === cbName && s.kind === 'cbuffer')) {
       symbols.push({
@@ -340,9 +443,9 @@ export function parseHlslSymbols(
     }
   }
 
-  // 3. Parse functions (definitions & declarations)
+  // 3. Parse functions (definitions & declarations, including multi-line headers & attributes)
   const fnRegex =
-    /(?:^|\n)[ \t]*(?:(?:inline|static|extern)\s+)*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*(?::\s*[A-Za-z0-9_]+)?\s*(\{|;)/g;
+    /(?:^|\n)[ \t]*(?:\[[^\]]*\]\s*)*(?:(?:inline|static|extern)\s+)*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*(?::\s*[A-Za-z0-9_]+)?\s*(\{|;)/g;
   const fnBodyRanges: Array<{ start: number; end: number }> = [];
   let fnMatch: RegExpExecArray | null;
   while ((fnMatch = fnRegex.exec(cleanNormalized)) !== null) {
@@ -362,7 +465,9 @@ export function parseHlslSymbols(
     const fnPos = offsetToLineCol(normStarts, nameOffset);
     const origLine = rawLines[fnPos.line] ?? '';
     const origCleanLine = cleanOrigLines[fnPos.line] ?? origLine;
-    const origReturnMatch = /^\s*(?:(?:inline|static|extern)\s+)*([A-Za-z_][A-Za-z0-9_<>]*)\s+/.exec(origCleanLine);
+    const origReturnMatch = /^\s*(?:\[[^\]]*\]\s*)*(?:(?:inline|static|extern)\s+)*([A-Za-z_][A-Za-z0-9_<>]*)\s+/.exec(
+      origCleanLine,
+    );
     const displayReturn = origReturnMatch ? origReturnMatch[1] : returnType;
     const col = origLine.indexOf(fnName);
 
@@ -400,55 +505,77 @@ export function parseHlslSymbols(
           .trim()
           .replace(/^(?:in|out|inout|uniform|const)\s+/g, '')
           .trim();
-        const pm = /^(.+?)\s+([A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?)$/.exec(cleaned);
+        const pm = /^(.+?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\[[^\]]*\])?$/.exec(cleaned);
         if (!pm) continue;
-        const pType = pm[1].trim();
-        const pName = pm[2].replace(/\[.*$/, '');
+        const arrSuffix = pm[3] ? pm[3].replace(/\s+/g, '') : '';
+        const pType = arrSuffix ? `${pm[1].trim()}${arrSuffix}` : pm[1].trim();
+        const pName = pm[2];
         scopeVars.set(pName, pType);
         const nameInPart = withoutDefault.lastIndexOf(pName);
         const absParamOffset = partStart + (nameInPart >= 0 ? nameInPart : 0);
         const pPos = offsetToLineCol(normStarts, absParamOffset);
         const origParamLine = rawLines[pPos.line] ?? '';
-        const typePosInLine = origParamLine.indexOf(pType);
-        const exactParamCol =
-          typePosInLine >= 0
-            ? origParamLine.indexOf(pName, typePosInLine + pType.length)
-            : origParamLine.indexOf(pName);
+        const paramWordMatch = new RegExp(`\\b${pName}\\b`).exec(origParamLine);
         scopeDecls.set(pName, {
           type: pType,
           line: pPos.line,
-          column: exactParamCol >= 0 ? exactParamCol : pPos.column,
+          column: paramWordMatch ? paramWordMatch.index : pPos.column,
           kind: 'parameter',
           signature: `${pType} ${pName}`,
         });
       }
 
       const bodySlice = cleanNormalized.slice(openBraceIdx + 1, closeBraceIdx);
-      const localVarRegex = /(?:^|;|\n)\s*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)/g;
-      let lvMatch: RegExpExecArray | null;
-      while ((lvMatch = localVarRegex.exec(bodySlice)) !== null) {
-        const lType = lvMatch[1];
-        const lName = lvMatch[2];
-        if (!CONTROL_KEYWORDS.has(lType)) {
-          scopeVars.set(lName, lType);
-          const nameInMatch = lvMatch[0].lastIndexOf(lName);
-          const absVarOffset = openBraceIdx + 1 + lvMatch.index + nameInMatch;
+
+      // Parse `for (int i = 0; ...)` loop header variable declarations
+      const forVarRegex = /\bfor\s*\(\s*(?:const\s+)?([A-Za-z_][A-Za-z0-9_<>]*)\s+([^;)]+);/g;
+      let fvMatch: RegExpExecArray | null;
+      while ((fvMatch = forVarRegex.exec(bodySlice)) !== null) {
+        const lType = fvMatch[1];
+        const declTail = fvMatch[2];
+        if (CONTROL_KEYWORDS.has(lType)) continue;
+        const tailStart = fvMatch[0].indexOf(declTail);
+        for (const item of parseDeclaratorItems(declTail, lType)) {
+          scopeVars.set(item.name, item.type);
+          const absVarOffset = openBraceIdx + 1 + fvMatch.index + tailStart + item.relOffset;
           const lvPos = offsetToLineCol(normStarts, absVarOffset);
           const origVarLine = rawLines[lvPos.line] ?? '';
-          const typePosInLine = origVarLine.indexOf(lType);
-          const exactVarCol =
-            typePosInLine >= 0
-              ? origVarLine.indexOf(lName, typePosInLine + lType.length)
-              : origVarLine.indexOf(lName);
-          scopeDecls.set(lName, {
-            type: lType,
+          const colMatch = new RegExp(`\\b${item.name}\\b`).exec(origVarLine);
+          scopeDecls.set(item.name, {
+            type: item.type,
             line: lvPos.line,
-            column: exactVarCol >= 0 ? exactVarCol : lvPos.column,
+            column: colMatch ? colMatch.index : lvPos.column,
             kind: 'localVariable',
-            signature: `${lType} ${lName}`,
+            signature: `${item.type} ${item.name}`,
           });
         }
       }
+
+      // Parse general local variable declarations (single, array, or comma-separated)
+      const localVarRegex =
+        /(?:^|(?<=[;\n{}]))\s*(?:(?:static|const)\s+)*([A-Za-z_][A-Za-z0-9_<>]*)\s+([^;{}]+);/g;
+      let lvMatch: RegExpExecArray | null;
+      while ((lvMatch = localVarRegex.exec(bodySlice)) !== null) {
+        const lType = lvMatch[1];
+        const declTail = lvMatch[2];
+        if (CONTROL_KEYWORDS.has(lType) || lType === 'return' || lType === 'case') continue;
+        const tailStart = lvMatch[0].indexOf(declTail);
+        for (const item of parseDeclaratorItems(declTail, lType)) {
+          scopeVars.set(item.name, item.type);
+          const absVarOffset = openBraceIdx + 1 + lvMatch.index + tailStart + item.relOffset;
+          const lvPos = offsetToLineCol(normStarts, absVarOffset);
+          const origVarLine = rawLines[lvPos.line] ?? '';
+          const colMatch = new RegExp(`\\b${item.name}\\b`).exec(origVarLine);
+          scopeDecls.set(item.name, {
+            type: item.type,
+            line: lvPos.line,
+            column: colMatch ? colMatch.index : lvPos.column,
+            kind: 'localVariable',
+            signature: `${lType} ${item.name}${item.arraySuffix}`,
+          });
+        }
+      }
+
       localVarScopes.push({
         startLine: startPos.line,
         endLine: endPos.line,
@@ -468,23 +595,28 @@ export function parseHlslSymbols(
 
     const line = cleanNormLines[lineIdx];
     if (/^\s*#/.test(line)) continue;
-    const gMatch = /^\s*(?:static|uniform|extern)?\s*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=[^;]*)?;/.exec(line);
+    const gMatch =
+      /^\s*(?:(?:static|const|uniform|extern|groupshared|precise|volatile)\s+)*([A-Za-z_][A-Za-z0-9_<>]*)\s+([^;()]+);/.exec(
+        line,
+      );
     if (!gMatch) continue;
     const gType = gMatch[1];
-    const gName = gMatch[2];
+    const declTail = gMatch[2];
     if (CONTROL_KEYWORDS.has(gType) || gType === 'return') continue;
-    if (symbols.some((s) => s.name === gName && s.line === lineIdx)) continue;
-    const origLine = rawLines[lineIdx] ?? '';
-    const col = origLine.indexOf(gName);
-    symbols.push({
-      name: gName,
-      kind: 'variable',
-      returnType: gType,
-      signature: `${gType} ${gName}`,
-      uri,
-      line: lineIdx,
-      column: col >= 0 ? col : 0,
-    });
+    for (const item of parseDeclaratorItems(declTail, gType)) {
+      if (symbols.some((s) => s.name === item.name && s.line === lineIdx)) continue;
+      const origLine = rawLines[lineIdx] ?? '';
+      const col = origLine.indexOf(item.name);
+      symbols.push({
+        name: item.name,
+        kind: 'variable',
+        returnType: item.type,
+        signature: `${gType} ${item.name}${item.arraySuffix}`,
+        uri,
+        line: lineIdx,
+        column: col >= 0 ? col : 0,
+      });
+    }
   }
 
   return {
@@ -496,6 +628,8 @@ export function parseHlslSymbols(
     properties: extracted.properties,
     pragmas: extracted.pragmas,
     structFieldsByStruct,
+    scopedStructFields,
+    blocks: extracted.blocks,
     localVarScopes,
     virtualHlsl: extracted.virtualHlsl,
   };
@@ -539,13 +673,18 @@ export class HlslSymbolTable {
     if (!file) return null;
     for (const scope of file.localVarScopes) {
       if (line >= scope.startLine && line <= scope.endLine) {
-        const found = scope.variables.get(varName);
-        if (found) return found;
+        const decl = scope.declarations.get(varName);
+        if (decl && line >= decl.line) return decl.type;
       }
     }
-    const globalSym = file.symbols.find(
-      (s) => s.name === varName && (s.kind === 'variable' || s.kind === 'property'),
+    const hlslSym = file.symbols.find(
+      (s) =>
+        s.name === varName &&
+        s.kind === 'variable' &&
+        isLineVisibleInPass(file.blocks, s.line, line),
     );
-    return globalSym?.returnType ?? null;
+    if (hlslSym?.returnType) return hlslSym.returnType;
+    const propSym = file.symbols.find((s) => s.name === varName && s.kind === 'property');
+    return propSym?.returnType ?? null;
   }
 }

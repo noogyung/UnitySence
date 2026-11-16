@@ -1,5 +1,8 @@
 import { CompletionItemKind, type CompletionItem, type Position } from 'vscode-languageserver';
-import type { IncludeDependencyGraph } from '../indexer/hlslIncludeGraph.ts';
+import {
+  extractMemberChainExpression,
+  type IncludeDependencyGraph,
+} from '../indexer/hlslIncludeGraph.ts';
 import { UNITY_BUILTIN_MACROS } from '../parser/unityHlslMacroPrepass.ts';
 
 const HLSL_SEMANTICS_AND_TYPES = [
@@ -59,33 +62,36 @@ export class ShaderCompletionProvider {
         }));
     }
 
-    // Case 2: Struct member completion (varName.)
-    const memberMatch = /([A-Za-z_][A-Za-z0-9_]*)\s*\.([A-Za-z0-9_]*)$/.exec(linePrefix);
-    if (memberMatch) {
-      const varName = memberMatch[1];
-      const fieldPrefix = memberMatch[2].toLowerCase();
-      const varType = this.graph.inferVariableType(filePath, varName, position.line);
-      if (varType) {
-        const cleanType = varType.replace(/<.*>$/, '').trim();
-        const fields = this.graph.findStructFields(filePath, cleanType);
-        if (fields.length > 0) {
-          return fields
-            .filter((f) => !fieldPrefix || f.name.toLowerCase().startsWith(fieldPrefix))
-            .map((f) => ({
-              label: f.name,
-              kind: CompletionItemKind.Field,
-              detail: `[UnityBrain] ${cleanType} 구조체 멤버 · ${f.signature ?? `${f.returnType ?? ''} ${f.name}`.trim()}`,
-              documentation: `[UnityBrain] 구조체 ${cleanType}의 필드입니다.`,
-            }));
+    // Case 2: Chained struct member completion (`a.`, `a.b.`, `_Lights[0].`, `GetMainLight().`)
+    const memberPrefixMatch = /\.\s*([A-Za-z0-9_]*)$/.exec(linePrefix);
+    if (memberPrefixMatch) {
+      const dotIdx = linePrefix.lastIndexOf('.');
+      const chainExpr = extractMemberChainExpression(linePrefix.slice(0, dotIdx));
+      const fieldPrefix = memberPrefixMatch[1].toLowerCase();
+      if (chainExpr) {
+        const resolved = this.graph.resolveExpressionChain(filePath, chainExpr, position.line);
+        if (resolved.type) {
+          const cleanType = resolved.type.replace(/<.*>$/, '').replace(/\[[^\]]*\]$/, '').trim();
+          const fields = this.graph.findStructFields(filePath, cleanType, position.line);
+          if (fields.length > 0) {
+            return fields
+              .filter((f) => !fieldPrefix || f.name.toLowerCase().startsWith(fieldPrefix))
+              .map((f) => ({
+                label: f.name,
+                kind: CompletionItemKind.Field,
+                detail: `[UnityBrain] ${cleanType} 구조체 멤버 · ${f.signature ?? `${f.returnType ?? ''} ${f.name}`.trim()}`,
+                documentation: `[UnityBrain] 구조체 ${cleanType}의 필드입니다.`,
+              }));
+          }
         }
       }
       return [];
     }
 
-    // Case 3: General HLSL symbols + Unity macros + Semantics
+    // Case 3: General HLSL symbols + Unity macros + Semantics (Pass-scoped)
     const identMatch = /([A-Za-z_][A-Za-z0-9_]*)?$/.exec(linePrefix);
     const prefix = (identMatch?.[1] ?? '').toLowerCase();
-    const visibleSymbols = this.graph.findAllVisibleSymbols(filePath);
+    const visibleSymbols = this.graph.findAllVisibleSymbols(filePath, position.line);
     const seenLabels = new Set<string>();
     const items: CompletionItem[] = [];
 

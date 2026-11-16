@@ -9,7 +9,12 @@ import type {
 } from '../../../extension/src/contracts/index.ts';
 import { UnityVirtualPathResolver } from '../vfs/virtualPathResolver.ts';
 import { UnityHlslMacroPrepass } from '../parser/unityHlslMacroPrepass.ts';
-import { parseHlslSymbols, type ParsedHlslFile } from './hlslSymbolTable.ts';
+import {
+  findBlockIndexAtLine,
+  isLineVisibleInPass,
+  parseHlslSymbols,
+  type ParsedHlslFile,
+} from './hlslSymbolTable.ts';
 
 export interface UnresolvedIncludeDiagnostic {
   includePath: string;
@@ -30,6 +35,36 @@ interface CacheRecord {
   mtimeMs: number;
   size: number;
   parsed: ParsedHlslFile;
+}
+
+export function extractMemberChainExpression(exprEndSlice: string): string | null {
+  let i = exprEndSlice.length - 1;
+  while (i >= 0 && /\s/.test(exprEndSlice[i])) i--;
+  if (i < 0) return null;
+
+  let pDepth = 0;
+  let bDepth = 0;
+  const startLimit = 0;
+  let start = i;
+  while (start >= startLimit) {
+    const ch = exprEndSlice[start];
+    if (ch === ')') pDepth++;
+    else if (ch === '(') {
+      if (pDepth === 0) break;
+      pDepth--;
+    } else if (ch === ']') bDepth++;
+    else if (ch === '[') {
+      if (bDepth === 0) break;
+      bDepth--;
+    } else if (pDepth === 0 && bDepth === 0) {
+      if (!/[A-Za-z0-9_.]/.test(ch)) {
+        break;
+      }
+    }
+    start--;
+  }
+  const sliced = exprEndSlice.slice(start + 1, i + 1).trim();
+  return sliced.length > 0 ? sliced : null;
 }
 
 export class IncludeDependencyGraph {
@@ -262,25 +297,51 @@ export class IncludeDependencyGraph {
     return { files, unresolvedIncludes };
   }
 
-  public findSymbolsVisibleFrom(entryUriOrPath: string, symbolName: string): HlslSymbolEntry[] {
+  public findSymbolsVisibleFrom(
+    entryUriOrPath: string,
+    symbolName: string,
+    cursorLine?: number,
+  ): HlslSymbolEntry[] {
     const { files } = this.collectReachableFiles(entryUriOrPath);
+    const current = files[0];
     const results: HlslSymbolEntry[] = [];
-    for (const file of files) {
+    const fallbackProps: HlslSymbolEntry[] = [];
+    const otherPassHits: HlslSymbolEntry[] = [];
+
+    for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+      const file = files[fileIdx];
       for (const sym of file.symbols) {
-        if (sym.name === symbolName) {
-          results.push(sym);
+        if (sym.name !== symbolName) continue;
+        if (sym.kind === 'property') {
+          fallbackProps.push(sym);
+          continue;
         }
+        if (fileIdx === 0 && !isLineVisibleInPass(current?.blocks, sym.line, cursorLine)) {
+          otherPassHits.push(sym);
+          continue;
+        }
+        results.push(sym);
       }
     }
-    return results;
+
+    return [...results, ...fallbackProps, ...otherPassHits];
   }
 
-  public findAllVisibleSymbols(entryUriOrPath: string): HlslSymbolEntry[] {
+  public findAllVisibleSymbols(entryUriOrPath: string, cursorLine?: number): HlslSymbolEntry[] {
     const { files } = this.collectReachableFiles(entryUriOrPath);
+    const current = files[0];
     const out: HlslSymbolEntry[] = [];
     const seen = new Set<string>();
-    for (const file of files) {
+    for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+      const file = files[fileIdx];
       for (const sym of file.symbols) {
+        if (
+          fileIdx === 0 &&
+          sym.kind !== 'property' &&
+          !isLineVisibleInPass(current?.blocks, sym.line, cursorLine)
+        ) {
+          continue;
+        }
         const key = `${sym.uri}:${sym.line}:${sym.kind}:${sym.name}`;
         if (!seen.has(key)) {
           seen.add(key);
@@ -291,8 +352,30 @@ export class IncludeDependencyGraph {
     return out;
   }
 
-  public findStructFields(entryUriOrPath: string, structName: string): HlslSymbolEntry[] {
+  public findStructFields(
+    entryUriOrPath: string,
+    structName: string,
+    cursorLine?: number,
+  ): HlslSymbolEntry[] {
     const { files } = this.collectReachableFiles(entryUriOrPath);
+    const current = files[0];
+    if (current && cursorLine !== undefined && current.scopedStructFields) {
+      const groups = current.scopedStructFields.get(structName);
+      if (groups && groups.length > 0) {
+        const cursorBlk = findBlockIndexAtLine(current.blocks, cursorLine);
+        if (cursorBlk >= 0) {
+          const exact = groups.find((g) => g.blockIndex === cursorBlk);
+          if (exact) return exact.fields;
+          const includedIndices = current.blocks?.[cursorBlk]?.includeBlockIndices ?? [];
+          const shared = groups.find((g) => includedIndices.includes(g.blockIndex));
+          if (shared) return shared.fields;
+        }
+        const unblocked = groups.find((g) => g.blockIndex < 0);
+        if (unblocked) return unblocked.fields;
+        return groups[0].fields;
+      }
+    }
+
     for (const file of files) {
       const fields = file.structFieldsByStruct.get(structName);
       if (fields && fields.length > 0) {
@@ -308,18 +391,137 @@ export class IncludeDependencyGraph {
     if (current) {
       for (const scope of current.localVarScopes) {
         if (line >= scope.startLine && line <= scope.endLine) {
-          const hit = scope.variables.get(varName);
-          if (hit) return hit;
+          const decl = scope.declarations.get(varName);
+          if (decl && line >= decl.line) return decl.type;
         }
       }
     }
-    for (const file of files) {
+    // Prefer HLSL variables (CBUFFER / globals / macros) over ShaderLab properties
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
       const sym = file.symbols.find(
-        (s) => s.name === varName && (s.kind === 'variable' || s.kind === 'property'),
+        (s) =>
+          s.name === varName &&
+          s.kind === 'variable' &&
+          (i > 0 || isLineVisibleInPass(file.blocks, s.line, line)),
       );
       if (sym?.returnType) return sym.returnType;
     }
+    for (const file of files) {
+      const propSym = file.symbols.find((s) => s.name === varName && s.kind === 'property');
+      if (propSym?.returnType) return propSym.returnType;
+    }
     return null;
+  }
+
+  public resolveExpressionChain(
+    entryUriOrPath: string,
+    expression: string,
+    line: number,
+  ): { type: string | null; field: HlslSymbolEntry | null; ownerType: string | null } {
+    const segments = this.splitChainSegments(expression.trim());
+    if (segments.length === 0) return { type: null, field: null, ownerType: null };
+
+    let currentType = this.resolveRootSegmentType(entryUriOrPath, segments[0], line);
+    let lastField: HlslSymbolEntry | null = null;
+    let ownerType: string | null = null;
+
+    for (let i = 1; i < segments.length; i++) {
+      if (!currentType) return { type: null, field: null, ownerType: null };
+      const rawSeg = segments[i].replace(/\[[^\]]*\]/g, '').trim();
+      const callMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s*\(.*\)$/.exec(rawSeg);
+      const memberName = callMatch ? callMatch[1] : rawSeg;
+      if (!memberName) return { type: null, field: null, ownerType: null };
+
+      const cleanOwner = this.unwrapContainerType(currentType, segments[i].includes('['));
+      const fields = this.findStructFields(entryUriOrPath, cleanOwner, line);
+      const matched = fields.find((f) => f.name === memberName);
+      if (matched) {
+        ownerType = cleanOwner;
+        lastField = matched;
+        currentType = matched.returnType ?? null;
+        if (currentType && segments[i].includes('[')) {
+          currentType = this.unwrapIndexedElementType(currentType);
+        }
+        continue;
+      }
+
+      const swizzleType = this.resolveSwizzleType(cleanOwner, memberName);
+      if (swizzleType) {
+        ownerType = cleanOwner;
+        lastField = null;
+        currentType = swizzleType;
+        continue;
+      }
+
+      return { type: null, field: null, ownerType: cleanOwner };
+    }
+
+    return { type: currentType, field: lastField, ownerType };
+  }
+
+  private splitChainSegments(expr: string): string[] {
+    const out: string[] = [];
+    let pDepth = 0;
+    let bDepth = 0;
+    let start = 0;
+    for (let i = 0; i < expr.length; i++) {
+      const ch = expr[i];
+      if (ch === '(') pDepth++;
+      else if (ch === ')' && pDepth > 0) pDepth--;
+      else if (ch === '[') bDepth++;
+      else if (ch === ']' && bDepth > 0) bDepth--;
+      else if (ch === '.' && pDepth === 0 && bDepth === 0) {
+        const part = expr.slice(start, i).trim();
+        if (part) out.push(part);
+        start = i + 1;
+      }
+    }
+    const tail = expr.slice(start).trim();
+    if (tail) out.push(tail);
+    return out;
+  }
+
+  private resolveRootSegmentType(
+    entryUriOrPath: string,
+    segment: string,
+    line: number,
+  ): string | null {
+    const hasIndex = segment.includes('[');
+    const trimmed = segment.trim();
+    const fnCallMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s*\(.*\)$/.exec(trimmed);
+    if (fnCallMatch) {
+      const hits = this.findSymbolsVisibleFrom(entryUriOrPath, fnCallMatch[1], line);
+      const fn = hits.find((s) => s.kind === 'function' && s.returnType);
+      return fn?.returnType ?? null;
+    }
+
+    const identMatch = /^([A-Za-z_][A-Za-z0-9_]*)/.exec(trimmed);
+    if (!identMatch) return null;
+    const rawType = this.inferVariableType(entryUriOrPath, identMatch[1], line);
+    if (!rawType) return null;
+    return hasIndex ? this.unwrapIndexedElementType(rawType) : rawType;
+  }
+
+  private unwrapIndexedElementType(typeName: string): string {
+    const generic = /^(?:StructuredBuffer|RWStructuredBuffer|AppendStructuredBuffer|ConsumeStructuredBuffer|Buffer|RWBuffer)<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>$/.exec(
+      typeName.trim(),
+    );
+    if (generic) return generic[1];
+    return typeName.replace(/\[[^\]]*\]$/, '').trim();
+  }
+
+  private unwrapContainerType(typeName: string, indexed: boolean): string {
+    const base = indexed ? this.unwrapIndexedElementType(typeName) : typeName;
+    return base.replace(/<.*>$/, '').replace(/\[[^\]]*\]$/, '').trim();
+  }
+
+  private resolveSwizzleType(ownerType: string, swizzle: string): string | null {
+    const vecMatch = /^(float|half|real|fixed|int|uint|bool)([234])$/.exec(ownerType);
+    if (!vecMatch) return null;
+    if (!/^(?:[xyzw]{1,4}|[rgba]{1,4})$/.test(swizzle)) return null;
+    const scalar = vecMatch[1];
+    return swizzle.length === 1 ? scalar : `${scalar}${swizzle.length}`;
   }
 
   public buildShaderSymbolIndex(entryPaths: string[]): ShaderSymbolIndex {

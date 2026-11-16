@@ -1,7 +1,10 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MarkupKind, type Hover, type Position } from 'vscode-languageserver';
-import type { IncludeDependencyGraph } from '../indexer/hlslIncludeGraph.ts';
+import {
+  extractMemberChainExpression,
+  type IncludeDependencyGraph,
+} from '../indexer/hlslIncludeGraph.ts';
 import { ShaderDefinitionProvider } from './definitionProvider.ts';
 import { UNITY_BUILTIN_MACROS } from '../parser/unityHlslMacroPrepass.ts';
 
@@ -74,35 +77,31 @@ export class ShaderHoverProvider {
     if (!span) return null;
     const word = span.word;
 
-    // 3. Member access hover (`varName.fieldName`)
-    if (span.start > 0 && lineText[span.start - 1] === '.') {
-      const baseMatch = /([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*$/.exec(lineText.slice(0, span.start));
-      if (baseMatch) {
-        const varType = this.graph.inferVariableType(filePath, baseMatch[1], position.line);
-        if (varType) {
-          const cleanType = varType.replace(/<.*>$/, '').trim();
-          const fields = this.graph.findStructFields(filePath, cleanType);
-          const field = fields.find((f) => f.name === word);
-          if (field) {
-            const declaredIn = this.formatVirtualLocation(field.uri, projectRoot);
-            return {
-              contents: {
-                kind: MarkupKind.Markdown,
-                value: `\`\`\`hlsl\n${field.signature ?? `${field.returnType ?? ''} ${field.name}`}\n\`\`\`\n\n**[UnityBrain]** 구조체 \`${cleanType}\`의 멤버\n\n선언 위치: \`${declaredIn}\``,
-              },
-            };
-          }
+    // 3. Chained member access hover (`a.b.c`, `_Buf[i].field`, `GetMainLight().direction`)
+    const isMemberAccess = span.start > 0 && lineText[span.start - 1] === '.';
+    if (isMemberAccess) {
+      const chainExpr = extractMemberChainExpression(lineText.slice(0, span.end));
+      if (chainExpr) {
+        const resolved = this.graph.resolveExpressionChain(filePath, chainExpr, position.line);
+        if (resolved.field && resolved.ownerType) {
+          const declaredIn = this.formatVirtualLocation(resolved.field.uri, projectRoot);
+          return {
+            contents: {
+              kind: MarkupKind.Markdown,
+              value: `\`\`\`hlsl\n${resolved.field.signature ?? `${resolved.field.returnType ?? ''} ${resolved.field.name}`}\n\`\`\`\n\n**[UnityBrain]** 구조체 \`${resolved.ownerType}\`의 멤버\n\n선언 위치: \`${declaredIn}\``,
+            },
+          };
         }
       }
     }
 
     // 3-2. Local variables & function parameters in enclosing scope
-    if (!(span.start > 0 && lineText[span.start - 1] === '.')) {
+    if (!isMemberAccess) {
       const scope = parsed.localVarScopes.find(
         (sc) => position.line >= sc.startLine && position.line <= sc.endLine && sc.declarations.has(word),
       );
       const localDecl = scope?.declarations.get(word);
-      if (localDecl) {
+      if (localDecl && position.line >= localDecl.line) {
         const declaredIn = this.formatVirtualLocation(parsed.uri, projectRoot);
         const roleLabel = localDecl.kind === 'parameter' ? '함수 파라미터' : '로컬 변수';
         return {
@@ -114,16 +113,23 @@ export class ShaderHoverProvider {
       }
     }
 
-    // 4. Visible symbols from Include graph
-    const hits = this.graph.findSymbolsVisibleFrom(filePath, word);
+    // 4. Visible symbols from Include graph (Pass-scoped + HLSL variable preferred over Property)
+    const hits = this.graph.findSymbolsVisibleFrom(filePath, word, position.line);
     if (hits.length > 0) {
       const sym = hits[0];
+      const propNote =
+        sym.kind !== 'property'
+          ? hits.find((h) => h.kind === 'property')
+          : undefined;
       const declaredIn = this.formatVirtualLocation(sym.uri, projectRoot);
       const parts = [
         `\`\`\`hlsl\n${sym.signature ?? `${sym.returnType ?? ''} ${sym.name}`.trim()}\n\`\`\``,
       ];
       if (sym.documentation) {
         parts.push(sym.documentation);
+      }
+      if (propNote) {
+        parts.push(`ShaderLab 프로퍼티: \`${propNote.signature ?? propNote.name}\``);
       }
       parts.push(`**[UnityBrain]** 선언 위치: \`${declaredIn}\``);
       return {
