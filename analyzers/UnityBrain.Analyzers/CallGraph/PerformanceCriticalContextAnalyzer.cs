@@ -67,7 +67,7 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
                     continue;
                 }
 
-                if (IsGetOrTryGetComponent(called))
+                if (IsCacheableGetComponent(called, inv))
                 {
                     symbolCtx.ReportDiagnostic(Diagnostic.Create(
                         DiagnosticIds.UB1002Rule,
@@ -86,12 +86,12 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
                     continue;
                 }
 
-                if (!info.IsRoot && IsExpensiveUnityLookup(called))
+                if (!info.IsRoot && (IsGetOrTryGetComponent(called) || IsExpensiveUnityLookup(called)))
                 {
                     symbolCtx.ReportDiagnostic(Diagnostic.Create(
                         DiagnosticIds.UB1001Rule,
                         inv.GetLocation(),
-                        $"{called.ContainingType.Name}.{called.Name}",
+                        IsGetOrTryGetComponent(called) ? called.Name : $"{called.ContainingType.Name}.{called.Name}",
                         info.CallChain));
                 }
             }
@@ -130,11 +130,50 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
         }
     }
 
+    private static bool IsCacheableGetComponent(IMethodSymbol method, InvocationExpressionSyntax inv)
+    {
+        if (method.Name == "TryGetComponent" || !IsGetOrTryGetComponent(method))
+        {
+            return false;
+        }
+
+        // Only GetComponent*() targeting `this`, `this.gameObject`, `this.transform`, `gameObject`, or `transform`
+        // can be safely cached in `this.Awake()`; external receivers like `other.GetComponent<T>()` cannot.
+        if (inv.Expression is GenericNameSyntax || inv.Expression is IdentifierNameSyntax)
+        {
+            return true;
+        }
+
+        if (inv.Expression is MemberAccessExpressionSyntax ma)
+        {
+            if (ma.Expression is ThisExpressionSyntax)
+            {
+                return true;
+            }
+            if (ma.Expression is IdentifierNameSyntax id &&
+                (id.Identifier.Text == "gameObject" || id.Identifier.Text == "transform"))
+            {
+                return true;
+            }
+            if (ma.Expression is MemberAccessExpressionSyntax inner &&
+                inner.Expression is ThisExpressionSyntax &&
+                (inner.Name.Identifier.Text == "gameObject" || inner.Name.Identifier.Text == "transform"))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool IsGetOrTryGetComponent(IMethodSymbol method)
     {
         if (method.Name != "GetComponent" &&
             method.Name != "GetComponentInChildren" &&
             method.Name != "GetComponentInParent" &&
+            method.Name != "GetComponents" &&
+            method.Name != "GetComponentsInChildren" &&
+            method.Name != "GetComponentsInParent" &&
             method.Name != "TryGetComponent")
         {
             return false;

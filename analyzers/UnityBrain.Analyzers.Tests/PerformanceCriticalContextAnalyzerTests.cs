@@ -135,4 +135,27 @@ public class OneShotInitializer : MonoBehaviour
             new PerformanceCriticalContextAnalyzer());
         AssertEx.Equal(0, diags.Length, "Start()-only GetComponent should not trigger UB1001/UB1002");
     }
+
+    [Fact]
+    public async Task ExcludesTryGetComponentAndExternalReceiverFromUB1002()
+    {
+        const string source = @"
+using UnityEngine;
+
+public class TriggerResponder : MonoBehaviour
+{
+    private void Update()
+    {
+        if (TryGetComponent<Rigidbody>(out var selfRb)) { _ = selfRb; }
+        var go = new GameObject();
+        var otherRb = go.GetComponent<Rigidbody>();
+        _ = otherRb;
+    }
+}";
+        var diags = await RoslynTestHarness.GetAnalyzerDiagnosticsAsync(
+            source,
+            new PerformanceCriticalContextAnalyzer());
+        var ub1002 = diags.Where(d => d.Id == DiagnosticIds.UncachedComponentLookup).ToArray();
+        AssertEx.Equal(0, ub1002.Length, $"Expected 0 UB1002 for TryGetComponent/external receiver, got {ub1002.Length}");
+    }
 }

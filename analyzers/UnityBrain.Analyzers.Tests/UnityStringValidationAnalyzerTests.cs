@@ -250,4 +250,53 @@ public class DirectYamlValidation : MonoBehaviour
         AssertEx.Equal(2, ub3002.Length, $"Expected 2 UB3002 diagnostics from TagManager.asset, got {ub3002.Length}");
         AssertEx.Equal(2, ub3003.Length, $"Expected 2 UB3003 diagnostics from EditorBuildSettings.asset, got {ub3003.Length}");
     }
+
+    [Fact]
+    public async Task AllowsBuiltinLayersAndDetectsStopCoroutineAndGetSceneByName()
+    {
+        const string tagManagerAsset = @"%YAML 1.1
+--- !u!78 &1
+TagManager:
+  tags: []
+  layers: []
+";
+        const string editorBuildSettingsAsset = @"%YAML 1.1
+--- !u!1045 &1
+EditorBuildSettings:
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/Lobby.unity
+    guid: 11111111111111111111111111111111
+";
+        const string code = @"
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class CoroutineAndSceneTest : MonoBehaviour
+{
+    private void Run()
+    {
+        int uiLayer = LayerMask.NameToLayer(""UI"");
+        _ = uiLayer;
+        StopCoroutine(""MissingRoutine"");
+        _ = SceneManager.GetSceneByName(""MissingScene"");
+    }
+}";
+        var diags = await RoslynTestHarness.GetAnalyzerDiagnosticsAsync(
+            code,
+            new UnityStringValidationAnalyzer(),
+            new[]
+            {
+                new InMemoryAdditionalText("D:/SampleUnityProject/ProjectSettings/TagManager.asset", tagManagerAsset),
+                new InMemoryAdditionalText("D:/SampleUnityProject/ProjectSettings/EditorBuildSettings.asset", editorBuildSettingsAsset),
+            });
+
+        var ub3001 = diags.Where(d => d.Id == DiagnosticIds.UnresolvedInvokeOrCoroutineMethod).ToArray();
+        var ub3002 = diags.Where(d => d.Id == DiagnosticIds.UnknownUnityTagOrLayer).ToArray();
+        var ub3003 = diags.Where(d => d.Id == DiagnosticIds.SceneNotInBuildSettings).ToArray();
+
+        AssertEx.Equal(0, ub3002.Length, "UI builtin layer should not trigger UB3002");
+        AssertEx.Equal(1, ub3001.Length, "StopCoroutine missing routine should trigger UB3001");
+        AssertEx.Equal(1, ub3003.Length, "SceneManager.GetSceneByName missing scene should trigger UB3003");
+    }
 }

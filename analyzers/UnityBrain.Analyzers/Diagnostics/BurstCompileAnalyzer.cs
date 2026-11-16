@@ -133,6 +133,22 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
                     "try/finally"));
             }
         }
+
+        foreach (var throwStmt in methodSyntax.DescendantNodes().OfType<ThrowStatementSyntax>())
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                DiagnosticIds.UB2004Rule,
+                throwStmt.ThrowKeyword.GetLocation(),
+                "throw"));
+        }
+
+        foreach (var throwExpr in methodSyntax.DescendantNodes().OfType<ThrowExpressionSyntax>())
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                DiagnosticIds.UB2004Rule,
+                throwExpr.ThrowKeyword.GetLocation(),
+                "throw"));
+        }
     }
 
     private static void AnalyzeOperationTree(SymbolAnalysisContext context, IOperation rootOp)

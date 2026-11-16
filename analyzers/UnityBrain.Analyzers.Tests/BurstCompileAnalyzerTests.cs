@@ -120,4 +120,27 @@ public struct ValidBurstJob
         var diags = await RoslynTestHarness.GetAnalyzerDiagnosticsAsync(code, new BurstCompileAnalyzer());
         AssertEx.Equal(0, diags.Length, $"Expected 0 diagnostics, got {diags.Length}");
     }
+
+    [Fact]
+    public async Task DetectsThrowStatementAndThrowExpressionAsUB2004()
+    {
+        const string code = @"
+using System;
+using Unity.Burst;
+
+public struct ThrowBurstJob
+{
+    [BurstCompile]
+    public void Execute(int v)
+    {
+        if (v < 0)
+        {
+            throw new InvalidOperationException();
+        }
+    }
+}";
+        var diags = await RoslynTestHarness.GetAnalyzerDiagnosticsAsync(code, new BurstCompileAnalyzer());
+        var ub2004 = diags.Where(d => d.Id == DiagnosticIds.BurstExceptionHandlingForbidden).ToArray();
+        AssertEx.Equal(1, ub2004.Length, $"Expected 1 UB2004 throw diagnostic, got {ub2004.Length}");
+    }
 }

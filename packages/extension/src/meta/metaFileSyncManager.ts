@@ -17,7 +17,11 @@ export class MetaFileSyncManager implements vscode.Disposable {
       vscode.workspace.onWillRenameFiles((e) => this.handleWillRenameFiles(e)),
       vscode.workspace.onWillDeleteFiles((e) => this.handleWillDeleteFiles(e)),
       vscode.workspace.onDidCreateFiles((e) => {
-        void this.handleDidCreateFiles(e.files);
+        // Yield briefly (150ms) so Unity Editor's own asset importer can emit `.meta` first if running
+        const timer = setTimeout(() => {
+          void this.handleDidCreateFiles(e.files);
+        }, 150);
+        this.disposables.push(new vscode.Disposable(() => clearTimeout(timer)));
       }),
     );
   }
@@ -41,6 +45,10 @@ export class MetaFileSyncManager implements vscode.Disposable {
 
     const top = segments[0].toLowerCase();
     if (top !== 'assets' && top !== 'packages') {
+      return false;
+    }
+    if (top === 'packages' && segments.length < 3) {
+      // Packages/manifest.json and Packages/packages-lock.json do not have .meta files
       return false;
     }
 
@@ -147,6 +155,45 @@ export class MetaFileSyncManager implements vscode.Disposable {
     }
 
     return createdMetaPaths;
+  }
+
+  public async cleanOrphanMetaFiles(): Promise<string[]> {
+    const removed: string[] = [];
+    const scanDirs = [path.join(this.projectRoot, 'Assets'), path.join(this.projectRoot, 'Packages')];
+
+    for (const rootDir of scanDirs) {
+      if (!fs.existsSync(rootDir)) continue;
+      const stack = [rootDir];
+      while (stack.length > 0) {
+        const dir = stack.pop();
+        if (!dir) continue;
+        let entries: fs.Dirent[];
+        try {
+          entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const entry of entries) {
+          if (entry.name.startsWith('.')) continue;
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            stack.push(full);
+          } else if (entry.isFile() && entry.name.endsWith('.meta')) {
+            const peerPath = full.slice(0, -'.meta'.length);
+            if (this.isEligibleUnityPath(peerPath) && !fs.existsSync(peerPath)) {
+              try {
+                await fs.promises.unlink(full);
+                removed.push(full);
+              } catch {
+                // Ignore unlink errors
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return removed;
   }
 
   public static generateUnityGuid(): string {

@@ -89,6 +89,7 @@ namespace UnityEngine
         public void CancelInvoke(string methodName) {}
         public bool IsInvoking(string methodName) => false;
         public object StartCoroutine(string methodName) => null!;
+        public void StopCoroutine(string methodName) {}
     }
     public class ScriptableObject : Object { }
     public sealed class GameObject : Object
@@ -162,6 +163,7 @@ namespace UnityEngine
         {
             public static void LoadScene(string sceneName) {}
             public static void LoadSceneAsync(string sceneName) {}
+            public static object GetSceneByName(string sceneName) => null!;
         }
     }
 }

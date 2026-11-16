@@ -112,6 +112,7 @@ public static class UnityYamlStreamParser
             if (span.StartsWith("--- !u!", StringComparison.Ordinal))
             {
                 FlushPendingCallback(currentMb, ref activeCallback);
+                FlushPendingList(currentMb);
                 FlushPendingMod(currentPrefab, ref activeMod);
                 inPersistentCallsList = false;
                 inModificationsList = false;
@@ -207,6 +208,7 @@ public static class UnityYamlStreamParser
         }
 
         FlushPendingCallback(currentMb, ref activeCallback);
+        FlushPendingList(currentMb);
         FlushPendingMod(currentPrefab, ref activeMod);
 
         var goPathCache = BuildGameObjectPathCache(goNames, transforms, goToTransform);
@@ -292,6 +294,7 @@ public static class UnityYamlStreamParser
                     ? $"{fallbackAssetName} (PrefabOverride)"
                     : $"{parentPath} (PrefabOverride)";
 
+                string modTargetFileId = !string.IsNullOrEmpty(mod.TargetFileId) ? mod.TargetFileId : prefab.FileId;
                 var dict = new Dictionary<string, string>(StringComparer.Ordinal);
                 if (!string.IsNullOrEmpty(mod.PropertyPath))
                 {
@@ -301,14 +304,14 @@ public static class UnityYamlStreamParser
                         mod.PropertyPath,
                         mod.Value,
                         modPath,
-                        mod.TargetFileId,
+                        modTargetFileId,
                         mod.Line));
                 }
 
                 componentUsages.Add(new ComponentUsageRecord(
                     mod.TargetGuid.ToLowerInvariant(),
                     modPath,
-                    prefab.FileId,
+                    modTargetFileId,
                     mod.Line,
                     "prefabOverride",
                     dict));
@@ -360,6 +363,28 @@ public static class UnityYamlStreamParser
             return;
         }
 
+        if (mb.PendingListName != null)
+        {
+            if (indent >= mb.PendingListIndent &&
+                (trimmed.StartsWith("- ", StringComparison.Ordinal) || trimmed.SequenceEqual("-")))
+            {
+                if (mb.PendingListItemIndent < 0 || indent == mb.PendingListItemIndent)
+                {
+                    mb.PendingListItemIndent = indent;
+                    mb.PendingListCount++;
+                }
+                return;
+            }
+            if (indent <= mb.PendingListIndent)
+            {
+                FlushPendingList(mb);
+            }
+            else
+            {
+                return;
+            }
+        }
+
         if (!TrySplitKeyValue(trimmed, out var key, out var val))
         {
             return;
@@ -407,13 +432,30 @@ public static class UnityYamlStreamParser
             return;
         }
 
+        string keyStr = key.ToString();
+        if (val.SequenceEqual("[]"))
+        {
+            mb.Fields[keyStr] = "[0 items]";
+            mb.FieldRecords.Add(new FieldEntry(keyStr, "[0 items]", lineNumber));
+            return;
+        }
+
+        if (val.Length == 0)
+        {
+            mb.PendingListName = keyStr;
+            mb.PendingListLine = lineNumber;
+            mb.PendingListIndent = indent;
+            mb.PendingListItemIndent = -1;
+            mb.PendingListCount = 0;
+            return;
+        }
+
         string cleanVal = UnquoteYamlScalar(val);
         if (cleanVal.Length == 0)
         {
             return;
         }
 
-        string keyStr = key.ToString();
         mb.Fields[keyStr] = cleanVal;
         mb.FieldRecords.Add(new FieldEntry(keyStr, cleanVal, lineNumber));
     }
@@ -523,6 +565,22 @@ public static class UnityYamlStreamParser
             mb.PendingCallbacks.Add(cb);
         }
         cb = null;
+    }
+
+    private static void FlushPendingList(MonoBehaviourBlock? mb)
+    {
+        if (mb != null && mb.PendingListName != null)
+        {
+            if (mb.PendingListCount > 0)
+            {
+                string summary = $"[{mb.PendingListCount} items]";
+                mb.Fields[mb.PendingListName] = summary;
+                mb.FieldRecords.Add(new FieldEntry(mb.PendingListName, summary, mb.PendingListLine));
+            }
+            mb.PendingListName = null;
+            mb.PendingListCount = 0;
+            mb.PendingListItemIndent = -1;
+        }
     }
 
     private static void FlushPendingMod(PrefabOverrideBlock? prefab, ref PendingMod? mod)
@@ -724,6 +782,11 @@ public static class UnityYamlStreamParser
         public Dictionary<string, string> Fields { get; } = new(StringComparer.Ordinal);
         public List<FieldEntry> FieldRecords { get; } = new();
         public List<PendingCallback> PendingCallbacks { get; } = new();
+        public string? PendingListName { get; set; }
+        public int PendingListLine { get; set; }
+        public int PendingListIndent { get; set; }
+        public int PendingListItemIndent { get; set; } = -1;
+        public int PendingListCount { get; set; }
 
         public MonoBehaviourBlock(string fileId, int startLine)
         {

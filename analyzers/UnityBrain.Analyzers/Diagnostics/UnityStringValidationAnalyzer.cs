@@ -20,6 +20,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
         "CancelInvoke",
         "IsInvoking",
         "StartCoroutine",
+        "StopCoroutine",
     };
 
     private static readonly HashSet<string> TagLookupMethods = new(StringComparer.Ordinal)
@@ -128,9 +129,9 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        // 3. UB3003: SceneManager.LoadScene / LoadSceneAsync
+        // 3. UB3003: SceneManager.LoadScene / LoadSceneAsync / GetSceneByName
         if (containingType == "UnityEngine.SceneManagement.SceneManager" &&
-            (called.Name == "LoadScene" || called.Name == "LoadSceneAsync") &&
+            (called.Name == "LoadScene" || called.Name == "LoadSceneAsync" || called.Name == "GetSceneByName") &&
             called.Parameters.Length > 0 &&
             called.Parameters[0].Type.SpecialType == SpecialType.System_String &&
             settings.HasBuildScenes)
@@ -293,6 +294,15 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
         "GameController",
     };
 
+    private static readonly string[] BuiltinUnityLayers =
+    {
+        "Default",
+        "TransparentFX",
+        "Ignore Raycast",
+        "Water",
+        "UI",
+    };
+
     private static string StripYamlQuotes(string raw)
     {
         var trimmed = raw.Trim();
@@ -337,6 +347,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                 if (trimmed == "layers:" || trimmed == "layers: []")
                 {
                     hasLayers = true;
+                    foreach (var builtin in BuiltinUnityLayers) layers.Add(builtin);
                     section = trimmed.EndsWith("[]", StringComparison.Ordinal) ? "none" : "layers";
                     continue;
                 }

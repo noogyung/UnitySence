@@ -87,6 +87,10 @@
       {
         "command": "unityBrain.rebuildAssetIndex",
         "title": "[UnityBrain] 유니티 에셋 인덱스 다시 구축"
+      },
+      {
+        "command": "unityBrain.cleanOrphanMetaFiles",
+        "title": "[UnityBrain] 고아 .meta 파일 정리"
       }
     ],
     "configuration": {

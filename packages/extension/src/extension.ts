@@ -445,6 +445,13 @@ export async function activate(
       );
       return res;
     }),
+    vscode.commands.registerCommand('unityBrain.cleanOrphanMetaFiles', async () => {
+      const removed = await metaSyncManager.cleanOrphanMetaFiles();
+      void vscode.window.showInformationMessage(
+        `[UnityBrain] 고아 .meta 파일 ${removed.length}개를 정리했습니다.`,
+      );
+      return removed;
+    }),
   ];
 
   const langWithLinks = vscode.languages as unknown as {
@@ -532,6 +539,46 @@ export async function activate(
         watcher.onDidDelete(onPackageChanged),
       );
     }
+
+    let assetRebuildTimer: ReturnType<typeof setTimeout> | undefined;
+    for (const pat of ['Assets/**/*.{unity,prefab,asset,meta}', 'Packages/**/*.{unity,prefab,asset,meta}']) {
+      const assetWatcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(unityContext.projectRoot, pat),
+      );
+      const onAssetChanged = () => {
+        if (assetRebuildTimer) clearTimeout(assetRebuildTimer);
+        assetRebuildTimer = setTimeout(() => {
+          void daemonClient
+            .rebuild(false)
+            .then(() => assetUsageCodeLensProvider.refresh())
+            .catch(() => {});
+        }, 400);
+      };
+      disposables.push(
+        assetWatcher,
+        assetWatcher.onDidChange(onAssetChanged),
+        assetWatcher.onDidCreate(onAssetChanged),
+        assetWatcher.onDidDelete(onAssetChanged),
+      );
+    }
+    disposables.push(
+      new vscode.Disposable(() => {
+        if (assetRebuildTimer) clearTimeout(assetRebuildTimer);
+      }),
+    );
+
+    const csWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(unityContext.projectRoot, 'Assets/**/*.cs'),
+    );
+    const onCsChanged = () => {
+      eventCompletionProvider.invalidateInheritanceCache();
+    };
+    disposables.push(
+      csWatcher,
+      csWatcher.onDidChange(onCsChanged),
+      csWatcher.onDidCreate(onCsChanged),
+      csWatcher.onDidDelete(onCsChanged),
+    );
   }
 
   for (const d of disposables) {

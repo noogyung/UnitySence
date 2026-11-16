@@ -240,4 +240,25 @@ MonoBehaviour:
         AssertEx.Equal(0, binIndex.ComponentUsages.Count);
         AssertEx.Equal(0, binIndex.EventCallbacks.Count);
     }
+
+    [Fact]
+    public void SummarizesSerializedArrayListsAsItemCounts()
+    {
+        const string yaml = @"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_Script: {fileID: 11500000, guid: dddddddddddddddddddddddddddddddd, type: 3}
+  m_Name: PatrolPath
+  waypoints:
+  - {x: 0, y: 0, z: 0}
+  - {x: 5, y: 0, z: 5}
+  emptyTags: []
+  patrolSpeed: 4.5
+";
+        var idx = UnityYamlStreamParser.ParseText(yaml, "Assets/Data/PatrolPath.asset", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        AssertEx.Equal("[2 items]", idx.ComponentUsages[0].SerializedValues["waypoints"]);
+        AssertEx.Equal("[0 items]", idx.ComponentUsages[0].SerializedValues["emptyTags"]);
+        AssertEx.Equal("4.5", idx.ComponentUsages[0].SerializedValues["patrolSpeed"]);
+    }
 }

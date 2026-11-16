@@ -220,4 +220,78 @@ MonoBehaviour:
             }
         }
     }
+
+    [Fact]
+    public void ResolvesPrefabInstanceModificationsAcrossPrefabAndSceneAssets()
+    {
+        string tempRoot = Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "test-output",
+            "daemon-prefab-override-" + Guid.NewGuid().ToString("N"));
+        string prefabsDir = Path.Combine(tempRoot, "Assets", "Prefabs");
+        string scenesDir = Path.Combine(tempRoot, "Assets", "Scenes");
+        string cacheFile = Path.Combine(tempRoot, "Library", "UnityBrainCache", "asset-index.bin");
+        Directory.CreateDirectory(prefabsDir);
+        Directory.CreateDirectory(scenesDir);
+
+        try
+        {
+            const string prefabAssetGuid = "abcdef0123456789abcdef0123456789";
+            const string sceneAssetGuid = "fedcba9876543210fedcba9876543210";
+
+            File.WriteAllText(
+                Path.Combine(prefabsDir, "Hero.prefab.meta"),
+                $"fileFormatVersion: 2\nguid: {prefabAssetGuid}\n");
+            File.WriteAllText(
+                Path.Combine(prefabsDir, "Hero.prefab"),
+                $@"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &10
+GameObject:
+  m_Name: Hero
+--- !u!4 &11
+Transform:
+  m_GameObject: {{fileID: 10}}
+  m_Father: {{fileID: 0}}
+--- !u!114 &11400002
+MonoBehaviour:
+  m_GameObject: {{fileID: 10}}
+  m_Script: {{fileID: 11500000, guid: {PlayerScriptGuid}, type: 3}}
+  moveSpeed: 5
+");
+
+            File.WriteAllText(
+                Path.Combine(scenesDir, "BossArena.unity.meta"),
+                $"fileFormatVersion: 2\nguid: {sceneAssetGuid}\n");
+            File.WriteAllText(
+                Path.Combine(scenesDir, "BossArena.unity"),
+                $@"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1001 &9000
+PrefabInstance:
+  m_TransformParent: {{fileID: 0}}
+  m_Modification:
+    m_Modifications:
+    - target: {{fileID: 11400002, guid: {prefabAssetGuid}, type: 3}}
+      propertyPath: moveSpeed
+      value: 19.5
+");
+
+            var cache = new BinaryIndexCache();
+            cache.BuildOrUpdateIndex(tempRoot, cacheFile, forceRebuild: true);
+
+            var usages = cache.FindByScriptGuid(PlayerScriptGuid);
+            AssertEx.True(usages.Any(u => u.UsageKind == "prefabOverride" && u.AssetPath.EndsWith("BossArena.unity")));
+
+            var values = cache.GetSerializedValues(PlayerScriptGuid, "moveSpeed");
+            AssertEx.True(values.Any(v => v.Value == "19.5" && v.AssetPath.EndsWith("BossArena.unity")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
 }

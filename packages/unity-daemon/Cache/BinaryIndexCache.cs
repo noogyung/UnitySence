@@ -106,20 +106,25 @@ public sealed class BinaryIndexCache
                 }
             }
 
-            string assetsDir = Path.Combine(projectRoot, "Assets");
             var diskMetas = new List<(string FullPath, string RelPath, long Ticks, long Length)>();
             var diskAssets = new List<(string FullPath, string RelPath, long Ticks, long Length)>();
-
-            if (Directory.Exists(assetsDir))
+            var scanRoots = new[]
             {
-                var dirInfo = new DirectoryInfo(assetsDir);
-                var opts = new EnumerationOptions
-                {
-                    RecurseSubdirectories = true,
-                    IgnoreInaccessible = true,
-                    AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
-                };
+                Path.Combine(projectRoot, "Assets"),
+                Path.Combine(projectRoot, "Packages"),
+            };
 
+            var opts = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
+            };
+
+            foreach (var scanDir in scanRoots)
+            {
+                if (!Directory.Exists(scanDir)) continue;
+                var dirInfo = new DirectoryInfo(scanDir);
                 foreach (var fileInfo in dirInfo.EnumerateFiles("*", opts))
                 {
                     string name = fileInfo.Name;
@@ -337,16 +342,50 @@ public sealed class BinaryIndexCache
         var callbacksByMethod = new Dictionary<string, List<(string, string, AssetUsageLocationDto)>>(StringComparer.Ordinal);
         var fieldsByGuid = new Dictionary<string, List<SerializedFieldValueEntryDto>>(StringComparer.OrdinalIgnoreCase);
 
+        // Pass 1: Build cross-asset lookup table (TargetAssetGuid, ComponentFileId) -> C# ScriptGuid
+        // so PrefabInstance (!u!1001) m_Modifications overrides resolve cleanly to the script GUID.
+        var componentScriptMap = new Dictionary<(string AssetGuid, string FileId), string>();
+        foreach (var entry in nextAssets.Values)
+        {
+            var doc = entry.Document;
+            if (string.IsNullOrEmpty(doc.AssetGuid)) continue;
+            foreach (var comp in doc.ComponentUsages)
+            {
+                if (comp.UsageKind == "component" &&
+                    !string.IsNullOrEmpty(comp.FileId) &&
+                    !string.IsNullOrEmpty(comp.ScriptGuid))
+                {
+                    componentScriptMap[(doc.AssetGuid.ToLowerInvariant(), comp.FileId)] = comp.ScriptGuid;
+                }
+            }
+        }
+
+        string ResolveOverrideScriptGuid(string rawGuid, string fileId)
+        {
+            if (!string.IsNullOrEmpty(rawGuid) &&
+                !string.IsNullOrEmpty(fileId) &&
+                componentScriptMap.TryGetValue((rawGuid.ToLowerInvariant(), fileId), out var resolvedScript))
+            {
+                return resolvedScript;
+            }
+            return rawGuid;
+        }
+
         foreach (var entry in nextAssets.Values)
         {
             var doc = entry.Document;
 
             foreach (var comp in doc.ComponentUsages)
             {
-                if (!usagesByGuid.TryGetValue(comp.ScriptGuid, out var list))
+                string effectiveScriptGuid =
+                    comp.UsageKind == "prefabOverride"
+                        ? ResolveOverrideScriptGuid(comp.ScriptGuid, comp.FileId)
+                        : comp.ScriptGuid;
+
+                if (!usagesByGuid.TryGetValue(effectiveScriptGuid, out var list))
                 {
                     list = new List<AssetUsageLocationDto>();
-                    usagesByGuid[comp.ScriptGuid] = list;
+                    usagesByGuid[effectiveScriptGuid] = list;
                 }
 
                 list.Add(new AssetUsageLocationDto(
@@ -389,10 +428,11 @@ public sealed class BinaryIndexCache
                     continue;
                 }
 
-                if (!fieldsByGuid.TryGetValue(sv.ScriptGuid, out var list))
+                string effectiveScriptGuid = ResolveOverrideScriptGuid(sv.ScriptGuid, sv.FileId);
+                if (!fieldsByGuid.TryGetValue(effectiveScriptGuid, out var list))
                 {
                     list = new List<SerializedFieldValueEntryDto>();
-                    fieldsByGuid[sv.ScriptGuid] = list;
+                    fieldsByGuid[effectiveScriptGuid] = list;
                 }
 
                 list.Add(new SerializedFieldValueEntryDto(

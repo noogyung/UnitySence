@@ -155,4 +155,32 @@ describe('MetaFileSyncManager', () => {
       mgr.dispose();
     }
   });
+
+  it('ignores Packages root manifests and cleans orphan .meta files without touching valid ones', async () => {
+    const root = createTempUnityRoot();
+    fs.mkdirSync(path.join(root, 'Packages', 'com.my.local'), { recursive: true });
+    const manifestPath = path.join(root, 'Packages', 'manifest.json');
+    const pkgScriptPath = path.join(root, 'Packages', 'com.my.local', 'Runtime.cs');
+    const validCs = path.join(root, 'Assets', 'Scripts', 'Alive.cs');
+    const orphanMeta = path.join(root, 'Assets', 'Scripts', 'DeletedScript.cs.meta');
+
+    fs.writeFileSync(manifestPath, '{}', 'utf8');
+    fs.writeFileSync(pkgScriptPath, 'class R {}', 'utf8');
+    fs.writeFileSync(validCs, 'class Alive {}', 'utf8');
+    fs.writeFileSync(`${validCs}.meta`, 'guid: 11111111111111111111111111111111\n', 'utf8');
+    fs.writeFileSync(orphanMeta, 'guid: 22222222222222222222222222222222\n', 'utf8');
+
+    const mgr = new MetaFileSyncManager({ projectRoot: root });
+    try {
+      expect(mgr.isEligibleUnityPath(manifestPath)).toBe(false);
+      expect(mgr.isEligibleUnityPath(pkgScriptPath)).toBe(true);
+
+      const removed = await mgr.cleanOrphanMetaFiles();
+      expect(removed).toEqual([orphanMeta]);
+      expect(fs.existsSync(orphanMeta)).toBe(false);
+      expect(fs.existsSync(`${validCs}.meta`)).toBe(true);
+    } finally {
+      mgr.dispose();
+    }
+  });
 });
