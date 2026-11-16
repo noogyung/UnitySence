@@ -282,14 +282,58 @@ function readMetaGuid(assetPath: string): string {
   }
 }
 
-function walkControllerFiles(dir: string, out: string[] = []): string[] {
+export interface InputActionEntry {
+  name: string;
+  actionMap: string;
+  assetName: string;
+}
+
+export function parseInputActionsJson(content: string, assetPath: string): InputActionEntry[] {
+  const assetName = path.basename(assetPath, path.extname(assetPath));
+  try {
+    const parsed = JSON.parse(content) as {
+      maps?: Array<{ name?: string; actions?: Array<{ name?: string }> }>;
+    };
+    const entries: InputActionEntry[] = [];
+    for (const map of parsed.maps ?? []) {
+      const mapName = map.name ?? 'Default';
+      for (const action of map.actions ?? []) {
+        if (action.name) {
+          entries.push({ name: action.name, actionMap: mapName, assetName });
+        }
+      }
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+interface ScannedAssets {
+  controllerFiles: string[];
+  inputActionFiles: string[];
+  resourcePaths: string[];
+}
+
+function scanAssetsForSettings(dir: string, out: ScannedAssets = { controllerFiles: [], inputActionFiles: [], resourcePaths: [] }, inResourcesRoot?: string): ScannedAssets {
   if (!fs.existsSync(dir)) return out;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.')) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      walkControllerFiles(full, out);
-    } else if (entry.isFile() && entry.name.endsWith('.controller')) {
-      out.push(full);
+      const nextResourcesRoot =
+        inResourcesRoot ?? (entry.name.toLowerCase() === 'resources' ? full : undefined);
+      scanAssetsForSettings(full, out, nextResourcesRoot);
+    } else if (entry.isFile()) {
+      if (entry.name.endsWith('.controller')) {
+        out.controllerFiles.push(full);
+      } else if (entry.name.endsWith('.inputactions')) {
+        out.inputActionFiles.push(full);
+      } else if (inResourcesRoot && !entry.name.endsWith('.meta')) {
+        const rel = path.relative(inResourcesRoot, full).replace(/\\/g, '/');
+        const ext = path.extname(rel);
+        out.resourcePaths.push(ext ? rel.slice(0, -ext.length) : rel);
+      }
     }
   }
   return out;
@@ -298,6 +342,8 @@ function walkControllerFiles(dir: string, out: string[] = []): string[] {
 export class ProjectSettingsWatcher implements vscode.Disposable {
   private context: UnityProjectContext;
   private cache: ProjectSettingsCache;
+  private inputActions: InputActionEntry[] = [];
+  private resourcePaths: string[] = [];
   private readonly enableWatchers: boolean;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly _onDidUpdateCache = new vscode.EventEmitter<ProjectSettingsCache>();
@@ -321,6 +367,14 @@ export class ProjectSettingsWatcher implements vscode.Disposable {
 
   public getCache(): ProjectSettingsCache {
     return this.cache;
+  }
+
+  public getInputActions(): readonly InputActionEntry[] {
+    return this.inputActions;
+  }
+
+  public getResourcePaths(): readonly string[] {
+    return this.resourcePaths;
   }
 
   public updateContext(newContext: UnityProjectContext): void {
@@ -360,12 +414,20 @@ export class ProjectSettingsWatcher implements vscode.Disposable {
       ? parseEditorBuildSettingsYaml(fs.readFileSync(buildPath, 'utf8'))
       : [];
 
-    const controllerFiles = walkControllerFiles(path.join(this.context.projectRoot, 'Assets'));
-    const animatorControllers: AnimatorControllerIndex[] = controllerFiles.map((file) => {
+    const scanned = scanAssetsForSettings(path.join(this.context.projectRoot, 'Assets'));
+    const animatorControllers: AnimatorControllerIndex[] = scanned.controllerFiles.map((file) => {
       const relPath = path.relative(this.context.projectRoot, file).replace(/\\/g, '/');
       const guid = readMetaGuid(file);
       return parseAnimatorControllerYaml(fs.readFileSync(file, 'utf8'), relPath, guid);
     });
+
+    const inputActions: InputActionEntry[] = [];
+    for (const file of scanned.inputActionFiles) {
+      const relPath = path.relative(this.context.projectRoot, file).replace(/\\/g, '/');
+      inputActions.push(...parseInputActionsJson(fs.readFileSync(file, 'utf8'), relPath));
+    }
+    this.inputActions = inputActions;
+    this.resourcePaths = Array.from(new Set(scanned.resourcePaths));
 
     this.cache = {
       schemaVersion: 1,
@@ -389,6 +451,8 @@ export class ProjectSettingsWatcher implements vscode.Disposable {
       'ProjectSettings/InputManager.asset',
       'ProjectSettings/EditorBuildSettings.asset',
       'Assets/**/*.controller',
+      'Assets/**/*.inputactions',
+      'Assets/**/Resources/**/*',
     ];
     for (const pat of patterns) {
       const watcher = vscode.workspace.createFileSystemWatcher(

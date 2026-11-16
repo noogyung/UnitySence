@@ -6,6 +6,7 @@ import { IncludeDependencyGraph } from '../../shader-lsp/src/indexer/hlslInclude
 import { ShaderCompletionProvider } from '../../shader-lsp/src/providers/completionProvider.ts';
 import { ShaderDefinitionProvider } from '../../shader-lsp/src/providers/definitionProvider.ts';
 import { ShaderHoverProvider } from '../../shader-lsp/src/providers/hoverProvider.ts';
+import { UnityCSharpCodeActionProvider } from './analyzers/csharpCodeActionProvider.ts';
 import { MsbuildAnalyzerInjector } from './analyzers/msbuildInjector.ts';
 import {
   type DaemonClientTransport,
@@ -39,6 +40,7 @@ import {
   ShaderSignatureHelpProvider,
 } from './shader/shaderEditorProviders.ts';
 import {
+  analyzeShaderVariants,
   isShaderDocument,
   ShaderKeywordContextStatusBar,
   ShaderVariantCodeLensProvider,
@@ -214,21 +216,45 @@ export async function activate(
     transportFactory: options.daemonTransportFactory,
   });
 
+  const eventCompletionProvider = new UnityEventCompletionProvider({
+    apiDatabase,
+    projectRoot: unityContext.projectRoot,
+    getEditorVersion: () => contextManager.context?.editorVersion ?? unityContext.editorVersion,
+  });
+
   const assetUsageCodeLensProvider = new UnityAssetUsageCodeLensProvider(
     unityContext.projectRoot,
     daemonClient,
+    eventCompletionProvider,
   );
   const shaderVariantCodeLensProvider = new ShaderVariantCodeLensProvider();
+
+  const collectProjectShaderKeywords = (): string[] => {
+    const activeCtx = contextManager.context ?? unityContext;
+    const files = walkShaderFiles(path.join(activeCtx.projectRoot, 'Assets'));
+    const kwSet = new Set<string>();
+    for (const file of files) {
+      try {
+        const analysis = analyzeShaderVariants(fs.readFileSync(file, 'utf8'));
+        for (const kw of analysis.allKeywords) kwSet.add(kw);
+      } catch {
+        // Ignore unreadable shader
+      }
+    }
+    return Array.from(kwSet);
+  };
 
   const stringCompletionProvider = new UnityStringCompletionProvider(
     () => settingsWatcher.getCache(),
     () => cachedShaderIndex ?? buildCurrentShaderIndex(),
+    {
+      getInputActions: () => settingsWatcher.getInputActions(),
+      getResourcePaths: () => settingsWatcher.getResourcePaths(),
+      getShaderKeywords: collectProjectShaderKeywords,
+    },
   );
 
-  const eventCompletionProvider = new UnityEventCompletionProvider({
-    apiDatabase,
-    getEditorVersion: () => contextManager.context?.editorVersion ?? unityContext.editorVersion,
-  });
+  const csharpCodeActionProvider = new UnityCSharpCodeActionProvider();
 
   const metaSyncManager = new MetaFileSyncManager({ projectRoot: unityContext.projectRoot });
 
@@ -400,6 +426,11 @@ export async function activate(
     vscode.languages.registerCompletionItemProvider(
       CSHARP_SELECTOR,
       eventCompletionProvider,
+    ),
+    vscode.languages.registerCodeActionsProvider(
+      CSHARP_SELECTOR,
+      csharpCodeActionProvider,
+      { providedCodeActionKinds: UnityCSharpCodeActionProvider.providedCodeActionKinds },
     ),
     vscode.languages.registerCodeLensProvider(CSHARP_SELECTOR, assetUsageCodeLensProvider),
     vscode.languages.registerCodeLensProvider(SHADER_SELECTOR, shaderVariantCodeLensProvider),

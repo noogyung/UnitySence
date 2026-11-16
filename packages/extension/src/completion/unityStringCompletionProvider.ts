@@ -4,17 +4,30 @@ import type {
   ProjectSettingsCache,
   ShaderSymbolIndex,
 } from '../contracts/index.ts';
+import type { InputActionEntry } from '../watchers/projectSettingsWatcher.ts';
 
 export type UnityStringContextKind =
   | 'tag'
   | 'layer'
   | 'sortingLayer'
   | 'input'
+  | 'inputAction'
   | 'scene'
   | 'shaderProperty'
+  | 'shaderName'
+  | 'shaderKeyword'
+  | 'resource'
   | 'animator'
   | 'coroutine'
   | 'invoke';
+
+export type AnimatorFilterKind = 'Float' | 'Int' | 'Bool' | 'Trigger' | 'State';
+
+export interface UnityStringExtraSources {
+  getInputActions?: () => readonly InputActionEntry[];
+  getResourcePaths?: () => readonly string[];
+  getShaderKeywords?: () => readonly string[];
+}
 
 export interface ParsedCSharpMethod {
   name: string;
@@ -103,68 +116,104 @@ function analyzeCursorLexicalState(snippet: string): {
   };
 }
 
-function matchUnityStringApiBeforeArg(beforeArg: string, allowAssignment: boolean): UnityStringContextKind | null {
+interface ApiMatchResult {
+  kind: UnityStringContextKind;
+  animatorSubKind?: AnimatorFilterKind;
+}
+
+function matchUnityStringApiBeforeArg(beforeArg: string, allowAssignment: boolean): ApiMatchResult | null {
   const windowLines = beforeArg.split(/\r?\n/).slice(-4).join(' ');
 
   if (/(?:CompareTag|FindWithTag|FindGameObjects?WithTag)\s*\(\s*$/.test(windowLines)) {
-    return 'tag';
+    return { kind: 'tag' };
   }
   if (allowAssignment && /\.tag\s*(?:==|!=|=)\s*$/.test(windowLines)) {
-    return 'tag';
+    return { kind: 'tag' };
   }
 
   if (/LayerMask\.NameToLayer\s*\(\s*$/.test(windowLines)) {
-    return 'layer';
+    return { kind: 'layer' };
   }
   if (/LayerMask\.GetMask\s*\([^;()]*$/.test(windowLines)) {
-    return 'layer';
+    return { kind: 'layer' };
   }
 
   if (/SortingLayer\.NameToID\s*\(\s*$/.test(windowLines)) {
-    return 'sortingLayer';
+    return { kind: 'sortingLayer' };
   }
 
   if (/Input\.(?:GetAxis|GetAxisRaw|GetButton|GetButtonDown|GetButtonUp)\s*\(\s*$/.test(windowLines)) {
-    return 'input';
+    return { kind: 'input' };
+  }
+
+  if (/(?:FindAction|FindActionMap|SwitchCurrentActionMap)\s*\(\s*$/.test(windowLines) || /\.actions\[\s*$/.test(windowLines)) {
+    return { kind: 'inputAction' };
   }
 
   if (/SceneManager\.(?:LoadScene|LoadSceneAsync|GetSceneByName)\s*\(\s*$/.test(windowLines)) {
-    return 'scene';
+    return { kind: 'scene' };
+  }
+
+  if (/Resources\.(?:Load|LoadAsync|LoadAll)(?:<[^>]+>)?\s*\(\s*$/.test(windowLines)) {
+    return { kind: 'resource' };
+  }
+
+  if (/Shader\.Find\s*\(\s*$/.test(windowLines)) {
+    return { kind: 'shaderName' };
   }
 
   if (
-    /Shader\.PropertyToID\s*\(\s*$/.test(windowLines) ||
-    /(?:mat|material|Material|mpb|block|PropertyBlock)[A-Za-z0-9_]*\.(?:SetFloat|SetInt|SetInteger|SetColor|SetVector|SetTexture|SetMatrix|SetBuffer|GetFloat|GetInt|GetInteger|GetColor|GetVector|GetTexture|GetMatrix|HasProperty)\s*\(\s*$/.test(
+    /(?:Shader|mat|material|Material)[A-Za-z0-9_]*\.(?:EnableKeyword|DisableKeyword|IsKeywordEnabled)\s*\(\s*$/.test(
+      windowLines,
+    )
+  ) {
+    return { kind: 'shaderKeyword' };
+  }
+
+  if (/Animator\.StringToHash\s*\(\s*$/.test(windowLines)) {
+    return { kind: 'animator' };
+  }
+
+  const animMethodMatch =
+    /(?<![A-Za-z])_?(?:anim|animator|Animator)[A-Za-z0-9_]*\.(SetFloat|GetFloat|SetInteger|GetInteger|SetBool|GetBool|SetTrigger|ResetTrigger|Play|CrossFade|CrossFadeInFixedTime|IsName)\s*\(\s*$/.exec(
+      windowLines,
+    ) ?? /\.(SetTrigger|ResetTrigger|SetBool|GetBool|CrossFade|CrossFadeInFixedTime)\s*\(\s*$/.exec(windowLines);
+  if (animMethodMatch) {
+    const mName = animMethodMatch[1];
+    let sub: AnimatorFilterKind | undefined;
+    if (mName.includes('Float')) sub = 'Float';
+    else if (mName.includes('Integer')) sub = 'Int';
+    else if (mName.includes('Bool')) sub = 'Bool';
+    else if (mName.includes('Trigger')) sub = 'Trigger';
+    else if (mName === 'Play' || mName.startsWith('CrossFade') || mName === 'IsName') sub = 'State';
+    return { kind: 'animator', animatorSubKind: sub };
+  }
+
+  if (
+    /Shader\.(?:PropertyToID|SetGlobalFloat|SetGlobalInt|SetGlobalInteger|SetGlobalColor|SetGlobalVector|SetGlobalTexture|SetGlobalMatrix|SetGlobalBuffer)\s*\(\s*$/.test(
+      windowLines,
+    ) ||
+    /(?<![A-Za-z])_?(?:mat|material|Material|mpb|block|PropertyBlock)[A-Za-z0-9_]*\.(?:SetFloat|SetInt|SetInteger|SetColor|SetVector|SetTexture|SetMatrix|SetBuffer|GetFloat|GetInt|GetInteger|GetColor|GetVector|GetTexture|GetMatrix|HasProperty)\s*\(\s*$/.test(
       windowLines,
     ) ||
     /\.(?:HasProperty|SetColor|SetTexture|GetColor|GetTexture|SetVector|GetVector)\s*\(\s*$/.test(
       windowLines,
     )
   ) {
-    return 'shaderProperty';
-  }
-
-  if (
-    /Animator\.StringToHash\s*\(\s*$/.test(windowLines) ||
-    /(?:anim|animator|Animator)[A-Za-z0-9_]*\.(?:SetFloat|SetInteger|SetBool|SetTrigger|ResetTrigger|GetFloat|GetInteger|GetBool|Play|CrossFade|IsName)\s*\(\s*$/.test(
-      windowLines,
-    ) ||
-    /\.(?:SetTrigger|ResetTrigger|SetBool|GetBool|CrossFade)\s*\(\s*$/.test(windowLines)
-  ) {
-    return 'animator';
+    return { kind: 'shaderProperty' };
   }
 
   // Fallback for `.SetFloat("` when receiver is unrecognized: still differentiate animator vs material
   if (/\.(?:SetFloat|GetFloat|SetInt|GetInt|SetInteger|GetInteger)\s*\(\s*$/.test(windowLines)) {
-    return 'shaderProperty';
+    return { kind: 'shaderProperty' };
   }
 
   if (/(?:StartCoroutine|StopCoroutine)\s*\(\s*$/.test(windowLines)) {
-    return 'coroutine';
+    return { kind: 'coroutine' };
   }
 
   if (/(?:Invoke|InvokeRepeating|CancelInvoke|IsInvoking)\s*\(\s*$/.test(windowLines)) {
-    return 'invoke';
+    return { kind: 'invoke' };
   }
 
   return null;
@@ -175,13 +224,15 @@ export function detectApiStringContext(textBeforeCursor: string): UnityStringCon
   if (!state.inString || state.stringStart === -1) return null;
 
   const beforeQuote = textBeforeCursor.slice(0, state.stringStart);
-  return matchUnityStringApiBeforeArg(beforeQuote, true);
+  return matchUnityStringApiBeforeArg(beforeQuote, true)?.kind ?? null;
 }
 
 export function detectApiParenOrStringContext(textBeforeCursor: string): {
   kind: UnityStringContextKind;
+  animatorSubKind?: AnimatorFilterKind;
   insideQuotes: boolean;
   quoteStartIdx: number;
+  partialIdent: string;
 } | null {
   const state = analyzeCursorLexicalState(textBeforeCursor);
   if (state.inLineComment || state.inBlockComment) {
@@ -190,13 +241,35 @@ export function detectApiParenOrStringContext(textBeforeCursor: string): {
 
   if (state.inString && state.stringStart !== -1) {
     const beforeQuote = textBeforeCursor.slice(0, state.stringStart);
-    const kind = matchUnityStringApiBeforeArg(beforeQuote, true);
-    return kind ? { kind, insideQuotes: true, quoteStartIdx: state.stringStart } : null;
+    const hit = matchUnityStringApiBeforeArg(beforeQuote, true);
+    return hit
+      ? {
+          kind: hit.kind,
+          animatorSubKind: hit.animatorSubKind,
+          insideQuotes: true,
+          quoteStartIdx: state.stringStart,
+          partialIdent: '',
+        }
+      : null;
   }
 
-  // Right after an opening parenthesis (or comma inside LayerMask.GetMask) before quotes are typed
-  const kind = matchUnityStringApiBeforeArg(state.codeWithoutComments, false);
-  return kind ? { kind, insideQuotes: false, quoteStartIdx: -1 } : null;
+  // Allow right after opening `(` / comma OR when unquoted identifier prefix was started (`CompareTag(Pl`)
+  const partialMatch = /([A-Za-z_][A-Za-z0-9_]*)$/.exec(state.codeWithoutComments);
+  const partialIdent = partialMatch ? partialMatch[1] : '';
+  const beforeIdent = partialIdent
+    ? state.codeWithoutComments.slice(0, state.codeWithoutComments.length - partialIdent.length)
+    : state.codeWithoutComments;
+
+  const hit = matchUnityStringApiBeforeArg(beforeIdent, false);
+  return hit
+    ? {
+        kind: hit.kind,
+        animatorSubKind: hit.animatorSubKind,
+        insideQuotes: false,
+        quoteStartIdx: -1,
+        partialIdent,
+      }
+    : null;
 }
 
 export function extractCSharpClassMethods(sourceText: string): ParsedCSharpMethod[] {
@@ -220,13 +293,16 @@ export function extractCSharpClassMethods(sourceText: string): ParsedCSharpMetho
 export class UnityStringCompletionProvider implements vscode.CompletionItemProvider {
   private readonly getCache: () => ProjectSettingsCache;
   private readonly getShaderIndex: () => Promise<ShaderSymbolIndex | null> | ShaderSymbolIndex | null;
+  private readonly extraSources?: UnityStringExtraSources;
 
   constructor(
     getCache: () => ProjectSettingsCache,
     getShaderIndex: () => Promise<ShaderSymbolIndex | null> | ShaderSymbolIndex | null,
+    extraSources?: UnityStringExtraSources,
   ) {
     this.getCache = getCache;
     this.getShaderIndex = getShaderIndex;
+    this.extraSources = extraSources;
   }
 
   public async provideCompletionItems(
@@ -286,11 +362,63 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
         }
         break;
       }
+      case 'inputAction': {
+        const actions = this.extraSources?.getInputActions?.() ?? [];
+        const seen = new Set<string>();
+        for (const act of actions) {
+          if (!seen.has(act.name)) {
+            seen.add(act.name);
+            const item = new vscode.CompletionItem(act.name, vscode.CompletionItemKind.Event);
+            item.detail = `[UnityBrain] InputAction (${act.actionMap} · ${act.assetName})`;
+            item.documentation = `[UnityBrain] '.inputactions' 에셋의 액션 '${act.actionMap}/${act.name}'입니다.`;
+            items.push(item);
+          }
+          if (!seen.has(act.actionMap)) {
+            seen.add(act.actionMap);
+            const mapItem = new vscode.CompletionItem(act.actionMap, vscode.CompletionItemKind.Module);
+            mapItem.detail = `[UnityBrain] InputActionMap (${act.assetName})`;
+            mapItem.documentation = `[UnityBrain] '.inputactions' 에셋의 액션 맵입니다.`;
+            items.push(mapItem);
+          }
+        }
+        break;
+      }
       case 'scene': {
         for (const scene of cache.buildScenes) {
           const item = new vscode.CompletionItem(scene.name, vscode.CompletionItemKind.File);
           item.detail = `[UnityBrain] 빌드 씬 #${scene.buildIndex} (Build Index ${scene.buildIndex} · ${scene.path})`;
           item.documentation = `[UnityBrain] EditorBuildSettings.asset 빌드 인덱스 ${scene.buildIndex}번 씬입니다.`;
+          items.push(item);
+        }
+        break;
+      }
+      case 'resource': {
+        const resPaths = this.extraSources?.getResourcePaths?.() ?? [];
+        for (const rPath of resPaths) {
+          const item = new vscode.CompletionItem(rPath, vscode.CompletionItemKind.File);
+          item.detail = '[UnityBrain] Resources 리소스 경로';
+          item.documentation = `[UnityBrain] Assets/.../Resources/${rPath} 에셋입니다.`;
+          items.push(item);
+        }
+        break;
+      }
+      case 'shaderName': {
+        const shaderIndex = await this.getShaderIndex();
+        if (!shaderIndex) return [];
+        for (const sName of shaderIndex.shaderNames) {
+          const item = new vscode.CompletionItem(sName, vscode.CompletionItemKind.Class);
+          item.detail = '[UnityBrain] 유니티 셰이더 이름 (Shader.Find)';
+          item.documentation = `[UnityBrain] 프로젝트에 정의된 셰이더 '${sName}'입니다.`;
+          items.push(item);
+        }
+        break;
+      }
+      case 'shaderKeyword': {
+        const keywords = this.extraSources?.getShaderKeywords?.() ?? [];
+        for (const kw of keywords) {
+          const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Constant);
+          item.detail = '[UnityBrain] 셰이더 키워드 (#pragma keyword)';
+          item.documentation = `[UnityBrain] 프로젝트 셰이더에 선언된 배리언트 키워드 '${kw}'입니다.`;
           items.push(item);
         }
         break;
@@ -311,21 +439,40 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
         break;
       }
       case 'animator': {
+        const subFilter = detected.animatorSubKind;
+        const primaryItems: vscode.CompletionItem[] = [];
+        const secondaryItems: vscode.CompletionItem[] = [];
         for (const ctrl of cache.animatorControllers) {
           const ctrlName = path.basename(ctrl.assetPath, path.extname(ctrl.assetPath));
-          for (const param of ctrl.parameters) {
-            const item = new vscode.CompletionItem(param.name, vscode.CompletionItemKind.Variable);
-            item.detail = `[UnityBrain] 애니메이터 파라미터 (${param.type} · ${ctrlName})`;
-            item.documentation = `[UnityBrain] '${ctrl.assetPath}' 컨트롤러의 파라미터입니다.`;
-            items.push(item);
+          if (subFilter !== 'State') {
+            for (const param of ctrl.parameters) {
+              if (subFilter && param.type !== subFilter) continue;
+              const item = new vscode.CompletionItem(param.name, vscode.CompletionItemKind.Variable);
+              item.detail = `[UnityBrain] 애니메이터 파라미터 (${param.type} · ${ctrlName})`;
+              item.documentation = `[UnityBrain] '${ctrl.assetPath}' 컨트롤러의 파라미터입니다.`;
+              item.sortText = `0_${param.name}`;
+              primaryItems.push(item);
+            }
           }
-          for (const state of ctrl.states) {
-            const item = new vscode.CompletionItem(state, vscode.CompletionItemKind.Enum);
-            item.detail = `[UnityBrain] 애니메이터 상태 (State · ${ctrlName})`;
-            item.documentation = `[UnityBrain] '${ctrl.assetPath}' 컨트롤러의 스테이트입니다.`;
-            items.push(item);
+          if (!subFilter || subFilter === 'State') {
+            for (const state of ctrl.states) {
+              const item = new vscode.CompletionItem(state, vscode.CompletionItemKind.Enum);
+              item.detail = `[UnityBrain] 애니메이터 상태 (State · ${ctrlName})`;
+              item.documentation = `[UnityBrain] '${ctrl.assetPath}' 컨트롤러의 스테이트입니다.`;
+              item.sortText = `0_${state}`;
+              primaryItems.push(item);
+            }
+          } else {
+            for (const state of ctrl.states) {
+              const item = new vscode.CompletionItem(state, vscode.CompletionItemKind.Enum);
+              item.detail = `[UnityBrain] 애니메이터 상태 (State · ${ctrlName})`;
+              item.documentation = `[UnityBrain] '${ctrl.assetPath}' 컨트롤러의 스테이트입니다.`;
+              item.sortText = `2_${state}`;
+              secondaryItems.push(item);
+            }
           }
         }
+        items.push(...primaryItems, ...secondaryItems);
         break;
       }
       case 'coroutine':
@@ -348,20 +495,45 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
     }
 
     let replaceRange: vscode.Range | undefined;
+    const fullLineText = document.lineAt(position.line).text;
     if (detected.insideQuotes) {
-      const curBeforeCursor = document.lineAt(position.line).text.slice(0, position.character);
+      const curBeforeCursor = fullLineText.slice(0, position.character);
       const lastQuoteCol = curBeforeCursor.lastIndexOf('"');
       if (lastQuoteCol >= 0) {
-        replaceRange = new vscode.Range(new vscode.Position(position.line, lastQuoteCol + 1), position);
+        let closingOffset = -1;
+        const afterCursor = fullLineText.slice(position.character);
+        for (let k = 0; k < afterCursor.length; k++) {
+          if (afterCursor[k] === '\\') {
+            k++;
+            continue;
+          }
+          if (afterCursor[k] === '"') {
+            closingOffset = k;
+            break;
+          }
+        }
+        const endCol = closingOffset >= 0 ? position.character + closingOffset : position.character;
+        replaceRange = new vscode.Range(
+          new vscode.Position(position.line, lastQuoteCol + 1),
+          new vscode.Position(position.line, endCol),
+        );
       }
+    } else if (detected.partialIdent) {
+      replaceRange = new vscode.Range(
+        new vscode.Position(position.line, position.character - detected.partialIdent.length),
+        position,
+      );
     }
 
     for (let idx = 0; idx < items.length; idx++) {
       const item = items[idx];
       if (!detected.insideQuotes) {
         item.insertText = `"${item.label}"`;
-        item.filterText = `"${item.label}" ${item.label}`;
-      } else if (replaceRange) {
+        item.filterText = detected.partialIdent
+          ? `${detected.partialIdent} "${item.label}" ${item.label}`
+          : `"${item.label}" ${item.label}`;
+      }
+      if (replaceRange) {
         item.range = replaceRange;
       }
       item.sortText = item.sortText

@@ -109,4 +109,42 @@ public class TriggerZone : MonoBehaviour
     expect(updated).toContain('private void FixedUpdate()');
     disp.dispose();
   });
+
+  it('replaces modifier+void prefixes cleanly, supports generic where constraints, and uses public override for Editor/StateMachineBehaviour', () => {
+    const provider = new UnityEventCompletionProvider({
+      getEditorVersion: () => '6000.0.23f1',
+    });
+
+    // 1. Partial `private void Up` replacement range + generic where constraint
+    const csCode = `public class GenericBehaviour<T> : MonoBehaviour where T : class
+{
+    private void Up/*CURSOR*/
+}`;
+    const cursorOffset = csCode.indexOf('/*CURSOR*/');
+    const doc = vscode.__mock.createTextDocument(
+      vscode.Uri.file('Assets/GenericBehaviour.cs'),
+      csCode.replace('/*CURSOR*/', ''),
+      'csharp',
+    );
+    const items = provider.provideCompletionItems(doc, doc.positionAt(cursorOffset));
+    const updateItem = items?.find((i) => i.label === 'Update');
+    expect(updateItem).toBeDefined();
+    expect(doc.getText(updateItem!.range as vscode.Range)).toBe('private void Up');
+
+    // 2. Editor class emits `public override void OnInspectorGUI()`
+    const editorCode = `using UnityEditor;
+public class CustomInspector : Editor
+{
+    /*CURSOR*/
+}`;
+    const edOffset = editorCode.indexOf('/*CURSOR*/');
+    const edDoc = vscode.__mock.createTextDocument(
+      vscode.Uri.file('Assets/Editor/CustomInspector.cs'),
+      editorCode.replace('/*CURSOR*/', ''),
+      'csharp',
+    );
+    const edItems = provider.provideCompletionItems(edDoc, edDoc.positionAt(edOffset));
+    const inspectorItem = edItems?.find((i) => i.label === 'OnInspectorGUI');
+    expect((inspectorItem?.insertText as vscode.SnippetString).value).toContain('public override void OnInspectorGUI()');
+  });
 });

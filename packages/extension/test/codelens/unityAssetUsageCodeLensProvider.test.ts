@@ -234,4 +234,45 @@ describe('UnityAssetUsageCodeLensProvider', () => {
     provider.dispose();
     daemonClient.dispose();
   });
+
+  it('emits Rider-style Unity event function CodeLenses even for modifierless methods and without .meta', async () => {
+    const root = createTempProject();
+    const csPath = path.join(root, 'Assets', 'Scripts', 'LifecycleProbe.cs');
+    const source = [
+      'using UnityEngine;',
+      '',
+      'public class LifecycleProbe : MonoBehaviour',
+      '{',
+      '    void Awake() {}',
+      '    private void Update() {}',
+      '    void HelperOnly() {}',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(csPath, source, 'utf8');
+
+    const daemonClient = new UnityDaemonClient({
+      projectRoot: root,
+      extensionPath: root,
+      transportFactory: () => ({
+        sendRequest: async <T>() => ({ locations: [] } as T),
+        dispose: () => {},
+      }),
+    });
+
+    const provider = new UnityAssetUsageCodeLensProvider(root, daemonClient);
+    const doc = vscode.__mock.createTextDocument(vscode.Uri.file(csPath), source, 'csharp');
+    const lenses = await provider.provideCodeLenses(doc, new vscode.CancellationTokenSource().token);
+
+    const awakeLens = lenses.find((l) => l.range.start.line === 4);
+    const updateLens = lenses.find((l) => l.range.start.line === 5);
+    const helperLens = lenses.find((l) => l.range.start.line === 6);
+
+    expect(awakeLens?.command?.title).toBe('$(symbol-event) [UnityBrain] 유니티 이벤트 함수 (MonoBehaviour)');
+    expect(updateLens?.command?.title).toBe(
+      '$(symbol-event) [UnityBrain] 유니티 이벤트 함수 (MonoBehaviour) · 매 프레임 호출',
+    );
+    expect(helperLens).toBeUndefined();
+    provider.dispose();
+    daemonClient.dispose();
+  });
 });

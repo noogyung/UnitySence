@@ -74,7 +74,7 @@ export function shortenCSharpType(fullType: string): string {
 }
 
 export function findEnclosingClassContext(sourceText: string, cursorOffset: number): ClassContextInfo | null {
-  const classRegex = /\bclass\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*:\s*([^{]+))?\s*\{/g;
+  const classRegex = /\bclass\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?(?:\s*:\s*([^{]+))?\s*\{/g;
   let match: RegExpExecArray | null;
   let best: ClassContextInfo | null = null;
 
@@ -104,10 +104,11 @@ export function findEnclosingClassContext(sourceText: string, cursorOffset: numb
 
       const classBody = sourceText.slice(openBraceOffset + 1, closeBraceOffset);
       const existingMethods = extractMethodNamesAtTopLevel(classBody);
-      const baseTypes = baseListRaw
+      const cleanBaseList = baseListRaw.replace(/\bwhere\b[\s\S]*$/, '');
+      const baseTypes = cleanBaseList
         .split(',')
         .map((s) => s.trim())
-        .filter((s) => s.length > 0 && !s.startsWith('where '));
+        .filter((s) => s.length > 0);
 
       best = {
         className,
@@ -176,13 +177,49 @@ export function resolveUnityApiType(
   return null;
 }
 
+const VIRTUAL_OVERRIDE_EVENTS: Record<string, ReadonlySet<string>> = {
+  'UnityEngine.StateMachineBehaviour': new Set([
+    'OnStateEnter',
+    'OnStateUpdate',
+    'OnStateExit',
+    'OnStateMove',
+    'OnStateIK',
+    'OnStateMachineEnter',
+    'OnStateMachineExit',
+  ]),
+  'UnityEditor.Editor': new Set([
+    'OnInspectorGUI',
+    'CreateInspectorGUI',
+    'HasPreviewGUI',
+    'OnPreviewGUI',
+    'OnInteractivePreviewGUI',
+    'RequiresConstantRepaint',
+  ]),
+  'UnityEditor.PropertyDrawer': new Set(['OnGUI', 'GetPropertyHeight', 'CreatePropertyGUI']),
+  'UnityEditor.AssetImporters.ScriptedImporter': new Set(['OnImportAsset']),
+  'Unity.Netcode.NetworkBehaviour': new Set([
+    'OnNetworkSpawn',
+    'OnNetworkDespawn',
+    'OnGainedOwnership',
+    'OnLostOwnership',
+  ]),
+};
+
+function resolveMethodModifier(ev: UnityEventFunction, ownerFullName?: string): string {
+  if (ev.isStatic) return 'private static';
+  if (ownerFullName && VIRTUAL_OVERRIDE_EVENTS[ownerFullName]?.has(ev.name)) {
+    return 'public override';
+  }
+  return 'private';
+}
+
 export function formatUnityEventMethod(
   ev: UnityEventFunction,
-  options: { asCoroutine?: boolean; snippet?: boolean; indent?: string } = {},
+  options: { asCoroutine?: boolean; snippet?: boolean; indent?: string; ownerFullName?: string } = {},
 ): string {
   const indent = options.indent ?? '    ';
   const bodyIndent = `${indent}    `;
-  const modifier = ev.isStatic ? 'private static' : 'private';
+  const modifier = resolveMethodModifier(ev, options.ownerFullName);
   const returnType = options.asCoroutine ? 'IEnumerator' : shortenCSharpType(ev.returnType);
   const paramsStr = ev.parameters
     .map((p) => `${shortenCSharpType(p.type)} ${p.name}`)
@@ -199,8 +236,28 @@ export function formatUnityEventMethod(
   return `${indent}${modifier} ${returnType} ${ev.name}(${paramsStr})\n${indent}{\n${inner}\n${indent}}`;
 }
 
+export function extractClassInheritanceFromSource(
+  sourceText: string,
+  targetMap: Map<string, string[]>,
+): void {
+  const classRegex = /\bclass\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?\s*:\s*([^{]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = classRegex.exec(sourceText)) !== null) {
+    const cls = m[1];
+    const bases = m[2]
+      .replace(/\bwhere\b[\s\S]*$/, '')
+      .split(',')
+      .map((s) => s.replace(/<.*>$/, '').trim())
+      .filter(Boolean);
+    if (bases.length > 0) {
+      targetMap.set(cls, bases);
+    }
+  }
+}
+
 export interface EventGeneratorOptions {
   apiDatabase?: UnityApiDatabase;
+  projectRoot?: string;
   getEditorVersion?: () => string | undefined;
   getInheritanceMap?: () => ReadonlyMap<string, string[]>;
 }
@@ -208,21 +265,96 @@ export interface EventGeneratorOptions {
 export class UnityEventCompletionProvider implements vscode.CompletionItemProvider {
   private readonly db: UnityApiDatabase;
   private readonly options: EventGeneratorOptions;
+  private cachedProjectInheritance: Map<string, string[]> | null = null;
+  private lastScanMs = 0;
 
   constructor(options: EventGeneratorOptions = {}) {
     this.options = options;
     this.db = options.apiDatabase ?? loadUnityApiDatabase();
   }
 
+  private buildCombinedInheritanceMap(documentText?: string): ReadonlyMap<string, string[]> {
+    const explicit = this.options.getInheritanceMap?.();
+    const combined = new Map<string, string[]>();
+    if (explicit) {
+      for (const [k, v] of explicit.entries()) {
+        combined.set(k, v);
+      }
+    }
+
+    const projectRoot = this.options.projectRoot;
+    if (projectRoot) {
+      const now = Date.now();
+      if (!this.cachedProjectInheritance || now - this.lastScanMs > 5000) {
+        const scanned = new Map<string, string[]>();
+        const assetsDir = path.join(projectRoot, 'Assets');
+        if (fs.existsSync(assetsDir)) {
+          const stack = [assetsDir];
+          while (stack.length > 0) {
+            const dir = stack.pop();
+            if (!dir) continue;
+            let entries: fs.Dirent[];
+            try {
+              entries = fs.readdirSync(dir, { withFileTypes: true });
+            } catch {
+              continue;
+            }
+            for (const entry of entries) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) stack.push(full);
+              else if (entry.isFile() && entry.name.endsWith('.cs')) {
+                try {
+                  extractClassInheritanceFromSource(fs.readFileSync(full, 'utf8'), scanned);
+                } catch {
+                  // Ignore unreadable file
+                }
+              }
+            }
+          }
+        }
+        this.cachedProjectInheritance = scanned;
+        this.lastScanMs = now;
+      }
+      for (const [k, v] of this.cachedProjectInheritance.entries()) {
+        if (!combined.has(k)) combined.set(k, v);
+      }
+    }
+
+    if (documentText) {
+      extractClassInheritanceFromSource(documentText, combined);
+    }
+    return combined;
+  }
+
+  public invalidateInheritanceCache(): void {
+    this.cachedProjectInheritance = null;
+    this.lastScanMs = 0;
+  }
+
+  public findUnityEventInfo(
+    documentText: string,
+    offsetInClass: number,
+    methodName: string,
+  ): { apiType: UnityApiTypeEntry; event: UnityEventFunction } | null {
+    const classCtx = findEnclosingClassContext(documentText, offsetInClass);
+    if (!classCtx) return null;
+    const inheritanceMap = this.buildCombinedInheritanceMap(documentText);
+    const apiType = resolveUnityApiType(classCtx.baseTypes, this.db, inheritanceMap);
+    if (!apiType) return null;
+    const ev = apiType.events.find((e) => e.name === methodName);
+    return ev ? { apiType, event: ev } : null;
+  }
+
   public getMissingEventsForDocument(
     document: vscode.TextDocument,
     position: vscode.Position,
   ): { classCtx: ClassContextInfo; apiType: UnityApiTypeEntry; events: UnityEventFunction[] } | null {
+    const text = document.getText();
     const offset = document.offsetAt(position);
-    const classCtx = findEnclosingClassContext(document.getText(), offset);
+    const classCtx = findEnclosingClassContext(text, offset);
     if (!classCtx) return null;
 
-    const inheritanceMap = this.options.getInheritanceMap?.() ?? new Map<string, string[]>();
+    const inheritanceMap = this.buildCombinedInheritanceMap(text);
     const apiType = resolveUnityApiType(classCtx.baseTypes, this.db, inheritanceMap);
     if (!apiType) return null;
 
@@ -244,7 +376,8 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
       .get<boolean>('completion.showEventSnippets', true);
     if (!enabled) return undefined;
 
-    const lineText = document.lineAt(position.line).text.slice(0, position.character).trimStart();
+    const rawLineBeforeCursor = document.lineAt(position.line).text.slice(0, position.character);
+    const lineText = rawLineBeforeCursor.trimStart();
     if (lineText.startsWith('//') || lineText.startsWith('/*')) return undefined;
 
     const missing = this.getMissingEventsForDocument(document, position);
@@ -252,14 +385,32 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
       return undefined;
     }
 
+    const prefixMatch =
+      /^(\s*)((?:(?:public|private|protected|internal|static|virtual|override|async|new)\s+)*(?:(?:void|bool|float|int|IEnumerator|VisualElement)\s+)?)([A-Za-z_][A-Za-z0-9_]*)?$/.exec(
+        rawLineBeforeCursor,
+      );
+    const modifierPrefix = prefixMatch?.[2] ?? '';
+    const replaceRange =
+      modifierPrefix.length > 0 && prefixMatch
+        ? new vscode.Range(new vscode.Position(position.line, prefixMatch[1].length), position)
+        : undefined;
+
     const items: vscode.CompletionItem[] = [];
     for (const ev of missing.events) {
       const baseItem = new vscode.CompletionItem(ev.name, vscode.CompletionItemKind.Method);
       baseItem.detail = `[UnityBrain] 유니티 이벤트 함수 (${missing.apiType.fullName})`;
       baseItem.documentation = new vscode.MarkdownString(`[UnityBrain] ${ev.description}`);
       baseItem.insertText = new vscode.SnippetString(
-        formatUnityEventMethod(ev, { asCoroutine: false, snippet: true }),
+        formatUnityEventMethod(ev, {
+          asCoroutine: false,
+          snippet: true,
+          ownerFullName: missing.apiType.fullName,
+        }),
       );
+      if (replaceRange) {
+        baseItem.range = replaceRange;
+        baseItem.filterText = `${modifierPrefix}${ev.name}`;
+      }
       baseItem.sortText = `1_unity_${ev.name}`;
       items.push(baseItem);
 
@@ -268,14 +419,21 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
           `${ev.name} (Coroutine)`,
           vscode.CompletionItemKind.Snippet,
         );
-        coroItem.filterText = ev.name;
+        coroItem.filterText = replaceRange ? `${modifierPrefix}${ev.name}` : ev.name;
         coroItem.detail = `[UnityBrain] 유니티 코루틴 이벤트 (${missing.apiType.fullName})`;
         coroItem.documentation = new vscode.MarkdownString(
           `[UnityBrain] ${ev.description}\n\n코루틴 실행을 위해 \`IEnumerator\`를 반환합니다.`,
         );
         coroItem.insertText = new vscode.SnippetString(
-          formatUnityEventMethod(ev, { asCoroutine: true, snippet: true }),
+          formatUnityEventMethod(ev, {
+            asCoroutine: true,
+            snippet: true,
+            ownerFullName: missing.apiType.fullName,
+          }),
         );
+        if (replaceRange) {
+          coroItem.range = replaceRange;
+        }
         coroItem.sortText = `2_unity_${ev.name}_coro`;
         items.push(coroItem);
       }
@@ -343,7 +501,13 @@ export function registerGenerateEventFunctionsCommand(
       const generatedText =
         '\n' +
         selected
-          .map((s) => formatUnityEventMethod(s.event, { asCoroutine: s.asCoroutine, snippet: false }))
+          .map((s) =>
+            formatUnityEventMethod(s.event, {
+              asCoroutine: s.asCoroutine,
+              snippet: false,
+              ownerFullName: missing.apiType.fullName,
+            }),
+          )
           .join('\n\n') +
         '\n';
 

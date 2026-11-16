@@ -144,4 +144,64 @@ describe('UnityStringCompletionProvider', () => {
     expect(detectApiStringContext('string msg = "hello')).toBeNull();
     expect(detectApiStringContext('// CompareTag("')).toBeNull();
   });
+
+  it('replaces until closing quote, supports unquoted identifier prefix, filters Animator methods, and completes Shader.Find/EnableKeyword/Resources/InputActions', async () => {
+    const provider = new UnityStringCompletionProvider(
+      () => MOCK_CACHE,
+      () => MOCK_SHADER_INDEX,
+      {
+        getInputActions: () => [{ name: 'Move', actionMap: 'Player', assetName: 'Controls' }],
+        getResourcePaths: () => ['Prefabs/Bullet', 'Audio/HitSfx'],
+        getShaderKeywords: () => ['_ALPHATEST_ON', '_EMISSION'],
+      },
+    );
+
+    // 1. Closing quote replacement: other.CompareTag("Pla|yer") -> replaces "Pla|yer" up to closing quote
+    const qCode = 'class C : MonoBehaviour { void U() { gameObject.CompareTag("Pl/*CURSOR*/ayer"); } }';
+    const qOffset = qCode.indexOf('/*CURSOR*/');
+    const qDoc = vscode.__mock.createTextDocument(vscode.Uri.file('Assets/C.cs'), qCode.replace('/*CURSOR*/', ''), 'csharp');
+    const qItems = await provider.provideCompletionItems(qDoc, qDoc.positionAt(qOffset));
+    const playerItem = qItems?.find((i) => i.label === 'Player');
+    expect(playerItem?.range).toBeDefined();
+    const qRange = playerItem!.range as vscode.Range;
+    expect(qDoc.getText(qRange)).toBe('Player');
+
+    // 2. Unquoted identifier prefix: CompareTag(En/*CURSOR*/) -> replaces En with "Enemy"
+    const uCode = 'class C : MonoBehaviour { void U() { gameObject.CompareTag(En/*CURSOR*/); } }';
+    const uOffset = uCode.indexOf('/*CURSOR*/');
+    const uDoc = vscode.__mock.createTextDocument(vscode.Uri.file('Assets/C.cs'), uCode.replace('/*CURSOR*/', ''), 'csharp');
+    const uItems = await provider.provideCompletionItems(uDoc, uDoc.positionAt(uOffset));
+    const enemyUnquoted = uItems?.find((i) => i.label === 'Enemy');
+    expect(enemyUnquoted?.insertText).toBe('"Enemy"');
+    expect(uDoc.getText(enemyUnquoted!.range as vscode.Range)).toBe('En');
+
+    // 3. Animator filtering & priority: Play -> only states; SetFloat -> Speed first without Trigger
+    const playItems = await runAtSnippet('_animator.Play("/*CURSOR*/");');
+    expect(playItems?.map((i) => i.label)).toEqual(['Idle', 'Run']);
+
+    const floatItems = await runAtSnippet('_animator.SetFloat("/*CURSOR*/", 1f);');
+    expect(floatItems?.[0].label).toBe('Speed');
+    expect(floatItems?.map((i) => i.label)).not.toContain('Attack');
+
+    // 4. Shader.Find, Shader.EnableKeyword, Resources.Load, InputAction
+    const shaderFindCode = 'class C { void U() { var s = Shader.Find("/*CURSOR*/"); } }';
+    const sfDoc = vscode.__mock.createTextDocument(vscode.Uri.file('Assets/C.cs'), shaderFindCode.replace('/*CURSOR*/', ''), 'csharp');
+    const sfItems = await provider.provideCompletionItems(sfDoc, sfDoc.positionAt(shaderFindCode.indexOf('/*CURSOR*/')));
+    expect(sfItems?.map((i) => i.label)).toContain('UnityBrain/TestLit');
+
+    const kwCode = 'class C { void U() { Shader.EnableKeyword("/*CURSOR*/"); } }';
+    const kwDoc = vscode.__mock.createTextDocument(vscode.Uri.file('Assets/C.cs'), kwCode.replace('/*CURSOR*/', ''), 'csharp');
+    const kwItems = await provider.provideCompletionItems(kwDoc, kwDoc.positionAt(kwCode.indexOf('/*CURSOR*/')));
+    expect(kwItems?.map((i) => i.label)).toContain('_ALPHATEST_ON');
+
+    const resCode = 'class C { void U() { Resources.Load<GameObject>("/*CURSOR*/"); } }';
+    const resDoc = vscode.__mock.createTextDocument(vscode.Uri.file('Assets/C.cs'), resCode.replace('/*CURSOR*/', ''), 'csharp');
+    const resItems = await provider.provideCompletionItems(resDoc, resDoc.positionAt(resCode.indexOf('/*CURSOR*/')));
+    expect(resItems?.map((i) => i.label)).toContain('Prefabs/Bullet');
+
+    const actCode = 'class C { void U() { input.actions.FindAction("/*CURSOR*/"); } }';
+    const actDoc = vscode.__mock.createTextDocument(vscode.Uri.file('Assets/C.cs'), actCode.replace('/*CURSOR*/', ''), 'csharp');
+    const actItems = await provider.provideCompletionItems(actDoc, actDoc.positionAt(actCode.indexOf('/*CURSOR*/')));
+    expect(actItems?.map((i) => i.label)).toContain('Move');
+  });
 });

@@ -14,6 +14,10 @@ import type {
   DaemonIndexStatus,
   SerializedFieldValueEntry,
 } from '../contracts/index.ts';
+import {
+  shortenCSharpType,
+  UnityEventCompletionProvider,
+} from '../completion/unityEventGenerator.ts';
 
 export interface DaemonClientTransport {
   sendRequest<T = unknown>(method: string, params?: unknown): Promise<T>;
@@ -250,6 +254,13 @@ export function parseCSharpDeclarations(sourceText: string): CSharpCodeDeclarati
 
   const lines = sourceText.split(/\r?\n/);
   let pendingSerializeField = false;
+  let braceDepth = 0;
+  let pendingClassBrace = false;
+  let memberBraceDepth = 1;
+  const nonMethodKeywords = new Set([
+    'if', 'for', 'foreach', 'while', 'switch', 'catch', 'using', 'lock', 'return', 'throw',
+    'else', 'new', 'class', 'struct', 'interface', 'enum', 'namespace', 'get', 'set', 'add', 'remove',
+  ]);
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
@@ -267,36 +278,45 @@ export function parseCSharpDeclarations(sourceText: string): CSharpCodeDeclarati
     if (classMatch) {
       classes.push({ className: classMatch[1], line: i });
       pendingSerializeField = false;
-      continue;
+      pendingClassBrace = true;
+    } else if (braceDepth === memberBraceDepth || (!pendingClassBrace && braceDepth === 1)) {
+      const methodMatch =
+        /^(?:(?:public|private|protected|internal|virtual|override|async|static|sealed|new|unsafe|extern)\s+)*([A-Za-z_][A-Za-z0-9_<>.?[\]]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(
+          trimmed,
+        );
+      if (
+        methodMatch &&
+        !nonMethodKeywords.has(methodMatch[1]) &&
+        !nonMethodKeywords.has(methodMatch[2]) &&
+        !trimmed.startsWith('[')
+      ) {
+        methods.push({ methodName: methodMatch[2], line: i });
+        pendingSerializeField = false;
+      } else {
+        const isPublicField = /\bpublic\b/.test(trimmed) && !/\b(?:static|const|readonly)\b/.test(trimmed);
+        const fieldMatch = /^(?:\[[^\]]+\]\s*)*(?:public|private|protected|internal|\s)+[A-Za-z0-9_<>\[\].,\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)/.exec(
+          trimmed,
+        );
+        if (fieldMatch && (pendingSerializeField || isPublicField) && !trimmed.includes('(')) {
+          serializedFields.push({ fieldName: fieldMatch[1], line: i });
+          pendingSerializeField = false;
+        } else if (!trimmed.startsWith('[')) {
+          pendingSerializeField = false;
+        }
+      }
     }
 
-    const methodMatch = /^(?:public|private|protected|internal|virtual|override|async|static|\s)+\s+[A-Za-z0-9_<>\[\],\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(
-      trimmed,
-    );
-    if (
-      methodMatch &&
-      !trimmed.startsWith('if') &&
-      !trimmed.startsWith('for') &&
-      !trimmed.startsWith('while') &&
-      !trimmed.startsWith('switch')
-    ) {
-      methods.push({ methodName: methodMatch[1], line: i });
-      pendingSerializeField = false;
-      continue;
-    }
-
-    const isPublicField = /\bpublic\b/.test(trimmed) && !/\b(?:static|const|readonly)\b/.test(trimmed);
-    const fieldMatch = /^(?:\[[^\]]+\]\s*)*(?:public|private|protected|internal|\s)+[A-Za-z0-9_<>\[\].,\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)/.exec(
-      trimmed,
-    );
-    if (fieldMatch && (pendingSerializeField || isPublicField) && !trimmed.includes('(')) {
-      serializedFields.push({ fieldName: fieldMatch[1], line: i });
-      pendingSerializeField = false;
-      continue;
-    }
-
-    if (!trimmed.startsWith('[')) {
-      pendingSerializeField = false;
+    const codeOnly = trimmed.replace(/"(?:\\.|[^"\\])*"/g, '').replace(/\/\/.*$/, '');
+    for (const ch of codeOnly) {
+      if (ch === '{') {
+        braceDepth++;
+        if (pendingClassBrace) {
+          memberBraceDepth = braceDepth;
+          pendingClassBrace = false;
+        }
+      } else if (ch === '}') {
+        braceDepth = Math.max(0, braceDepth - 1);
+      }
     }
   }
 
@@ -306,13 +326,20 @@ export function parseCSharpDeclarations(sourceText: string): CSharpCodeDeclarati
 export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
   private readonly projectRoot: string;
   private readonly daemonClient: UnityDaemonClient;
+  private readonly eventProvider: UnityEventCompletionProvider;
   private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
 
   public readonly onDidChangeCodeLenses: vscode.Event<void> = this.onDidChangeEmitter.event;
 
-  constructor(projectRoot: string, daemonClient: UnityDaemonClient) {
+  constructor(
+    projectRoot: string,
+    daemonClient: UnityDaemonClient,
+    eventProvider?: UnityEventCompletionProvider,
+  ) {
     this.projectRoot = path.resolve(projectRoot);
     this.daemonClient = daemonClient;
+    this.eventProvider =
+      eventProvider ?? new UnityEventCompletionProvider({ projectRoot: this.projectRoot });
   }
 
   public refresh(): void {
@@ -330,14 +357,38 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
       return [];
     }
 
-    const scriptGuid = await readMetaGuid(document.fileName);
-    if (!scriptGuid || token.isCancellationRequested) {
+    const sourceText = document.getText();
+    const decls = parseCSharpDeclarations(sourceText);
+    if (decls.classes.length === 0) {
       return [];
     }
 
-    const decls = parseCSharpDeclarations(document.getText());
-    if (decls.classes.length === 0) {
-      return [];
+    const lenses: vscode.CodeLens[] = [];
+    const primaryClass = decls.classes[0].className;
+
+    const appendUnityEventMethodLenses = () => {
+      for (const method of decls.methods) {
+        const methodOffset = document.offsetAt(new vscode.Position(method.line, 0));
+        const evInfo = this.eventProvider.findUnityEventInfo(sourceText, methodOffset, method.methodName);
+        if (!evInfo) continue;
+
+        const shortOwner = shortenCSharpType(evInfo.apiType.fullName);
+        const perfBadge = evInfo.event.isPerformanceCritical ? ' · 매 프레임 호출' : '';
+        const range = new vscode.Range(method.line, 0, method.line, 0);
+        lenses.push(
+          new vscode.CodeLens(range, {
+            title: `$(symbol-event) [UnityBrain] 유니티 이벤트 함수 (${shortOwner})${perfBadge}`,
+            command: 'unityBrain.generateEventFunctions',
+            tooltip: `[UnityBrain] ${evInfo.apiType.fullName}.${evInfo.event.name}: ${evInfo.event.description}`,
+          }),
+        );
+      }
+    };
+
+    const scriptGuid = await readMetaGuid(document.fileName);
+    if (!scriptGuid || token.isCancellationRequested) {
+      appendUnityEventMethodLenses();
+      return lenses;
     }
 
     let scriptUsages: AssetUsageLocation[] = [];
@@ -348,15 +399,13 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
         this.daemonClient.getSerializedValues(scriptGuid),
       ]);
     } catch {
-      return [];
+      appendUnityEventMethodLenses();
+      return lenses;
     }
 
     if (token.isCancellationRequested) {
-      return [];
+      return lenses;
     }
-
-    const lenses: vscode.CodeLens[] = [];
-    const primaryClass = decls.classes[0].className;
 
     // 1. Class-level Asset Usage CodeLenses
     const classTitle = this.formatClassUsageSummary(scriptUsages);
@@ -462,6 +511,7 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
       );
     }
 
+    appendUnityEventMethodLenses();
     return lenses;
   }
 

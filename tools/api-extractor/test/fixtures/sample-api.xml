@@ -6,13 +6,13 @@
       <returns type="void" />
       <parameters />
     </message>
-    <message name="Start" static="false" coroutine="true">
-      <summary>Start is called on the frame when a script is enabled just before any of the Update methods are called the first time.</summary>
+    <message name="OnEnable" static="false">
+      <summary>This function is called when the object becomes enabled and active.</summary>
       <returns type="void" />
       <parameters />
     </message>
-    <message name="Update" static="false">
-      <summary>Update is called every frame, if the MonoBehaviour is enabled.</summary>
+    <message name="Start" static="false" coroutine="true">
+      <summary>Start is called on the frame when a script is enabled just before any of the Update methods are called the first time.</summary>
       <returns type="void" />
       <parameters />
     </message>
@@ -21,13 +21,13 @@
       <returns type="void" />
       <parameters />
     </message>
-    <message name="LateUpdate" static="false">
-      <summary>LateUpdate is called every frame, if the Behaviour is enabled, after all Update functions have been called.</summary>
+    <message name="Update" static="false">
+      <summary>Update is called every frame, if the MonoBehaviour is enabled.</summary>
       <returns type="void" />
       <parameters />
     </message>
-    <message name="OnEnable" static="false">
-      <summary>This function is called when the object becomes enabled and active.</summary>
+    <message name="LateUpdate" static="false">
+      <summary>LateUpdate is called every frame, if the Behaviour is enabled, after all Update functions have been called.</summary>
       <returns type="void" />
       <parameters />
     </message>
@@ -69,6 +69,20 @@
         <parameter type="UnityEngine.Collider2D" name="other" />
       </parameters>
     </message>
+    <message name="OnTriggerStay2D" static="false" coroutine="true">
+      <summary>Sent each frame where another object is within a trigger collider attached to this object (2D physics only).</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collider2D" name="other" />
+      </parameters>
+    </message>
+    <message name="OnTriggerExit2D" static="false" coroutine="true">
+      <summary>Sent when another object leaves a trigger collider attached to this object (2D physics only).</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collider2D" name="other" />
+      </parameters>
+    </message>
     <message name="OnCollisionEnter" static="false" coroutine="true">
       <summary>OnCollisionEnter is called when this collider/rigidbody has begun touching another rigidbody/collider.</summary>
       <returns type="void" />
@@ -97,6 +111,41 @@
         <parameter type="UnityEngine.Collision2D" name="other" />
       </parameters>
     </message>
+    <message name="OnCollisionStay2D" static="false" coroutine="true">
+      <summary>Sent each frame where a collider on another object is touching this object's collider (2D physics only).</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collision2D" name="other" />
+      </parameters>
+    </message>
+    <message name="OnCollisionExit2D" static="false" coroutine="true">
+      <summary>Sent when a collider on another object stops touching this object's collider (2D physics only).</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Collision2D" name="other" />
+      </parameters>
+    </message>
+    <message name="OnControllerColliderHit" static="false" coroutine="true">
+      <summary>OnControllerColliderHit is called when the controller hits a collider while performing a Move.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.ControllerColliderHit" name="hit" />
+      </parameters>
+    </message>
+    <message name="OnJointBreak" static="false" coroutine="true">
+      <summary>Called when a joint attached to the same game object broke.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="float" name="breakForce" />
+      </parameters>
+    </message>
+    <message name="OnJointBreak2D" static="false" coroutine="true">
+      <summary>Called when a Joint2D attached to the same game object breaks.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Joint2D" name="brokenJoint" />
+      </parameters>
+    </message>
     <message name="OnGUI" static="false">
       <summary>OnGUI is called for rendering and handling GUI events.</summary>
       <returns type="void" />
@@ -122,7 +171,14 @@
       <returns type="void" />
       <parameters />
     </message>
-    <message name="OnApplicationPause" static="false">
+    <message name="OnApplicationFocus" static="false" coroutine="true">
+      <summary>Sent to all GameObjects when the player gets or loses focus.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="bool" name="hasFocus" />
+      </parameters>
+    </message>
+    <message name="OnApplicationPause" static="false" coroutine="true">
       <summary>Sent to all GameObjects when the application pauses.</summary>
       <returns type="void" />
       <parameters>
@@ -146,6 +202,14 @@
       <returns type="void" />
       <parameters />
     </message>
+    <message name="OnAudioFilterRead" static="false">
+      <summary>If OnAudioFilterRead is implemented, Unity will insert a custom filter into the audio DSP chain.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="float[]" name="data" />
+        <parameter type="int" name="channels" />
+      </parameters>
+    </message>
     <message name="OnBecameVisible" static="false" coroutine="true">
       <summary>OnBecameVisible is called when the renderer became visible by any camera.</summary>
       <returns type="void" />
@@ -156,13 +220,108 @@
       <returns type="void" />
       <parameters />
     </message>
+    <message name="OnWillRenderObject" static="false">
+      <summary>OnWillRenderObject is called for each camera if the object is visible and not a UI element.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnPreCull" static="false">
+      <summary>OnPreCull is called before a camera culls the scene.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnPreRender" static="false" coroutine="true">
+      <summary>OnPreRender is called before a camera starts rendering the scene.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnPostRender" static="false" coroutine="true">
+      <summary>OnPostRender is called after a camera finishes rendering the scene.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
     <message name="OnRenderObject" static="false">
       <summary>OnRenderObject is called after camera has rendered the Scene.</summary>
       <returns type="void" />
       <parameters />
     </message>
+    <message name="OnRenderImage" static="false">
+      <summary>OnRenderImage is called after all rendering is complete to render image.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.RenderTexture" name="source" />
+        <parameter type="UnityEngine.RenderTexture" name="destination" />
+      </parameters>
+    </message>
+    <message name="OnParticleCollision" static="false" coroutine="true">
+      <summary>OnParticleCollision is called when a particle hits a collider.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.GameObject" name="other" />
+      </parameters>
+    </message>
+    <message name="OnParticleTrigger" static="false">
+      <summary>OnParticleTrigger is called when any particles in a Particle System meet the conditions in the trigger module.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnParticleSystemStopped" static="false">
+      <summary>OnParticleSystemStopped is called when all particles in the system have died.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
     <message name="OnMouseDown" static="false" coroutine="true">
       <summary>OnMouseDown is called when the user has pressed the mouse button while over the Collider.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnMouseDrag" static="false" coroutine="true">
+      <summary>OnMouseDrag is called when the user has clicked on a Collider and is still holding down the mouse.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnMouseEnter" static="false" coroutine="true">
+      <summary>Called when the mouse enters the Collider.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnMouseExit" static="false" coroutine="true">
+      <summary>Called when the mouse is not any longer over the Collider.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnMouseOver" static="false">
+      <summary>Called every frame while the mouse is over the Collider.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnMouseUp" static="false" coroutine="true">
+      <summary>OnMouseUp is called when the user has released the mouse button.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnMouseUpAsButton" static="false" coroutine="true">
+      <summary>OnMouseUpAsButton is only called when the mouse is released over the same Collider as it was pressed on.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnTransformChildrenChanged" static="false">
+      <summary>Called when the list of children of the transform of the GameObject has changed.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnTransformParentChanged" static="false">
+      <summary>Called when the parent property of the transform of the GameObject has changed.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnBeforeTransformParentChanged" static="false">
+      <summary>Called just before the parent property of the transform is about to change.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnRectTransformDimensionsChange" static="false">
+      <summary>This callback is called if any associated RectTransform has its dimensions changed.</summary>
       <returns type="void" />
       <parameters />
     </message>
@@ -227,8 +386,114 @@
         <parameter type="int" name="layerIndex" />
       </parameters>
     </message>
+    <message name="OnStateMove" static="false">
+      <summary>Called right after Animator.OnAnimatorMove.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Animator" name="animator" />
+        <parameter type="UnityEngine.AnimatorStateInfo" name="stateInfo" />
+        <parameter type="int" name="layerIndex" />
+      </parameters>
+    </message>
+    <message name="OnStateIK" static="false">
+      <summary>Called right after Animator.OnAnimatorIK.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Animator" name="animator" />
+        <parameter type="UnityEngine.AnimatorStateInfo" name="stateInfo" />
+        <parameter type="int" name="layerIndex" />
+      </parameters>
+    </message>
+    <message name="OnStateMachineEnter" static="false">
+      <summary>Called when a transition starts and the state machine starts to evaluate this state machine.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Animator" name="animator" />
+        <parameter type="int" name="stateMachinePathHash" />
+      </parameters>
+    </message>
+    <message name="OnStateMachineExit" static="false">
+      <summary>Called when a transition ends and the state machine finishes evaluating this state machine.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Animator" name="animator" />
+        <parameter type="int" name="stateMachinePathHash" />
+      </parameters>
+    </message>
+  </type>
+  <type kind="class" name="UIBehaviour" ns="UnityEngine.EventSystems" minimumVersion="2020.3">
+    <message name="Awake" static="false">
+      <summary>Awake is called when the UIBehaviour instance is being loaded.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnEnable" static="false">
+      <summary>Called when the UI object becomes enabled and active.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="Start" static="false">
+      <summary>Called before the first frame update.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDisable" static="false">
+      <summary>Called when the UI object becomes disabled.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDestroy" static="false">
+      <summary>Called when the UI object is destroyed.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnValidate" static="false">
+      <summary>Editor-only callback when serialized values change.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="Reset" static="false">
+      <summary>Reset to default values.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnRectTransformDimensionsChange" static="false">
+      <summary>Called when the dimensions of an associated RectTransform change.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDidApplyAnimationProperties" static="false">
+      <summary>Callback when animation clips modify RectTransform/UI properties.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnCanvasGroupChanged" static="false">
+      <summary>Called when the CanvasGroup state changes.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnCanvasHierarchyChanged" static="false">
+      <summary>Called when the parent Canvas changes.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnTransformParentChanged" static="false">
+      <summary>Called when the Transform parent changes.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnBeforeTransformParentChanged" static="false">
+      <summary>Called before the Transform parent changes.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
   </type>
   <type kind="class" name="Editor" ns="UnityEditor" minimumVersion="2020.3">
+    <message name="Awake" static="false">
+      <summary>Called when the Editor object is created.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
     <message name="OnEnable" static="false">
       <summary>Called when the Editor object becomes active.</summary>
       <returns type="void" />
@@ -236,6 +501,11 @@
     </message>
     <message name="OnDisable" static="false">
       <summary>Called when the Editor object becomes inactive.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDestroy" static="false">
+      <summary>Called when the Editor object is destroyed.</summary>
       <returns type="void" />
       <parameters />
     </message>
@@ -254,8 +524,39 @@
       <returns type="UnityEngine.UIElements.VisualElement" />
       <parameters />
     </message>
+    <message name="HasPreviewGUI" static="false">
+      <summary>Override this method in subclasses if the editor has a custom preview.</summary>
+      <returns type="bool" />
+      <parameters />
+    </message>
+    <message name="OnPreviewGUI" static="false">
+      <summary>Implement to create your own custom preview for the preview area of the inspector.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Rect" name="r" />
+        <parameter type="UnityEngine.GUIStyle" name="background" />
+      </parameters>
+    </message>
+    <message name="OnInteractivePreviewGUI" static="false">
+      <summary>Implement to create your own interactive custom preview.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Rect" name="r" />
+        <parameter type="UnityEngine.GUIStyle" name="background" />
+      </parameters>
+    </message>
+    <message name="RequiresConstantRepaint" static="false">
+      <summary>Checks if this editor requires constant repainting in its inspector.</summary>
+      <returns type="bool" />
+      <parameters />
+    </message>
   </type>
   <type kind="class" name="EditorWindow" ns="UnityEditor" minimumVersion="2020.3">
+    <message name="Awake" static="false">
+      <summary>Called as the new window is opened.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
     <message name="OnEnable" static="false">
       <summary>Called when the window is loaded.</summary>
       <returns type="void" />
@@ -263,6 +564,11 @@
     </message>
     <message name="OnDisable" static="false">
       <summary>Called when the window is closed or disabled.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDestroy" static="false">
+      <summary>OnDestroy is called to close the EditorWindow window.</summary>
       <returns type="void" />
       <parameters />
     </message>
@@ -281,6 +587,72 @@
       <returns type="void" />
       <parameters />
     </message>
+    <message name="OnInspectorUpdate" static="false">
+      <summary>OnInspectorUpdate is called at 10 frames per second to give the inspector a chance to update.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnSelectionChange" static="false">
+      <summary>Called whenever the selection has changed.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnHierarchyChange" static="false">
+      <summary>Handler for message that is sent when an object or group of objects in the hierarchy changes.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnProjectChange" static="false">
+      <summary>Handler for message that is sent whenever the state of the project changes.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnFocus" static="false">
+      <summary>Called when the window gets keyboard focus.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnLostFocus" static="false">
+      <summary>Called when the window loses keyboard focus.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnBecameVisible" static="false">
+      <summary>Called after the window is added to a container view and becomes visible.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnBecameInvisible" static="false">
+      <summary>Called before the window is removed or hidden.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+  </type>
+  <type kind="class" name="PropertyDrawer" ns="UnityEditor" minimumVersion="2020.3">
+    <message name="OnGUI" static="false">
+      <summary>Override this method to make your own IMGUI based GUI for the property.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.Rect" name="position" />
+        <parameter type="UnityEditor.SerializedProperty" name="property" />
+        <parameter type="UnityEngine.GUIContent" name="label" />
+      </parameters>
+    </message>
+    <message name="GetPropertyHeight" static="false">
+      <summary>Override this method to specify how tall the GUI for this field is in pixels.</summary>
+      <returns type="float" />
+      <parameters>
+        <parameter type="UnityEditor.SerializedProperty" name="property" />
+        <parameter type="UnityEngine.GUIContent" name="label" />
+      </parameters>
+    </message>
+    <message name="CreatePropertyGUI" static="false">
+      <summary>Override this method to make your own UI Toolkit based GUI for the property.</summary>
+      <returns type="UnityEngine.UIElements.VisualElement" />
+      <parameters>
+        <parameter type="UnityEditor.SerializedProperty" name="property" />
+      </parameters>
+    </message>
   </type>
   <type kind="class" name="AssetPostprocessor" ns="UnityEditor" minimumVersion="2020.3">
     <message name="OnPreprocessTexture" static="false">
@@ -295,6 +667,35 @@
         <parameter type="UnityEngine.Texture2D" name="texture" />
       </parameters>
     </message>
+    <message name="OnPreprocessModel" static="false">
+      <summary>Add this function in a subclass to get a notification before a model (.fbx, .obj, etc.) is imported.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnPostprocessModel" static="false">
+      <summary>Add this function in a subclass to get a notification when a 3D model has finished importing.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.GameObject" name="root" />
+      </parameters>
+    </message>
+    <message name="OnPreprocessAudio" static="false">
+      <summary>Add this function in a subclass to get a notification before an audio clip is imported.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnPostprocessAudio" static="false">
+      <summary>Add this function in a subclass to get a notification when an audio clip has finished importing.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEngine.AudioClip" name="clip" />
+      </parameters>
+    </message>
+    <message name="OnPreprocessAsset" static="false">
+      <summary>Add this function in a subclass to get a notification before any asset is imported.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
     <message name="OnPostprocessAllAssets" static="true">
       <summary>This is called after importing of any number of assets is complete.</summary>
       <returns type="void" />
@@ -306,6 +707,15 @@
       </parameters>
     </message>
   </type>
+  <type kind="class" name="ScriptedImporter" ns="UnityEditor.AssetImporters" minimumVersion="2020.3">
+    <message name="OnImportAsset" static="false">
+      <summary>This method must be overridden by the derived class and is called by the Asset pipeline to import files.</summary>
+      <returns type="void" />
+      <parameters>
+        <parameter type="UnityEditor.AssetImporters.AssetImportContext" name="ctx" />
+      </parameters>
+    </message>
+  </type>
   <type kind="class" name="NetworkBehaviour" ns="Unity.Netcode" minimumVersion="2021.3">
     <message name="OnNetworkSpawn" static="false">
       <summary>Gets called when the NetworkObject is spawned on the network.</summary>
@@ -314,6 +724,16 @@
     </message>
     <message name="OnNetworkDespawn" static="false">
       <summary>Gets called when the NetworkObject is despawned.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnGainedOwnership" static="false">
+      <summary>Called when the local client gains ownership of the NetworkObject.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnLostOwnership" static="false">
+      <summary>Called when the local client loses ownership of the NetworkObject.</summary>
       <returns type="void" />
       <parameters />
     </message>

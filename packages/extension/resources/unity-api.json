@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-15T17:33:53.237Z",
+  "generatedAt": "2026-11-16T13:10:37.891Z",
   "types": [
     {
       "fullName": "UnityEngine.MonoBehaviour",
@@ -14,19 +14,18 @@
           "parameters": []
         },
         {
+          "name": "OnEnable",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "This function is called when the object becomes enabled and active.",
+          "parameters": []
+        },
+        {
           "name": "Start",
           "returnType": "void",
           "supportsCoroutine": true,
           "description": "Start is called on the frame when a script is enabled just before any of the Update methods are called the first time.",
           "parameters": []
-        },
-        {
-          "name": "Update",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "Update is called every frame, if the MonoBehaviour is enabled.",
-          "parameters": [],
-          "isPerformanceCritical": true
         },
         {
           "name": "FixedUpdate",
@@ -37,19 +36,20 @@
           "isPerformanceCritical": true
         },
         {
+          "name": "Update",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Update is called every frame, if the MonoBehaviour is enabled.",
+          "parameters": [],
+          "isPerformanceCritical": true
+        },
+        {
           "name": "LateUpdate",
           "returnType": "void",
           "supportsCoroutine": false,
           "description": "LateUpdate is called every frame, if the Behaviour is enabled, after all Update functions have been called.",
           "parameters": [],
           "isPerformanceCritical": true
-        },
-        {
-          "name": "OnEnable",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "This function is called when the object becomes enabled and active.",
-          "parameters": []
         },
         {
           "name": "OnDisable",
@@ -115,6 +115,30 @@
           ]
         },
         {
+          "name": "OnTriggerStay2D",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Sent each frame where another object is within a trigger collider attached to this object (2D physics only).",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collider2D"
+            }
+          ]
+        },
+        {
+          "name": "OnTriggerExit2D",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Sent when another object leaves a trigger collider attached to this object (2D physics only).",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collider2D"
+            }
+          ]
+        },
+        {
           "name": "OnCollisionEnter",
           "returnType": "void",
           "supportsCoroutine": true,
@@ -163,6 +187,66 @@
           ]
         },
         {
+          "name": "OnCollisionStay2D",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Sent each frame where a collider on another object is touching this object's collider (2D physics only).",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collision2D"
+            }
+          ]
+        },
+        {
+          "name": "OnCollisionExit2D",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Sent when a collider on another object stops touching this object's collider (2D physics only).",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.Collision2D"
+            }
+          ]
+        },
+        {
+          "name": "OnControllerColliderHit",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnControllerColliderHit is called when the controller hits a collider while performing a Move.",
+          "parameters": [
+            {
+              "name": "hit",
+              "type": "UnityEngine.ControllerColliderHit"
+            }
+          ]
+        },
+        {
+          "name": "OnJointBreak",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Called when a joint attached to the same game object broke.",
+          "parameters": [
+            {
+              "name": "breakForce",
+              "type": "float"
+            }
+          ]
+        },
+        {
+          "name": "OnJointBreak2D",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Called when a Joint2D attached to the same game object breaks.",
+          "parameters": [
+            {
+              "name": "brokenJoint",
+              "type": "UnityEngine.Joint2D"
+            }
+          ]
+        },
+        {
           "name": "OnGUI",
           "returnType": "void",
           "supportsCoroutine": false,
@@ -199,9 +283,21 @@
           "parameters": []
         },
         {
+          "name": "OnApplicationFocus",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Sent to all GameObjects when the player gets or loses focus.",
+          "parameters": [
+            {
+              "name": "hasFocus",
+              "type": "bool"
+            }
+          ]
+        },
+        {
           "name": "OnApplicationPause",
           "returnType": "void",
-          "supportsCoroutine": false,
+          "supportsCoroutine": true,
           "description": "Sent to all GameObjects when the application pauses.",
           "parameters": [
             {
@@ -239,6 +335,22 @@
           "isPerformanceCritical": true
         },
         {
+          "name": "OnAudioFilterRead",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "If OnAudioFilterRead is implemented, Unity will insert a custom filter into the audio DSP chain.",
+          "parameters": [
+            {
+              "name": "data",
+              "type": "float[]"
+            },
+            {
+              "name": "channels",
+              "type": "int"
+            }
+          ]
+        },
+        {
           "name": "OnBecameVisible",
           "returnType": "void",
           "supportsCoroutine": true,
@@ -253,6 +365,36 @@
           "parameters": []
         },
         {
+          "name": "OnWillRenderObject",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "OnWillRenderObject is called for each camera if the object is visible and not a UI element.",
+          "parameters": []
+        },
+        {
+          "name": "OnPreCull",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "OnPreCull is called before a camera culls the scene.",
+          "parameters": []
+        },
+        {
+          "name": "OnPreRender",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnPreRender is called before a camera starts rendering the scene.",
+          "parameters": [],
+          "isPerformanceCritical": true
+        },
+        {
+          "name": "OnPostRender",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnPostRender is called after a camera finishes rendering the scene.",
+          "parameters": [],
+          "isPerformanceCritical": true
+        },
+        {
           "name": "OnRenderObject",
           "returnType": "void",
           "supportsCoroutine": false,
@@ -261,10 +403,122 @@
           "isPerformanceCritical": true
         },
         {
+          "name": "OnRenderImage",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "OnRenderImage is called after all rendering is complete to render image.",
+          "parameters": [
+            {
+              "name": "source",
+              "type": "UnityEngine.RenderTexture"
+            },
+            {
+              "name": "destination",
+              "type": "UnityEngine.RenderTexture"
+            }
+          ]
+        },
+        {
+          "name": "OnParticleCollision",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnParticleCollision is called when a particle hits a collider.",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "UnityEngine.GameObject"
+            }
+          ]
+        },
+        {
+          "name": "OnParticleTrigger",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnParticleTrigger is called when any particles in a Particle System meet the conditions in the trigger module.",
+          "parameters": []
+        },
+        {
+          "name": "OnParticleSystemStopped",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "OnParticleSystemStopped is called when all particles in the system have died.",
+          "parameters": []
+        },
+        {
           "name": "OnMouseDown",
           "returnType": "void",
           "supportsCoroutine": true,
           "description": "OnMouseDown is called when the user has pressed the mouse button while over the Collider.",
+          "parameters": []
+        },
+        {
+          "name": "OnMouseDrag",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnMouseDrag is called when the user has clicked on a Collider and is still holding down the mouse.",
+          "parameters": []
+        },
+        {
+          "name": "OnMouseEnter",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Called when the mouse enters the Collider.",
+          "parameters": []
+        },
+        {
+          "name": "OnMouseExit",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Called when the mouse is not any longer over the Collider.",
+          "parameters": []
+        },
+        {
+          "name": "OnMouseOver",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Called every frame while the mouse is over the Collider.",
+          "parameters": []
+        },
+        {
+          "name": "OnMouseUp",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnMouseUp is called when the user has released the mouse button.",
+          "parameters": []
+        },
+        {
+          "name": "OnMouseUpAsButton",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "OnMouseUpAsButton is only called when the mouse is released over the same Collider as it was pressed on.",
+          "parameters": []
+        },
+        {
+          "name": "OnTransformChildrenChanged",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the list of children of the transform of the GameObject has changed.",
+          "parameters": []
+        },
+        {
+          "name": "OnTransformParentChanged",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the parent property of the transform of the GameObject has changed.",
+          "parameters": []
+        },
+        {
+          "name": "OnBeforeTransformParentChanged",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called just before the parent property of the transform is about to change.",
+          "parameters": []
+        },
+        {
+          "name": "OnRectTransformDimensionsChange",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "This callback is called if any associated RectTransform has its dimensions changed.",
           "parameters": []
         }
       ],
@@ -382,6 +636,176 @@
               "type": "int"
             }
           ]
+        },
+        {
+          "name": "OnStateMove",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called right after Animator.OnAnimatorMove.",
+          "parameters": [
+            {
+              "name": "animator",
+              "type": "UnityEngine.Animator"
+            },
+            {
+              "name": "stateInfo",
+              "type": "UnityEngine.AnimatorStateInfo"
+            },
+            {
+              "name": "layerIndex",
+              "type": "int"
+            }
+          ]
+        },
+        {
+          "name": "OnStateIK",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called right after Animator.OnAnimatorIK.",
+          "parameters": [
+            {
+              "name": "animator",
+              "type": "UnityEngine.Animator"
+            },
+            {
+              "name": "stateInfo",
+              "type": "UnityEngine.AnimatorStateInfo"
+            },
+            {
+              "name": "layerIndex",
+              "type": "int"
+            }
+          ]
+        },
+        {
+          "name": "OnStateMachineEnter",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when a transition starts and the state machine starts to evaluate this state machine.",
+          "parameters": [
+            {
+              "name": "animator",
+              "type": "UnityEngine.Animator"
+            },
+            {
+              "name": "stateMachinePathHash",
+              "type": "int"
+            }
+          ]
+        },
+        {
+          "name": "OnStateMachineExit",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when a transition ends and the state machine finishes evaluating this state machine.",
+          "parameters": [
+            {
+              "name": "animator",
+              "type": "UnityEngine.Animator"
+            },
+            {
+              "name": "stateMachinePathHash",
+              "type": "int"
+            }
+          ]
+        }
+      ],
+      "minimumUnityVersion": "2020.3"
+    },
+    {
+      "fullName": "UnityEngine.EventSystems.UIBehaviour",
+      "kind": "class",
+      "events": [
+        {
+          "name": "Awake",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Awake is called when the UIBehaviour instance is being loaded.",
+          "parameters": []
+        },
+        {
+          "name": "OnEnable",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the UI object becomes enabled and active.",
+          "parameters": []
+        },
+        {
+          "name": "Start",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Called before the first frame update.",
+          "parameters": []
+        },
+        {
+          "name": "OnDisable",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the UI object becomes disabled.",
+          "parameters": []
+        },
+        {
+          "name": "OnDestroy",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the UI object is destroyed.",
+          "parameters": []
+        },
+        {
+          "name": "OnValidate",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Editor-only callback when serialized values change.",
+          "parameters": []
+        },
+        {
+          "name": "Reset",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Reset to default values.",
+          "parameters": []
+        },
+        {
+          "name": "OnRectTransformDimensionsChange",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the dimensions of an associated RectTransform change.",
+          "parameters": []
+        },
+        {
+          "name": "OnDidApplyAnimationProperties",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Callback when animation clips modify RectTransform/UI properties.",
+          "parameters": []
+        },
+        {
+          "name": "OnCanvasGroupChanged",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the CanvasGroup state changes.",
+          "parameters": []
+        },
+        {
+          "name": "OnCanvasHierarchyChanged",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the parent Canvas changes.",
+          "parameters": []
+        },
+        {
+          "name": "OnTransformParentChanged",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the Transform parent changes.",
+          "parameters": []
+        },
+        {
+          "name": "OnBeforeTransformParentChanged",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called before the Transform parent changes.",
+          "parameters": []
         }
       ],
       "minimumUnityVersion": "2020.3"
@@ -390,6 +814,13 @@
       "fullName": "UnityEditor.Editor",
       "kind": "class",
       "events": [
+        {
+          "name": "Awake",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the Editor object is created.",
+          "parameters": []
+        },
         {
           "name": "OnEnable",
           "returnType": "void",
@@ -402,6 +833,13 @@
           "returnType": "void",
           "supportsCoroutine": false,
           "description": "Called when the Editor object becomes inactive.",
+          "parameters": []
+        },
+        {
+          "name": "OnDestroy",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the Editor object is destroyed.",
           "parameters": []
         },
         {
@@ -424,6 +862,52 @@
           "supportsCoroutine": false,
           "description": "Implement this method to make a custom UIElements inspector.",
           "parameters": []
+        },
+        {
+          "name": "HasPreviewGUI",
+          "returnType": "bool",
+          "supportsCoroutine": false,
+          "description": "Override this method in subclasses if the editor has a custom preview.",
+          "parameters": []
+        },
+        {
+          "name": "OnPreviewGUI",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Implement to create your own custom preview for the preview area of the inspector.",
+          "parameters": [
+            {
+              "name": "r",
+              "type": "UnityEngine.Rect"
+            },
+            {
+              "name": "background",
+              "type": "UnityEngine.GUIStyle"
+            }
+          ]
+        },
+        {
+          "name": "OnInteractivePreviewGUI",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Implement to create your own interactive custom preview.",
+          "parameters": [
+            {
+              "name": "r",
+              "type": "UnityEngine.Rect"
+            },
+            {
+              "name": "background",
+              "type": "UnityEngine.GUIStyle"
+            }
+          ]
+        },
+        {
+          "name": "RequiresConstantRepaint",
+          "returnType": "bool",
+          "supportsCoroutine": false,
+          "description": "Checks if this editor requires constant repainting in its inspector.",
+          "parameters": []
         }
       ],
       "minimumUnityVersion": "2020.3"
@@ -432,6 +916,13 @@
       "fullName": "UnityEditor.EditorWindow",
       "kind": "class",
       "events": [
+        {
+          "name": "Awake",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called as the new window is opened.",
+          "parameters": []
+        },
         {
           "name": "OnEnable",
           "returnType": "void",
@@ -444,6 +935,13 @@
           "returnType": "void",
           "supportsCoroutine": false,
           "description": "Called when the window is closed or disabled.",
+          "parameters": []
+        },
+        {
+          "name": "OnDestroy",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "OnDestroy is called to close the EditorWindow window.",
           "parameters": []
         },
         {
@@ -468,6 +966,118 @@
           "description": "Called 100 times per second on all visible windows.",
           "parameters": [],
           "isPerformanceCritical": true
+        },
+        {
+          "name": "OnInspectorUpdate",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "OnInspectorUpdate is called at 10 frames per second to give the inspector a chance to update.",
+          "parameters": []
+        },
+        {
+          "name": "OnSelectionChange",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called whenever the selection has changed.",
+          "parameters": []
+        },
+        {
+          "name": "OnHierarchyChange",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Handler for message that is sent when an object or group of objects in the hierarchy changes.",
+          "parameters": []
+        },
+        {
+          "name": "OnProjectChange",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Handler for message that is sent whenever the state of the project changes.",
+          "parameters": []
+        },
+        {
+          "name": "OnFocus",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the window gets keyboard focus.",
+          "parameters": []
+        },
+        {
+          "name": "OnLostFocus",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the window loses keyboard focus.",
+          "parameters": []
+        },
+        {
+          "name": "OnBecameVisible",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Called after the window is added to a container view and becomes visible.",
+          "parameters": []
+        },
+        {
+          "name": "OnBecameInvisible",
+          "returnType": "void",
+          "supportsCoroutine": true,
+          "description": "Called before the window is removed or hidden.",
+          "parameters": []
+        }
+      ],
+      "minimumUnityVersion": "2020.3"
+    },
+    {
+      "fullName": "UnityEditor.PropertyDrawer",
+      "kind": "class",
+      "events": [
+        {
+          "name": "OnGUI",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Override this method to make your own IMGUI based GUI for the property.",
+          "parameters": [
+            {
+              "name": "position",
+              "type": "UnityEngine.Rect"
+            },
+            {
+              "name": "property",
+              "type": "UnityEditor.SerializedProperty"
+            },
+            {
+              "name": "label",
+              "type": "UnityEngine.GUIContent"
+            }
+          ],
+          "isPerformanceCritical": true
+        },
+        {
+          "name": "GetPropertyHeight",
+          "returnType": "float",
+          "supportsCoroutine": false,
+          "description": "Override this method to specify how tall the GUI for this field is in pixels.",
+          "parameters": [
+            {
+              "name": "property",
+              "type": "UnityEditor.SerializedProperty"
+            },
+            {
+              "name": "label",
+              "type": "UnityEngine.GUIContent"
+            }
+          ]
+        },
+        {
+          "name": "CreatePropertyGUI",
+          "returnType": "UnityEngine.UIElements.VisualElement",
+          "supportsCoroutine": false,
+          "description": "Override this method to make your own UI Toolkit based GUI for the property.",
+          "parameters": [
+            {
+              "name": "property",
+              "type": "UnityEditor.SerializedProperty"
+            }
+          ]
         }
       ],
       "minimumUnityVersion": "2020.3"
@@ -494,6 +1104,51 @@
               "type": "UnityEngine.Texture2D"
             }
           ]
+        },
+        {
+          "name": "OnPreprocessModel",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Add this function in a subclass to get a notification before a model (.fbx, .obj, etc.) is imported.",
+          "parameters": []
+        },
+        {
+          "name": "OnPostprocessModel",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Add this function in a subclass to get a notification when a 3D model has finished importing.",
+          "parameters": [
+            {
+              "name": "root",
+              "type": "UnityEngine.GameObject"
+            }
+          ]
+        },
+        {
+          "name": "OnPreprocessAudio",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Add this function in a subclass to get a notification before an audio clip is imported.",
+          "parameters": []
+        },
+        {
+          "name": "OnPostprocessAudio",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Add this function in a subclass to get a notification when an audio clip has finished importing.",
+          "parameters": [
+            {
+              "name": "clip",
+              "type": "UnityEngine.AudioClip"
+            }
+          ]
+        },
+        {
+          "name": "OnPreprocessAsset",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Add this function in a subclass to get a notification before any asset is imported.",
+          "parameters": []
         },
         {
           "name": "OnPostprocessAllAssets",
@@ -524,6 +1179,25 @@
       "minimumUnityVersion": "2020.3"
     },
     {
+      "fullName": "UnityEditor.AssetImporters.ScriptedImporter",
+      "kind": "class",
+      "events": [
+        {
+          "name": "OnImportAsset",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "This method must be overridden by the derived class and is called by the Asset pipeline to import files.",
+          "parameters": [
+            {
+              "name": "ctx",
+              "type": "UnityEditor.AssetImporters.AssetImportContext"
+            }
+          ]
+        }
+      ],
+      "minimumUnityVersion": "2020.3"
+    },
+    {
       "fullName": "Unity.Netcode.NetworkBehaviour",
       "kind": "class",
       "events": [
@@ -539,6 +1213,20 @@
           "returnType": "void",
           "supportsCoroutine": false,
           "description": "Gets called when the NetworkObject is despawned.",
+          "parameters": []
+        },
+        {
+          "name": "OnGainedOwnership",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the local client gains ownership of the NetworkObject.",
+          "parameters": []
+        },
+        {
+          "name": "OnLostOwnership",
+          "returnType": "void",
+          "supportsCoroutine": false,
+          "description": "Called when the local client loses ownership of the NetworkObject.",
           "parameters": []
         }
       ],
