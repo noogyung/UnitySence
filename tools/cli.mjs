@@ -429,7 +429,7 @@ function cmdPackageVsix() {
     { name: 'extension/package.json', data: fs.readFileSync(path.join(extDir, 'package.json')) }
   ];
 
-  for (const docFile of ['README.md', 'CHANGELOG.md', 'LICENSE']) {
+  for (const docFile of ['README.md', 'CHANGELOG.md', 'LICENSE', 'language-configuration.json']) {
     const extDoc = path.join(extDir, docFile);
     const rootDoc = path.join(ROOT, docFile);
     const chosen = fs.existsSync(extDoc) ? extDoc : (fs.existsSync(rootDoc) ? rootDoc : null);

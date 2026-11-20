@@ -52,12 +52,14 @@
       {
         "id": "unity-shaderlab",
         "aliases": ["Unity ShaderLab", "ShaderLab"],
-        "extensions": [".shader", ".urtshader"]
+        "extensions": [".shader", ".urtshader"],
+        "configuration": "./language-configuration.json"
       },
       {
         "id": "hlsl",
         "aliases": ["HLSL", "Unity HLSL"],
-        "extensions": [".hlsl", ".hlsli", ".cginc", ".cg", ".compute", ".hlslinc"]
+        "extensions": [".hlsl", ".hlsli", ".cginc", ".cg", ".compute", ".hlslinc", ".raytrace", ".fx", ".fxh"],
+        "configuration": "./language-configuration.json"
       },
       {
         "id": "uxml",
@@ -73,17 +75,17 @@
     "grammars": [
       {
         "language": "unity-shaderlab",
-        "scopeName": "source.shaderlab",
+        "scopeName": "source.unity-shaderlab",
         "path": "./syntaxes/unity-shaderlab.tmLanguage.json"
       },
       {
         "language": "shaderlab",
-        "scopeName": "source.shaderlab",
+        "scopeName": "source.unity-shaderlab",
         "path": "./syntaxes/unity-shaderlab.tmLanguage.json"
       },
       {
         "language": "hlsl",
-        "scopeName": "source.shaderlab",
+        "scopeName": "source.unity-shaderlab",
         "path": "./syntaxes/unity-shaderlab.tmLanguage.json"
       }
     ],

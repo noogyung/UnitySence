@@ -74,6 +74,14 @@ const BUILTIN_HLSL_SIGNATURES: Record<string, Array<{ label: string; doc: string
   GetAdditionalLight: [{ label: 'Light GetAdditionalLight(uint i, float3 positionWS)', doc: '[UnityBrain] 인덱스 i에 해당하는 추가 라이트(Point/Spot)를 반환합니다.' }],
   UniversalFragmentPBR: [{ label: 'half4 UniversalFragmentPBR(InputData inputData, SurfaceData surfaceData)', doc: '[UnityBrain] URP PBR 라이팅 최종 색상을 계산합니다.' }],
   MixFog: [{ label: 'half3 MixFog(half3 fragColor, float fogCoord)', doc: '[UnityBrain] 프래그먼트 색상에 씬 안개(Fog)를 혼합합니다.' }],
+  TraceRay: [{ label: 'void TraceRay(RaytracingAccelerationStructure AccelerationStructure, uint RayFlags, uint InstanceInclusionMask, uint RayContributionToHitGroupIndex, uint MultiplierForGeometryContributionToHitGroupIndex, uint MissShaderIndex, RayDesc Ray, inout payload_t Payload)', doc: '[UnityBrain] DXR / Unity RayTracing 가속 구조체에 대해 광선을 추적합니다.' }],
+  WaveActiveSum: [{ label: 'T WaveActiveSum(T expr)', doc: '[UnityBrain] SM 6.0 Wave 내 모든 활성 레인의 값 합계를 반환합니다.' }],
+  WaveReadLaneFirst: [{ label: 'T WaveReadLaneFirst(T expr)', doc: '[UnityBrain] SM 6.0 Wave의 첫 번째 활성 레인 값을 모든 레인에 브로드캐스트합니다.' }],
+  asfloat: [{ label: 'float asfloat(uint x)', doc: '[UnityBrain] 32비트 정수 비트를 IEEE 754 float로 재해석합니다.' }],
+  asuint: [{ label: 'uint asuint(float x)', doc: '[UnityBrain] IEEE 754 float 비트를 부호 없는 32비트 정수로 재해석합니다.' }],
+  f16tof32: [{ label: 'float f16tof32(uint value)', doc: '[UnityBrain] 하위 16비트 half 값을 32비트 float로 변환합니다.' }],
+  f32tof16: [{ label: 'uint f32tof16(float value)', doc: '[UnityBrain] 32비트 float 값을 하위 16비트 half 비트로 변환합니다.' }],
+  NonUniformResourceIndex: [{ label: 'uint NonUniformResourceIndex(uint index)', doc: '[UnityBrain] SM 5.1+/6.x 동적(비균일) 디스크립터 배열 인덱싱을 표시합니다.' }],
 };
 
 export function stripCommentsAndStringsByLine(lines: readonly string[]): string[] {

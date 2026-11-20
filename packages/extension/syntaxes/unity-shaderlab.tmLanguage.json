@@ -89,7 +89,7 @@
       "patterns": [
         {
           "name": "keyword.other.shaderlab.renderstate",
-          "match": "(?<!\\.)\\b(Cull|ZWrite|ZTest|Offset|Blend|BlendOp|AlphaToMask|ColorMask|Stencil|Ref|ReadMask|WriteMask|Comp|CompBack|CompFront|PassFront|PassBack|Fail|ZFail|Conservative)\\b(?!\\s*(?:=|\\+=|-=|\\*=|/=|;|\\)|,|\\[|\\.))"
+          "match": "(?<!\\.)\\b(Cull|ZWrite|ZTest|ZClip|Offset|Blend|BlendOp|AlphaToMask|ColorMask|Stencil|Ref|ReadMask|WriteMask|Comp|CompBack|CompFront|PassFront|PassBack|Fail|ZFail|Conservative|RequireOptions)\\b(?!\\s*(?:=|\\+=|-=|\\*=|/=|;|\\)|,|\\[|\\.))"
         },
         {
           "name": "support.type.shaderlab.property",
@@ -121,11 +121,11 @@
       "patterns": [
         {
           "name": "storage.type.hlsl.primitive",
-          "match": "\\b(void|bool|bool2|bool3|bool4|int|int2|int3|int4|int2x2|int3x3|int4x4|uint|uint2|uint3|uint4|uint2x2|uint3x3|uint4x4|float|float2|float3|float4|float2x2|float3x3|float3x4|float4x3|float4x4|half|half2|half3|half4|half2x2|half3x3|half4x4|real|real2|real3|real4|real2x2|real3x3|real4x4|fixed|fixed2|fixed3|fixed4|fixed2x2|fixed3x3|fixed4x4|double|min16float|min10float|min16int|min12int|min16uint)\\b"
+          "match": "\\b(void|bool|bool2|bool3|bool4|int|int2|int3|int4|int2x2|int3x3|int4x4|uint|uint2|uint3|uint4|uint2x2|uint3x3|uint4x4|float|float2|float3|float4|float2x2|float3x3|float3x4|float4x3|float4x4|half|half2|half3|half4|half2x2|half3x3|half4x4|real|real2|real3|real4|real2x2|real3x3|real4x4|fixed|fixed2|fixed3|fixed4|fixed2x2|fixed3x3|fixed4x4|double|min16float|min10float|min16int|min12int|min16uint|float16_t|float16_t2|float16_t3|float16_t4|int16_t|int16_t2|int16_t3|int16_t4|uint16_t|uint16_t2|uint16_t3|uint16_t4|int64_t|uint64_t|vector|matrix)\\b"
         },
         {
           "name": "storage.type.hlsl.resource",
-          "match": "\\b(sampler|sampler1D|sampler2D|sampler3D|samplerCUBE|SamplerState|SamplerComparisonState|Texture1D|Texture1DArray|Texture2D|Texture2DArray|Texture2DMS|Texture3D|TextureCube|TextureCubeArray|RWTexture1D|RWTexture2D|RWTexture2DArray|RWTexture3D|Buffer|RWBuffer|StructuredBuffer|RWStructuredBuffer|AppendStructuredBuffer|ConsumeStructuredBuffer|ByteAddressBuffer|RWByteAddressBuffer|InputPatch|OutputPatch|TriangleStream|PointStream|LineStream)\\b"
+          "match": "\\b(sampler|sampler1D|sampler2D|sampler3D|samplerCUBE|SamplerState|SamplerComparisonState|Texture1D|Texture1DArray|Texture2D|Texture2DArray|Texture2DMS|Texture2DMSArray|Texture3D|TextureCube|TextureCubeArray|RWTexture1D|RWTexture1DArray|RWTexture2D|RWTexture2DArray|RWTexture3D|Buffer|RWBuffer|StructuredBuffer|RWStructuredBuffer|AppendStructuredBuffer|ConsumeStructuredBuffer|ByteAddressBuffer|RWByteAddressBuffer|ConstantBuffer|RaytracingAccelerationStructure|RayDesc|BuiltInTriangleIntersectionAttributes|InputPatch|OutputPatch|TriangleStream|PointStream|LineStream)\\b"
         },
         {
           "name": "entity.name.type.struct.unity",
@@ -137,7 +137,7 @@
       "patterns": [
         {
           "name": "support.variable.semantic.hlsl",
-          "match": "\\b(POSITION[0-9]*|NORMAL[0-9]*|TANGENT[0-9]*|BINORMAL[0-9]*|COLOR[0-9]*|TEXCOORD[0-9]*|PSIZE[0-9]*|BLENDWEIGHT[0-9]*|BLENDINDICES[0-9]*|SV_POSITION|SV_Position|SV_Target[0-7]?|SV_TARGET[0-7]?|SV_Depth|SV_DEPTH|SV_InstanceID|SV_VertexID|SV_PrimitiveID|SV_IsFrontFace|SV_DispatchThreadID|SV_GroupID|SV_GroupThreadID|SV_GroupIndex|VPOS|VFACE|UNITY_VERTEX_INPUT_INSTANCE_ID|UNITY_VERTEX_OUTPUT_STEREO)\\b"
+          "match": "\\b(POSITION[0-9]*|NORMAL[0-9]*|TANGENT[0-9]*|BINORMAL[0-9]*|COLOR[0-9]*|TEXCOORD[0-9]*|PSIZE[0-9]*|BLENDWEIGHT[0-9]*|BLENDINDICES[0-9]*|SV_POSITION|SV_Position|SV_Target[0-7]?|SV_TARGET[0-7]?|SV_Depth|SV_DEPTH|SV_InstanceID|SV_VertexID|SV_PrimitiveID|SV_IsFrontFace|SV_DispatchThreadID|SV_GroupID|SV_GroupThreadID|SV_GroupIndex|SV_Coverage|SV_StencilRef|SV_InnerCoverage|SV_Barycentrics|SV_ViewID|SV_ShadingRate|SV_CullPrimitive|SV_SampleIndex|SV_GSInstanceID|SV_OutputControlPointID|SV_DomainLocation|SV_TessFactor|SV_InsideTessFactor|VPOS|VFACE|UNITY_VERTEX_INPUT_INSTANCE_ID|UNITY_VERTEX_OUTPUT_STEREO)\\b"
         }
       ]
     },
@@ -153,7 +153,7 @@
       "patterns": [
         {
           "name": "support.function.macro.unity",
-          "match": "\\b(TEXTURE2D|TEXTURE2D_X|TEXTURE2D_ARRAY|TEXTURE3D|TEXTURECUBE|SAMPLER|SAMPLE_TEXTURE2D|SAMPLE_TEXTURE2D_LOD|SAMPLE_TEXTURE2D_BIAS|SAMPLE_TEXTURE2D_GRAD|SAMPLE_TEXTURE2D_X|SAMPLE_TEXTURE2D_ARRAY|SAMPLE_TEXTURECUBE|SAMPLE_TEXTURECUBE_LOD|LOAD_TEXTURE2D|UNITY_DECLARE_TEX2D|UNITY_DECLARE_TEX2DARRAY|UNITY_DECLARE_TEXCUBE|UNITY_DECLARE_SCREENSPACE_TEXTURE|UNITY_SAMPLE_TEX2D|UNITY_SAMPLE_TEX2D_SAMPLER|TEXTURE2D_SHADOW_PARAM|TEXTURE2D_SHADOW_ARGS|CBUFFER_START|CBUFFER_START_WITH_SRP|CBUFFER_END|UNITY_SETUP_INSTANCE_ID|UNITY_TRANSFER_INSTANCE_ID|UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO|UNITY_TRANSFER_VERTEX_OUTPUT_STEREO|UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX|UNITY_BRANCH|UNITY_FLATTEN|UNITY_UNROLL|UNITY_LOOP)\\b"
+          "match": "\\b(TEXTURE2D|TEXTURE2D_X|TEXTURE2D_X_HALF|TEXTURE2D_X_FLOAT|TEXTURE2D_ARRAY|TEXTURE3D|TEXTURECUBE|RW_TEXTURE2D_X|TYPED_TEXTURE2D|DECLARE_TEX2D|SAMPLER|SAMPLE_TEXTURE2D|SAMPLE_TEXTURE2D_LOD|SAMPLE_TEXTURE2D_BIAS|SAMPLE_TEXTURE2D_GRAD|SAMPLE_TEXTURE2D_X|SAMPLE_TEXTURE2D_X_LOD|SAMPLE_TEXTURE2D_ARRAY|SAMPLE_TEXTURECUBE|SAMPLE_TEXTURECUBE_LOD|LOAD_TEXTURE2D|LOAD_TEXTURE2D_X|UNITY_DECLARE_TEX2D|UNITY_DECLARE_TEX2DARRAY|UNITY_DECLARE_TEXCUBE|UNITY_DECLARE_SCREENSPACE_TEXTURE|UNITY_SAMPLE_TEX2D|UNITY_SAMPLE_TEX2D_SAMPLER|TEXTURE2D_SHADOW_PARAM|TEXTURE2D_SHADOW_ARGS|CBUFFER_START|CBUFFER_START_WITH_SRP|CBUFFER_END|UNITY_DOTS_INSTANCING_START|UNITY_DOTS_INSTANCING_END|UNITY_DOTS_INSTANCED_PROP|UNITY_ACCESS_DOTS_INSTANCED_PROP|UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT|UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_CUSTOM_DEFAULT|UNITY_SETUP_INSTANCE_ID|UNITY_TRANSFER_INSTANCE_ID|UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO|UNITY_TRANSFER_VERTEX_OUTPUT_STEREO|UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX|UNITY_BRANCH|UNITY_FLATTEN|UNITY_UNROLL|UNITY_LOOP)\\b"
         },
         {
           "name": "constant.language.unity.matrix",
@@ -165,7 +165,7 @@
       "patterns": [
         {
           "name": "support.function.intrinsic.hlsl",
-          "match": "\\b(abs|acos|all|any|asin|atan|atan2|ceil|clamp|clip|cos|cosh|cross|ddx|ddy|degrees|determinant|distance|dot|exp|exp2|faceforward|floor|fmod|frac|fwidth|isfinite|isinf|isnan|ldexp|length|lerp|lit|log|log10|log2|mad|max|min|modf|mul|noise|normalize|pow|radians|rcp|reflect|refract|round|rsqrt|saturate|sign|sin|sincos|sinh|smoothstep|sqrt|step|tan|tanh|tex1D|tex2D|tex2Dlod|tex2Dbias|tex2Dgrad|tex3D|texCUBE|transpose|trunc|InterlockedAdd|InterlockedMin|InterlockedMax|InterlockedAnd|InterlockedOr|InterlockedXor|InterlockedCompareStore|InterlockedCompareExchange|InterlockedExchange|GroupMemoryBarrier|GroupMemoryBarrierWithGroupSync|DeviceMemoryBarrier|DeviceMemoryBarrierWithGroupSync|AllMemoryBarrier|AllMemoryBarrierWithGroupSync|TransformObjectToHClip|TransformObjectToWorld|TransformWorldToHClip|TransformObjectToWorldNormal|TransformWorldToView|TransformWorldToObject|GetVertexPositionInputs|GetVertexNormalInputs|GetCameraPositionWS|GetMainLight|GetAdditionalLight|GetAdditionalLightsCount|UniversalFragmentPBR|UniversalFragmentBlinnPhong|LightingLambert|LightingSpecular|ComputeScreenPos|ComputeFogFactor|MixFog|Sample|SampleLevel|SampleBias|SampleGrad|SampleCmp|SampleCmpLevelZero|Load|GetDimensions)\\b"
+          "match": "\\b(abs|acos|all|any|asdouble|asfloat|asin|asint|asuint|atan|atan2|ceil|CheckAccessFullyMapped|clamp|clip|cos|cosh|countbits|cross|ddx|ddx_coarse|ddx_fine|ddy|ddy_coarse|ddy_fine|degrees|determinant|distance|dot|exp|exp2|f16tof32|f32tof16|faceforward|firstbithigh|firstbitlow|floor|fmod|frac|fwidth|isfinite|isinf|isnan|ldexp|length|lerp|lit|log|log10|log2|mad|max|min|modf|mul|noise|NonUniformResourceIndex|normalize|pow|radians|rcp|reflect|refract|reversebits|round|rsqrt|saturate|sign|sin|sincos|sinh|smoothstep|sqrt|step|tan|tanh|tex1D|tex2D|tex2Dlod|tex2Dbias|tex2Dgrad|tex3D|texCUBE|transpose|trunc|InterlockedAdd|InterlockedMin|InterlockedMax|InterlockedAnd|InterlockedOr|InterlockedXor|InterlockedCompareStore|InterlockedCompareExchange|InterlockedExchange|GroupMemoryBarrier|GroupMemoryBarrierWithGroupSync|DeviceMemoryBarrier|DeviceMemoryBarrierWithGroupSync|AllMemoryBarrier|AllMemoryBarrierWithGroupSync|WaveIsFirstLane|WaveGetLaneIndex|WaveGetLaneCount|WaveActiveAllTrue|WaveActiveAnyTrue|WaveActiveAllEqual|WaveActiveBallot|WaveActiveCountBits|WaveActiveSum|WaveActiveMin|WaveActiveMax|WaveActiveBitAnd|WaveActiveBitOr|WaveActiveBitXor|WavePrefixSum|WavePrefixCountBits|WaveReadLaneFirst|WaveReadLaneAt|QuadReadAcrossX|QuadReadAcrossY|QuadReadAcrossDiagonal|QuadReadLaneAt|TraceRay|ReportHit|CallShader|AcceptHitAndEndSearch|IgnoreHit|DispatchRaysIndex|DispatchRaysDimensions|WorldRayOrigin|WorldRayDirection|ObjectRayOrigin|ObjectRayDirection|RayTCurrent|RayTMin|HitKind|InstanceIndex|InstanceID|PrimitiveIndex|GeometryIndex|TransformObjectToHClip|TransformObjectToWorld|TransformWorldToHClip|TransformObjectToWorldNormal|TransformWorldToView|TransformWorldToObject|GetVertexPositionInputs|GetVertexNormalInputs|GetCameraPositionWS|GetMainLight|GetAdditionalLight|GetAdditionalLightsCount|UniversalFragmentPBR|UniversalFragmentBlinnPhong|LightingLambert|LightingSpecular|ComputeScreenPos|ComputeFogFactor|MixFog|Sample|SampleLevel|SampleBias|SampleGrad|SampleCmp|SampleCmpLevelZero|Load|GetDimensions)\\b"
         }
       ]
     },
