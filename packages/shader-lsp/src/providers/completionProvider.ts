@@ -5,6 +5,32 @@ import {
 } from '../indexer/hlslIncludeGraph.ts';
 import { UNITY_BUILTIN_MACROS } from '../parser/unityHlslMacroPrepass.ts';
 
+const HLSL_PREPROCESSOR_DIRECTIVES = [
+  {
+    name: 'include',
+    insertText: 'include "',
+    detail: '[UnityBrain] HLSL / ShaderLab 헤더 파일 포함 (#include "...")',
+  },
+  {
+    name: 'include_with_pragmas',
+    insertText: 'include_with_pragmas "',
+    detail: '[UnityBrain] Unity 6 #pragma 지시어 포함 헤더 (#include_with_pragmas "...")',
+  },
+  {
+    name: 'pragma',
+    insertText: 'pragma ',
+    detail: '[UnityBrain] 셰이더 컴파일러 지시어 (#pragma vertex/fragment/multi_compile...)',
+  },
+  { name: 'define', insertText: 'define ', detail: '[UnityBrain] 전처리기 매크로 정의' },
+  { name: 'if', insertText: 'if ', detail: '[UnityBrain] 전처리기 조건 분기 시작' },
+  { name: 'ifdef', insertText: 'ifdef ', detail: '[UnityBrain] 매크로 정의 여부 조건 분기' },
+  { name: 'ifndef', insertText: 'ifndef ', detail: '[UnityBrain] 매크로 미정의 여부 조건 분기' },
+  { name: 'elif', insertText: 'elif ', detail: '[UnityBrain] 전처리기 추가 조건 분기' },
+  { name: 'else', insertText: 'else', detail: '[UnityBrain] 전처리기 기본 분기' },
+  { name: 'endif', insertText: 'endif', detail: '[UnityBrain] 전처리기 조건 분기 종료' },
+  { name: 'undef', insertText: 'undef ', detail: '[UnityBrain] 전처리기 매크로 정의 해제' },
+];
+
 const HLSL_SEMANTICS_AND_TYPES = [
   { label: 'SV_Position', kind: CompletionItemKind.Constant, detail: '[UnityBrain] HLSL 클립 공간 정점 출력 / 프래그먼트 위치 시맨틱' },
   { label: 'SV_Target', kind: CompletionItemKind.Constant, detail: '[UnityBrain] HLSL 프래그먼트 렌더 타겟 출력 시맨틱' },
@@ -42,6 +68,21 @@ export class ShaderCompletionProvider {
     const filePath = this.graph.normalizeFilePath(documentUri);
     const lines = documentText.split(/\r?\n/);
     const linePrefix = (lines[position.line] ?? '').slice(0, position.character);
+
+    // Case 0: Preprocessor directive completion (`#`, `#in`, `#include_`, `#prag`, etc.)
+    const directiveMatch = /^\s*#\s*([A-Za-z_]*)$/.exec(linePrefix);
+    if (directiveMatch) {
+      const dirPrefix = directiveMatch[1].toLowerCase();
+      return HLSL_PREPROCESSOR_DIRECTIVES
+        .filter((d) => !dirPrefix || d.name.startsWith(dirPrefix))
+        .map((d) => ({
+          label: `#${d.name}`,
+          filterText: d.name,
+          kind: CompletionItemKind.Keyword,
+          detail: d.detail,
+          insertText: d.insertText,
+        }));
+    }
 
     // Case 1: #include "..." or #include_with_pragmas "..." path completion
     const incMatch = /^\s*#\s*include(?:_with_pragmas)?\s+"([^"]*)$/.exec(linePrefix);

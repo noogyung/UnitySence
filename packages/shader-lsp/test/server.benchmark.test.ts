@@ -71,6 +71,19 @@ describe('ShaderCompletionProvider, ShaderHoverProvider, Server RPC & 50-file Be
     expect(incItems.some((item) => item.label === 'Core.hlsl')).toBe(true);
     expect(incItems.some((item) => item.label === 'Lighting.hlsl')).toBe(true);
 
+    // Preprocessor directive completion after `#include_`
+    const dirDoc = `${content}\n      #include_`;
+    const dirLines = dirDoc.split('\n');
+    const dirLineIdx = dirLines.length - 1;
+    const dirItems = completion.provideCompletionItems(
+      shaderUri,
+      { line: dirLineIdx, character: dirLines[dirLineIdx].length },
+      dirDoc,
+    );
+    const incWithPragmas = dirItems.find((item) => item.label === '#include_with_pragmas');
+    expect(incWithPragmas).toBeDefined();
+    expect(incWithPragmas?.insertText).toBe('include_with_pragmas "');
+
     // Member completion for `data.` (InputData)
     const lines = content.split(/\r?\n/);
     const dataLine = lines.findIndex((l) => l.includes('data.normalWS ='));

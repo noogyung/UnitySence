@@ -440,6 +440,9 @@ export async function activate(
             if (item.insertText) {
               ci.insertText = item.insertText;
             }
+            if (item.filterText) {
+              ci.filterText = item.filterText;
+            }
             return ci;
           });
         },
@@ -447,6 +450,8 @@ export async function activate(
       '"',
       '/',
       '.',
+      '#',
+      '_',
     ),
 
     vscode.languages.registerHoverProvider(SHADER_SELECTOR, {
