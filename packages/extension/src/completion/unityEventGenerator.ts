@@ -756,7 +756,9 @@ export function registerGenerateEventFunctionsCommand(
         return 0;
       }
 
-      const choices: Array<vscode.QuickPickItem & { event: UnityEventFunction; asCoroutine: boolean }> = [];
+      const choices: Array<
+        vscode.QuickPickItem & { event: UnityEventFunction; asCoroutine: boolean; asAwaitable: boolean }
+      > = [];
       for (const ev of missing.events) {
         const params = ev.parameters.map((p) => `${shortenCSharpType(p.type)} ${p.name}`).join(', ');
         choices.push({
@@ -765,6 +767,7 @@ export function registerGenerateEventFunctionsCommand(
           detail: `[UnityBrain] ${ev.description}`,
           event: ev,
           asCoroutine: false,
+          asAwaitable: false,
         });
         if (ev.supportsCoroutine) {
           choices.push({
@@ -773,6 +776,17 @@ export function registerGenerateEventFunctionsCommand(
             detail: `[UnityBrain] ${ev.description} (코루틴)`,
             event: ev,
             asCoroutine: true,
+            asAwaitable: false,
+          });
+        }
+        if (ev.supportsCoroutine || shortenCSharpType(ev.returnType) === 'void') {
+          choices.push({
+            label: `${ev.name} (Awaitable)`,
+            description: `async Awaitable ${ev.name}(${params})`,
+            detail: `[UnityBrain] ${ev.description} (Unity 6 Awaitable 비동기)`,
+            event: ev,
+            asCoroutine: false,
+            asAwaitable: true,
           });
         }
       }
@@ -794,6 +808,7 @@ export function registerGenerateEventFunctionsCommand(
           .map((s) =>
             formatUnityEventMethod(s.event, {
               asCoroutine: s.asCoroutine,
+              asAwaitable: s.asAwaitable,
               snippet: false,
               ownerFullName: missing.apiType.fullName,
             }),

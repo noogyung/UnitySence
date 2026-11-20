@@ -229,9 +229,21 @@ export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider 
     ];
   }
 
+  private collectShaderFilesWithPackageCache(): string[] {
+    const baseFiles = this.collectAssetAndPackageFiles('.shader');
+    const pkgCacheDir = path.join(this.options.projectRoot, 'Library', 'PackageCache');
+    const cacheFiles = walkFilesFiltered(pkgCacheDir, (_, n) => n.toLowerCase().endsWith('.shader'));
+    cacheFiles.sort((a, b) => {
+      const aUrp = a.includes('render-pipelines') ? 0 : 1;
+      const bUrp = b.includes('render-pipelines') ? 0 : 1;
+      return aUrp - bUrp;
+    });
+    return [...baseFiles, ...cacheFiles];
+  }
+
   private findShaderPropertyLocation(target: string): UnityStringNavigationResult | undefined {
     const propRe = new RegExp(`\\b${escapeRegex(target)}\\s*\\(`, 'm');
-    for (const sf of this.collectAssetAndPackageFiles('.shader')) {
+    for (const sf of this.collectShaderFilesWithPackageCache()) {
       try {
         const text = fs.readFileSync(sf, 'utf8');
         const m = propRe.exec(text);

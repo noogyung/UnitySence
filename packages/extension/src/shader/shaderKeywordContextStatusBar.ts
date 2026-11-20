@@ -89,15 +89,66 @@ export function parsePragmaDirectiveLine(rawLine: string, lineNumber: number): P
   };
 }
 
-export function analyzeShaderVariants(text: string): ShaderVariantAnalysis {
+export interface AnalyzeShaderVariantsOptions {
+  resolveIncludeText?: (includePath: string, fromUri?: string) => string | undefined;
+}
+
+function collectIncludeWithPragmas(
+  text: string,
+  resolveIncludeText: (includePath: string, fromUri?: string) => string | undefined,
+  fromUri: string | undefined,
+  anchorLine: number,
+  visited: Set<string>,
+  out: PragmaDirectiveInfo[],
+): void {
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.replace(/\/\/.*$/, '').trim();
+    if (!trimmed) continue;
+    const incMatch = /^\s*#include_with_pragmas\s+"([^"]+)"/.exec(trimmed);
+    if (incMatch) {
+      const incPath = incMatch[1];
+      if (!visited.has(incPath)) {
+        visited.add(incPath);
+        const incText = resolveIncludeText(incPath, fromUri);
+        if (incText) {
+          collectIncludeWithPragmas(incText, resolveIncludeText, incPath, anchorLine, visited, out);
+        }
+      }
+      continue;
+    }
+    const pragma = parsePragmaDirectiveLine(line, anchorLine);
+    if (pragma) {
+      out.push(pragma);
+    }
+  }
+}
+
+export function analyzeShaderVariants(
+  text: string,
+  options?: AnalyzeShaderVariantsOptions,
+): ShaderVariantAnalysis {
   const lines = text.split(/\r?\n/);
   const sharedIncludePragmas: PragmaDirectiveInfo[] = [];
   const programBlocks: Array<{ anchorLine: number; pragmas: PragmaDirectiveInfo[] }> = [];
   const standalonePragmas: PragmaDirectiveInfo[] = [];
+  const visitedIncludes = new Set<string>();
 
   let inInclude = false;
   let inProgram = false;
   let currentProgram: { anchorLine: number; pragmas: PragmaDirectiveInfo[] } | null = null;
+
+  const pushPragmas = (pragmas: PragmaDirectiveInfo[]) => {
+    for (const pragma of pragmas) {
+      if (inInclude) {
+        sharedIncludePragmas.push(pragma);
+      } else if (inProgram && currentProgram) {
+        currentProgram.pragmas.push(pragma);
+      } else {
+        standalonePragmas.push(pragma);
+      }
+    }
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].replace(/\/\/.*$/, '').trim();
@@ -122,16 +173,24 @@ export function analyzeShaderVariants(text: string): ShaderVariantAnalysis {
       continue;
     }
 
+    const incWithPragmasMatch = /^\s*#include_with_pragmas\s+"([^"]+)"/.exec(trimmed);
+    if (incWithPragmasMatch && options?.resolveIncludeText) {
+      const incPath = incWithPragmasMatch[1];
+      if (!visitedIncludes.has(incPath)) {
+        visitedIncludes.add(incPath);
+        const incText = options.resolveIncludeText(incPath);
+        if (incText) {
+          const collected: PragmaDirectiveInfo[] = [];
+          collectIncludeWithPragmas(incText, options.resolveIncludeText, incPath, i, visitedIncludes, collected);
+          pushPragmas(collected);
+        }
+      }
+      continue;
+    }
+
     const pragma = parsePragmaDirectiveLine(lines[i], i);
     if (!pragma) continue;
-
-    if (inInclude) {
-      sharedIncludePragmas.push(pragma);
-    } else if (inProgram && currentProgram) {
-      currentProgram.pragmas.push(pragma);
-    } else {
-      standalonePragmas.push(pragma);
-    }
+    pushPragmas([pragma]);
   }
 
   if (inProgram && currentProgram) {
@@ -183,6 +242,13 @@ export function analyzeShaderVariants(text: string): ShaderVariantAnalysis {
 export class ShaderVariantCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
   private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
   public readonly onDidChangeCodeLenses: vscode.Event<void> = this.onDidChangeEmitter.event;
+  private readonly resolveIncludeText?: (docUri: vscode.Uri, includePath: string, fromUri?: string) => string | undefined;
+
+  constructor(options?: {
+    resolveIncludeText?: (docUri: vscode.Uri, includePath: string, fromUri?: string) => string | undefined;
+  }) {
+    this.resolveIncludeText = options?.resolveIncludeText;
+  }
 
   public refresh(): void {
     this.onDidChangeEmitter.fire();
@@ -193,7 +259,12 @@ export class ShaderVariantCodeLensProvider implements vscode.CodeLensProvider, v
       return [];
     }
 
-    const analysis = analyzeShaderVariants(document.getText());
+    const analysis = analyzeShaderVariants(
+      document.getText(),
+      this.resolveIncludeText
+        ? { resolveIncludeText: (incPath, fromUri) => this.resolveIncludeText!(document.uri, incPath, fromUri) }
+        : undefined,
+    );
     if (analysis.blocks.length === 0) {
       return [];
     }
@@ -616,6 +687,12 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         this.updateForDocument(editor?.document);
         this.applyInactiveDecorations(editor);
+        if (editor && isShaderDocument(editor.document)) {
+          void this.onKeywordsChanged?.(
+            editor.document.uri,
+            this.getActiveKeywords(editor.document.uri),
+          );
+        }
       }),
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (vscode.window.activeTextEditor?.document.uri.toString() === e.document.uri.toString()) {

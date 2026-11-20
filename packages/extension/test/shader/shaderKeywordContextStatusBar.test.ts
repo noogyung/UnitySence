@@ -680,4 +680,56 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
     );
     expect(beforeDeclItems.some((i) => i.label === 'laterDeclared')).toBe(false);
   });
+
+  it('aggregates #include_with_pragmas header variants and syncs Hover keywords on tab switch', async () => {
+    const shaderText = [
+      'Shader "UnityBrain/IncludePragmas" {',
+      '  SubShader {',
+      '    Pass {',
+      '      HLSLPROGRAM',
+      '      #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"',
+      '      #pragma shader_feature_local _LOCAL_FX',
+      '      ENDHLSL',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+
+    const analysis = analyzeShaderVariants(shaderText, {
+      resolveIncludeText: (inc) =>
+        inc.endsWith('RenderingLayers.hlsl')
+          ? '#pragma multi_compile _ _WRITE_RENDERING_LAYERS _RENDERING_LAYERS_HIGH\n'
+          : undefined,
+    });
+    expect(analysis.totalVariants).toBe(6);
+    expect(analysis.allKeywords).toContain('_WRITE_RENDERING_LAYERS');
+    expect(analysis.allKeywords).toContain('_LOCAL_FX');
+
+    const syncedEvents: Array<{ uri: string; keywords: string[] }> = [];
+    const statusBar = new ShaderKeywordContextStatusBar({
+      onKeywordsChanged: (uri, keywords) => {
+        if (uri) syncedEvents.push({ uri: uri.toString(), keywords });
+      },
+    });
+    const docA = vscode.__mock.createTextDocument(
+      vscode.Uri.file('Assets/Shaders/ShaderA.shader'),
+      'Shader "A" { SubShader { Pass { HLSLPROGRAM\n#pragma shader_feature _KW_A\nENDHLSL } } }',
+      'unity-shaderlab',
+    );
+    const docB = vscode.__mock.createTextDocument(
+      vscode.Uri.file('Assets/Shaders/ShaderB.shader'),
+      'Shader "B" { SubShader { Pass { HLSLPROGRAM\n#pragma shader_feature _KW_B\nENDHLSL } } }',
+      'unity-shaderlab',
+    );
+    await statusBar.setActiveKeywords(docA.uri, ['_KW_A']);
+    await statusBar.setActiveKeywords(docB.uri, ['_KW_B']);
+    syncedEvents.length = 0;
+
+    vscode.__mock.emitters.onDidChangeActiveTextEditor.fire({
+      document: docA,
+      selection: new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 0)),
+    });
+    expect(syncedEvents.some((e) => e.uri === docA.uri.toString() && e.keywords.includes('_KW_A'))).toBe(true);
+    statusBar.dispose();
+  });
 });

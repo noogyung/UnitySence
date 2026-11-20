@@ -245,7 +245,23 @@ export async function activate(
     daemonClient,
     eventCompletionProvider,
   );
-  const shaderVariantCodeLensProvider = new ShaderVariantCodeLensProvider();
+  const shaderVariantCodeLensProvider = new ShaderVariantCodeLensProvider({
+    resolveIncludeText: (docUri, includePath, fromUri) => {
+      const fromFs =
+        fromUri && !fromUri.startsWith('Packages/') && !fromUri.startsWith('Assets/')
+          ? fromUri
+          : docUri.fsPath;
+      const resolved = shaderGraph.getResolver().resolve(includePath, fromFs);
+      if (resolved.resolvedPath && fs.existsSync(resolved.resolvedPath)) {
+        try {
+          return fs.readFileSync(resolved.resolvedPath, 'utf8');
+        } catch {
+          return undefined;
+        }
+      }
+      return undefined;
+    },
+  });
 
   const collectProjectShaderKeywords = (): string[] => {
     const activeCtx = contextManager.context ?? unityContext;
@@ -647,6 +663,7 @@ export async function activate(
       const onPackageChanged = () => {
         shaderGraph.getResolver().invalidateCache();
         cachedShaderIndex = null;
+        invalidateEcosystemCaches();
         for (const openDoc of vscode.workspace.textDocuments) {
           updateShaderDiagnostics(openDoc);
         }

@@ -208,7 +208,7 @@ public class MidConvertPanel : UIBehaviour
     expect((midAwake as vscode.CompletionItem & { preselect?: boolean }).preselect).toBe(true);
   });
 
-  it('offers Unity 6 async Awaitable event functions and prioritizes them when typing async Awaitable', () => {
+  it('offers Unity 6 async Awaitable event functions and prioritizes them when typing async Awaitable', async () => {
     const provider = new UnityEventCompletionProvider({
       getEditorVersion: () => '6000.0.23f1',
     });
@@ -315,5 +315,30 @@ public class AsyncHero : MonoBehaviour
     expect((sigAwaitable!.insertText as vscode.SnippetString).value).toBe(
       'private async Awaitable Start()',
     );
+
+    // 5. generateEventFunctions command also supports (Awaitable)
+    fs.mkdirSync(TEMP_CS_DIR, { recursive: true });
+    const cmdFile = path.join(TEMP_CS_DIR, 'AsyncCmdHero.cs');
+    const cmdCode = `using UnityEngine;
+public class AsyncCmdHero : MonoBehaviour
+{
+    private int hp;
+}`;
+    fs.writeFileSync(cmdFile, cmdCode, 'utf8');
+    const cmdDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(cmdFile));
+    vscode.window.activeTextEditor = {
+      document: cmdDoc,
+      selection: new vscode.Selection(new vscode.Position(2, 4), new vscode.Position(2, 4)),
+    };
+    const cmdDisp = registerGenerateEventFunctionsCommand(provider);
+    const createdCount = await vscode.commands.executeCommand<number>(
+      'unityBrain.generateEventFunctions',
+      ['Start (Awaitable)'],
+    );
+    expect(createdCount).toBe(1);
+    const updatedCmdText = fs.readFileSync(cmdFile, 'utf8');
+    expect(updatedCmdText).toContain('private async Awaitable Start()');
+    expect(updatedCmdText).toContain('await Awaitable.NextFrameAsync();');
+    cmdDisp.dispose();
   });
 });
