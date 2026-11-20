@@ -60,24 +60,32 @@ export class ShaderHoverProvider {
       };
     }
 
-    // 2. #ifdef / #if defined(...) keyword hover
-    const kwMatch = /^\s*#\s*ifdef\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(lineText);
-    if (kwMatch && this.activeKeywords.size > 0) {
-      const kw = kwMatch[1];
-      const enabled = this.activeKeywords.has(kw);
-      return {
-        contents: {
-          kind: MarkupKind.Markdown,
-          value: `**[UnityBrain] 셰이더 키워드** \`${kw}\`: 현재 컨텍스트에서 **${enabled ? '활성(ACTIVE)' : '비활성(INACTIVE)'}** 상태입니다.`,
-        },
-      };
-    }
-
     const span = this.definitionProvider.getWordSpanAt(lineText, position.character);
     if (!span) return null;
     const word = span.word;
 
-    // 3. Chained member access hover (`a.b.c`, `_Buf[i].field`, `GetMainLight().direction`)
+    // 2. #if / #elif / #ifdef / #ifndef / #pragma keyword hover (works even when activeKeywords is empty)
+    const lineCommentIdx = lineText.indexOf('//');
+    const inLineComment = lineCommentIdx >= 0 && position.character >= lineCommentIdx;
+    if (!inLineComment) {
+      const preprocInfo = this.extractPreprocessorDirectiveKeywords(lines, position.line);
+      if (preprocInfo) {
+        if (preprocInfo.ignoredWords.has(word)) {
+          return null;
+        }
+        if (preprocInfo.keywords.has(word)) {
+          const enabled = this.activeKeywords.has(word);
+          return {
+            contents: {
+              kind: MarkupKind.Markdown,
+              value: `**[UnityBrain] 셰이더 키워드** \`${word}\`: 현재 컨텍스트에서 **${enabled ? 'ON (활성)' : 'OFF (비활성)'}** 상태입니다.`,
+            },
+          };
+        }
+      }
+    }
+
+    // 3. Chained member access hover (`a.b.c`, `_Buf[i].field`, `GetMainLight().direction`, `col.rgb`)
     const isMemberAccess = span.start > 0 && lineText[span.start - 1] === '.';
     if (isMemberAccess) {
       const chainExpr = extractMemberChainExpression(lineText.slice(0, span.end));
@@ -89,6 +97,14 @@ export class ShaderHoverProvider {
             contents: {
               kind: MarkupKind.Markdown,
               value: `\`\`\`hlsl\n${resolved.field.signature ?? `${resolved.field.returnType ?? ''} ${resolved.field.name}`}\n\`\`\`\n\n**[UnityBrain]** 구조체 \`${resolved.ownerType}\`의 멤버\n\n선언 위치: \`${declaredIn}\``,
+            },
+          };
+        }
+        if (!resolved.field && resolved.type && /^[xyzwrgba]{1,4}$/i.test(word)) {
+          return {
+            contents: {
+              kind: MarkupKind.Markdown,
+              value: `\`\`\`hlsl\n${resolved.type} .${word}\n\`\`\`\n\n[UnityBrain] 벡터 스위즐 (${resolved.type})`,
             },
           };
         }
@@ -149,6 +165,88 @@ export class ShaderHoverProvider {
           value: `\`\`\`hlsl\n${builtin.signature}\n\`\`\`\n\n**[UnityBrain]** ${builtin.description} (*${builtin.pipeline}*)`,
         },
       };
+    }
+
+    return null;
+  }
+
+  private extractPreprocessorDirectiveKeywords(
+    lines: readonly string[],
+    lineIdx: number,
+  ): { keywords: Set<string>; ignoredWords: Set<string> } | null {
+    let startLine = lineIdx;
+    while (startLine > 0) {
+      const prev = (lines[startLine - 1] ?? '').replace(/\/\/.*$/, '').trimEnd();
+      if (!prev.endsWith('\\')) break;
+      startLine--;
+    }
+    let endLine = lineIdx;
+    while (endLine + 1 < lines.length) {
+      const curr = (lines[endLine] ?? '').replace(/\/\/.*$/, '').trimEnd();
+      if (!curr.endsWith('\\')) break;
+      endLine++;
+    }
+
+    const parts: string[] = [];
+    for (let i = startLine; i <= endLine; i++) {
+      let part = (lines[i] ?? '').replace(/\/\/.*$/, '').trimEnd();
+      if (part.endsWith('\\')) {
+        part = part.slice(0, -1).trimEnd();
+      }
+      parts.push(part.trim());
+    }
+    const joined = parts.join(' ').trim();
+    if (!joined.startsWith('#')) return null;
+
+    const ignoredWords = new Set([
+      'if',
+      'elif',
+      'ifdef',
+      'ifndef',
+      'else',
+      'endif',
+      'pragma',
+      'defined',
+      'true',
+      'false',
+    ]);
+    const keywords = new Set<string>();
+
+    const ifdefMatch = /^#\s*(?:ifdef|ifndef)\s+([A-Za-z_][A-Za-z0-9_]*)\b/.exec(joined);
+    if (ifdefMatch) {
+      keywords.add(ifdefMatch[1]);
+      return { keywords, ignoredWords };
+    }
+
+    const ifMatch = /^#\s*(?:if|elif)\b(.*)$/.exec(joined);
+    if (ifMatch) {
+      const expr = ifMatch[1].replace(/\/\*.*?\*\//g, ' ');
+      const idents = expr.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
+      for (const ident of idents) {
+        if (!ignoredWords.has(ident)) {
+          keywords.add(ident);
+        }
+      }
+      return { keywords, ignoredWords };
+    }
+
+    const pragmaMatch =
+      /^#\s*pragma\s+((?:multi_compile|shader_feature|dynamic_branch)(?:_[a-zA-Z0-9]+)*)\s+(.+)$/.exec(
+        joined,
+      );
+    if (pragmaMatch) {
+      ignoredWords.add(pragmaMatch[1]);
+      const tokens = pragmaMatch[2].split(/\s+/).filter(Boolean);
+      for (const tok of tokens) {
+        if (!/^_+$/.test(tok) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(tok)) {
+          keywords.add(tok);
+        }
+      }
+      return { keywords, ignoredWords };
+    }
+
+    if (/^#\s*pragma\b/.test(joined)) {
+      return { keywords, ignoredWords };
     }
 
     return null;

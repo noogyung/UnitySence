@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import * as vscode from 'vscode';
 
@@ -30,8 +31,68 @@ export class MsbuildAnalyzerInjector {
     return path.join(this.projectRoot, 'Directory.Build.props');
   }
 
+  private shouldCopyAnalyzerArtifact(srcFile: string, dstFile: string): boolean {
+    if (!fs.existsSync(dstFile)) {
+      return true;
+    }
+    try {
+      const srcStat = fs.statSync(srcFile);
+      const dstStat = fs.statSync(dstFile);
+      return (
+        srcStat.size !== dstStat.size ||
+        Math.floor(srcStat.mtimeMs) !== Math.floor(dstStat.mtimeMs)
+      );
+    } catch {
+      return true;
+    }
+  }
+
+  private resolveAnalyzerDllPath(): string {
+    const sourceDir = path.join(this.extensionPath, 'analyzers');
+    const sourceDll = path.join(sourceDir, 'UnityBrain.Analyzers.dll');
+    if (!fs.existsSync(sourceDll)) {
+      return sourceDll;
+    }
+
+    const shadowDir = path.join(os.tmpdir(), 'unitybrain-runtime', 'analyzers');
+    const shadowDll = path.join(shadowDir, 'UnityBrain.Analyzers.dll');
+
+    try {
+      fs.mkdirSync(shadowDir, { recursive: true });
+      const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!/\.(?:dll|pdb)$/i.test(entry.name)) continue;
+        const srcFile = path.join(sourceDir, entry.name);
+        let isFile = entry.isFile();
+        if (!isFile && entry.isSymbolicLink()) {
+          try {
+            isFile = fs.statSync(srcFile).isFile();
+          } catch {
+            continue;
+          }
+        }
+        if (!isFile) continue;
+
+        const dstFile = path.join(shadowDir, entry.name);
+        if (!this.shouldCopyAnalyzerArtifact(srcFile, dstFile)) continue;
+
+        try {
+          const srcStat = fs.statSync(srcFile);
+          fs.copyFileSync(srcFile, dstFile);
+          fs.utimesSync(dstFile, srcStat.atime, srcStat.mtime);
+        } catch {
+          // VBCSCompiler may hold lock on shadow copy; reuse existing shadowDll
+        }
+      }
+    } catch {
+      // Fall back to existing shadowDll or sourceDll
+    }
+
+    return fs.existsSync(shadowDll) ? shadowDll : sourceDll;
+  }
+
   public buildManagedBlock(): string {
-    const analyzerDll = path.join(this.extensionPath, 'analyzers', 'UnityBrain.Analyzers.dll');
+    const analyzerDll = this.resolveAnalyzerDllPath();
     const tagManagerAsset = path.join(this.projectRoot, 'ProjectSettings', 'TagManager.asset');
     const buildSettingsAsset = path.join(
       this.projectRoot,

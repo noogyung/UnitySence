@@ -82,7 +82,13 @@ public static class UnityCallGraphHelper
             if (fullName == "UnityEngine.MonoBehaviour" ||
                 fullName == "UnityEngine.Behaviour" ||
                 fullName == "UnityEngine.ScriptableObject" ||
-                fullName == "Unity.Netcode.NetworkBehaviour")
+                fullName == "Unity.Netcode.NetworkBehaviour" ||
+                fullName == "UnityEngine.StateMachineBehaviour" ||
+                fullName == "UnityEditor.Editor" ||
+                fullName == "UnityEditor.EditorWindow" ||
+                fullName == "UnityEditor.PropertyDrawer" ||
+                fullName == "UnityEditor.AssetImporters.ScriptedImporter" ||
+                fullName == "UnityEngine.EventSystems.UIBehaviour")
             {
                 return true;
             }

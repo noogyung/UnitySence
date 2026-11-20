@@ -9,4 +9,4 @@ obj/
 test-output/
 coverage/
 UnityBrain.vsix
-!test-fixtures/SampleUnityProject/Library/
+test-fixtures/

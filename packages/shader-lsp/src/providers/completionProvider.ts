@@ -43,8 +43,8 @@ export class ShaderCompletionProvider {
     const lines = documentText.split(/\r?\n/);
     const linePrefix = (lines[position.line] ?? '').slice(0, position.character);
 
-    // Case 1: #include "..." path completion
-    const incMatch = /^\s*#\s*include\s+"([^"]*)$/.exec(linePrefix);
+    // Case 1: #include "..." or #include_with_pragmas "..." path completion
+    const incMatch = /^\s*#\s*include(?:_with_pragmas)?\s+"([^"]*)$/.exec(linePrefix);
     if (incMatch) {
       const rawPrefix = incMatch[1];
       const lastSlash = rawPrefix.lastIndexOf('/');
@@ -83,6 +83,25 @@ export class ShaderCompletionProvider {
                 documentation: `[UnityBrain] 구조체 ${cleanType}의 필드입니다.`,
               }));
           }
+
+          const vecMatch = /^(float|half|real|min16float|int|uint)([234])$/.exec(cleanType);
+          if (vecMatch) {
+            const scalarType = vecMatch[1];
+            const compCount = Number(vecMatch[2]);
+            const swizzlesByDim: Record<number, readonly string[]> = {
+              2: ['x', 'y', 'xy', 'r', 'g', 'rg'],
+              3: ['x', 'y', 'z', 'xy', 'xyz', 'r', 'g', 'b', 'rg', 'rgb'],
+              4: ['x', 'y', 'z', 'w', 'xy', 'xyz', 'xyzw', 'r', 'g', 'b', 'a', 'rg', 'rgb', 'rgba'],
+            };
+            const candidates = swizzlesByDim[compCount] ?? [];
+            return candidates
+              .filter((sw) => !fieldPrefix || sw.startsWith(fieldPrefix))
+              .map((sw) => ({
+                label: sw,
+                kind: CompletionItemKind.Field,
+                detail: `[UnityBrain] ${cleanType} 벡터 스위즐 (${scalarType}${sw.length === 1 ? '' : sw.length})`,
+              }));
+          }
         }
       }
       return [];
@@ -94,6 +113,22 @@ export class ShaderCompletionProvider {
     const visibleSymbols = this.graph.findAllVisibleSymbols(filePath, position.line);
     const seenLabels = new Set<string>();
     const items: CompletionItem[] = [];
+
+    const parsed = this.graph.getOrParseFile(filePath);
+    for (const scope of parsed?.localVarScopes ?? []) {
+      if (position.line < scope.startLine || position.line > scope.endLine) continue;
+      for (const [name, decl] of scope.declarations.entries()) {
+        if (decl.line > position.line) continue;
+        if (seenLabels.has(name)) continue;
+        if (prefix && !name.toLowerCase().startsWith(prefix)) continue;
+        seenLabels.add(name);
+        items.push({
+          label: name,
+          kind: CompletionItemKind.Variable,
+          detail: `[UnityBrain] ${decl.kind === 'parameter' ? '함수 파라미터' : '로컬 변수'} · ${decl.signature}`,
+        });
+      }
+    }
 
     for (const sym of visibleSymbols) {
       if (sym.kind === 'field') continue;

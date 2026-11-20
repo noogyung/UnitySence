@@ -179,6 +179,28 @@ describe('MetaFileSyncManager', () => {
       expect(removed).toEqual([orphanMeta]);
       expect(fs.existsSync(orphanMeta)).toBe(false);
       expect(fs.existsSync(`${validCs}.meta`)).toBe(true);
+
+      // Dedicated importer templates (.asmdef, .asmref, texture, audio)
+      const asmMeta = MetaFileSyncManager.buildMetaContent(
+        path.join(root, 'Assets', 'Game.asmdef'),
+        '11111111111111111111111111111111',
+        false,
+      );
+      expect(asmMeta).toContain('AssemblyDefinitionImporter:');
+
+      const texMeta = MetaFileSyncManager.buildMetaContent(
+        path.join(root, 'Assets', 'Icon.png'),
+        '22222222222222222222222222222222',
+        false,
+      );
+      expect(texMeta).toContain('TextureImporter:');
+
+      const audioMeta = MetaFileSyncManager.buildMetaContent(
+        path.join(root, 'Assets', 'Hit.wav'),
+        '33333333333333333333333333333333',
+        false,
+      );
+      expect(audioMeta).toContain('AudioImporter:');
     } finally {
       mgr.dispose();
     }

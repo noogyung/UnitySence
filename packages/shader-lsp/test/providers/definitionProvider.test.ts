@@ -284,5 +284,42 @@ describe('ShaderDefinitionProvider', () => {
     const loopUseLine = lines.findIndex((l) => l.includes('_Weights[loopIdx]'));
     expect(graph.inferVariableType(multiShaderPath, 'loopIdx', loopUseLine)).toBe('int');
     expect(graph.inferVariableType(multiShaderPath, '_BaseColor', fragFwdUvLine)).toBe('float4');
+
+    // 2D struct array indexing + Texture2D .Sample(...) F12 resolution
+    const sample2dPath = path.join(projectRoot, 'Assets', 'Shaders', 'ArraySample2D.shader');
+    const sample2dUri = provider['graph'].toUri(sample2dPath);
+    const sample2dCode = [
+      'Shader "Test/ArraySample2D" {',
+      '  SubShader { Pass { HLSLPROGRAM',
+      '    TEXTURE2D(_MainTex);',
+      '    SAMPLER(sampler_MainTex);',
+      '    struct Cell { half4 weight; };',
+      '    Cell _Grid[2][4];',
+      '    half4 Frag(float2 uv : TEXCOORD0) : SV_Target {',
+      '      half r = _MainTex.Sample(sampler_MainTex, uv).r;',
+      '      return _Grid[0][1].weight * r;',
+      '    }',
+      '  ENDHLSL } }',
+      '}',
+    ].join('\n');
+    const sLines = sample2dCode.split('\n');
+    graph.setOpenDocumentContent(sample2dUri, sample2dCode);
+
+    const gridLine = sLines.findIndex((l) => l.includes('_Grid[0][1].weight'));
+    const weightCol = sLines[gridLine].indexOf('weight') + 2;
+    const gridDefs = provider.provideDefinition(sample2dUri, { line: gridLine, character: weightCol }, sample2dCode);
+    expect(gridDefs.length).toBe(1);
+    expect(gridDefs[0].range.start.line).toBe(sLines.findIndex((l) => l.includes('struct Cell')));
+
+    const sampLine = sLines.findIndex((l) => l.includes('_MainTex.Sample'));
+    const sampCol = sLines[sampLine].indexOf('Sample') + 2;
+    const sampDefs = provider.provideDefinition(sample2dUri, { line: sampLine, character: sampCol }, sample2dCode);
+    expect(sampDefs.length).toBe(1);
+    expect(sampDefs[0].range.start.line).toBe(sLines.findIndex((l) => l.includes('TEXTURE2D(_MainTex)')));
+
+    const swizCol = sLines[sampLine].lastIndexOf('.r') + 1;
+    const swizDefs = provider.provideDefinition(sample2dUri, { line: sampLine, character: swizCol }, sample2dCode);
+    expect(swizDefs.length).toBe(1);
+    expect(swizDefs[0].range.start.line).toBe(sLines.findIndex((l) => l.includes('TEXTURE2D(_MainTex)')));
   });
 });

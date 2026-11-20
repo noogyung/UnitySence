@@ -1,5 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Diagnostics;
 using UnityBrain.Analyzers.CallGraph;
 using UnityBrain.Analyzers.CodeFixes;
 
@@ -157,5 +164,104 @@ public class TriggerResponder : MonoBehaviour
             new PerformanceCriticalContextAnalyzer());
         var ub1002 = diags.Where(d => d.Id == DiagnosticIds.UncachedComponentLookup).ToArray();
         AssertEx.Equal(0, ub1002.Length, $"Expected 0 UB1002 for TryGetComponent/external receiver, got {ub1002.Length}");
+    }
+
+    [Fact]
+    public async Task DetectsDirectUnity6FindApisAndCameraMainInUpdateAsUB1001()
+    {
+        const string source = @"
+using UnityEngine;
+
+public class DirectScanner : MonoBehaviour
+{
+    private void Update()
+    {
+        var first = Object.FindFirstObjectByType<Rigidbody>();
+        var all = Object.FindObjectsByType<Rigidbody>(FindObjectsSortMode.None);
+        var cam = Camera.main;
+        _ = first;
+        _ = all;
+        _ = cam;
+    }
+}";
+
+        string extendedStubs = UnityTestStubs.UnityStubsSource.Contains("FindObjectsByType", StringComparison.Ordinal)
+            ? UnityTestStubs.UnityStubsSource
+            : UnityTestStubs.UnityStubsSource.Contains("public class Object { }", StringComparison.Ordinal)
+                ? UnityTestStubs.UnityStubsSource.Replace(
+                    "public class Object { }",
+                    @"public enum FindObjectsSortMode { None, InstanceID }
+    public class Object
+    {
+        public static T FindFirstObjectByType<T>() where T : Object => default!;
+        public static T FindAnyObjectByType<T>() where T : Object => default!;
+        public static T[] FindObjectsByType<T>(FindObjectsSortMode sortMode) where T : Object => Array.Empty<T>();
+        public static T FindObjectOfType<T>() where T : Object => default!;
+    }")
+                : UnityTestStubs.UnityStubsSource;
+
+        var diags = await GetDiagnosticsWithCustomStubsAsync(
+            source,
+            extendedStubs,
+            new PerformanceCriticalContextAnalyzer());
+
+        var ub1001 = diags.Where(d => d.Id == DiagnosticIds.IndirectPerformanceCriticalInvocation).ToList();
+        AssertEx.Equal(3, ub1001.Count, $"Expected 3 UB1001 diagnostics in Update(), got {ub1001.Count}");
+        AssertEx.Contains("Object.FindFirstObjectByType", ub1001[0].GetMessage());
+        AssertEx.Contains("Update()", ub1001[0].GetMessage());
+        AssertEx.Contains("Object.FindObjectsByType", ub1001[1].GetMessage());
+        AssertEx.Contains("Camera.main", ub1001[2].GetMessage());
+    }
+
+    private static async Task<ImmutableArray<Diagnostic>> GetDiagnosticsWithCustomStubsAsync(
+        string userSource,
+        string stubsSource,
+        DiagnosticAnalyzer analyzer)
+    {
+        var trusted = (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string ?? string.Empty)
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        var refs = new List<MetadataReference>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in trusted)
+        {
+            var fileName = Path.GetFileName(path);
+            if (!fileName.StartsWith("System.", StringComparison.OrdinalIgnoreCase) &&
+                !fileName.Equals("mscorlib.dll", StringComparison.OrdinalIgnoreCase) &&
+                !fileName.Equals("netstandard.dll", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (seen.Add(path))
+            {
+                refs.Add(MetadataReference.CreateFromFile(path));
+            }
+        }
+
+        var parseOpts = new CSharpParseOptions(LanguageVersion.Latest);
+        var userTree = CSharpSyntaxTree.ParseText(userSource, parseOpts, "TestScript.cs");
+        var stubTree = CSharpSyntaxTree.ParseText(stubsSource, parseOpts, "UnityStubs.cs");
+
+        var compilation = CSharpCompilation.Create(
+            "TestAssembly",
+            new[] { userTree, stubTree },
+            refs,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var compilerErrors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+        AssertEx.Equal(
+            0,
+            compilerErrors.Length,
+            $"Unexpected compilation errors in test source: {string.Join("; ", compilerErrors.Select(e => e.GetMessage()))}");
+
+        var withAnalyzers = compilation.WithAnalyzers(
+            ImmutableArray.Create(analyzer),
+            new AnalyzerOptions(ImmutableArray<AdditionalText>.Empty));
+        var allDiags = await withAnalyzers.GetAnalyzerDiagnosticsAsync().ConfigureAwait(false);
+        return allDiags
+            .Where(d => d.Location.SourceTree == userTree)
+            .OrderBy(d => d.Location.SourceSpan.Start)
+            .ToImmutableArray();
     }
 }

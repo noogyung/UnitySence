@@ -107,7 +107,7 @@ function parseDeclaratorItems(
     const semSplit = beforeEq.split(':');
     const declPart = semSplit[0].trim();
     const semantic = semSplit[1] ? semSplit[1].trim() : '';
-    const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*(\[[^\]]*\])?$/.exec(declPart);
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*((?:\[[^\]]*\])+)?$/.exec(declPart);
     if (!m) continue;
     const name = m[1];
     const arraySuffix = m[2] ? m[2].replace(/\s+/g, '') : '';
@@ -233,7 +233,7 @@ function parseParameterList(paramStr: string): Array<{ name: string; type: strin
     const cleaned = withoutDefault
       .replace(/^(?:in|out|inout|uniform|const)\s+/g, '')
       .trim();
-    const m = /^(.+?)\s+([A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?)$/.exec(cleaned);
+    const m = /^(.+?)\s+([A-Za-z_][A-Za-z0-9_]*(?:(?:\[[^\]]*\])+)?)$/.exec(cleaned);
     if (m) {
       params.push({ type: m[1].trim(), name: m[2].replace(/\[.*$/, '') });
     }
@@ -274,7 +274,7 @@ function extractIncludes(lines: string[], rawLines: string[]): HlslIncludeDirect
   const out: HlslIncludeDirective[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const m = /^\s*#\s*include\s*(["<])([^">]+)([">])/.exec(line);
+    const m = /^\s*#\s*include(?:_with_pragmas)?\s*(["<])([^">]+)([">])/.exec(line);
     if (!m) continue;
     const origLine = rawLines[i] ?? line;
     const rawPath = m[2].trim();
@@ -505,7 +505,7 @@ export function parseHlslSymbols(
           .trim()
           .replace(/^(?:in|out|inout|uniform|const)\s+/g, '')
           .trim();
-        const pm = /^(.+?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\[[^\]]*\])?$/.exec(cleaned);
+        const pm = /^(.+?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*((?:\[[^\]]*\])+)?$/.exec(cleaned);
         if (!pm) continue;
         const arrSuffix = pm[3] ? pm[3].replace(/\s+/g, '') : '';
         const pType = arrSuffix ? `${pm[1].trim()}${arrSuffix}` : pm[1].trim();

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import * as vscode from 'vscode';
@@ -18,6 +19,7 @@ import {
   shortenCSharpType,
   UnityEventCompletionProvider,
 } from '../completion/unityEventGenerator.ts';
+import { openAssetInUnityEditor } from '../editor/unityEditorIntegration.ts';
 
 export interface DaemonClientTransport {
   sendRequest<T = unknown>(method: string, params?: unknown): Promise<T>;
@@ -53,6 +55,7 @@ export class UnityDaemonClient implements vscode.Disposable {
   private childProcess: ChildProcess | null = null;
   private connection: MessageConnection | null = null;
   private startPromise: Promise<void> | null = null;
+  private shadowDaemonDir: string | null = null;
 
   constructor(options: UnityDaemonClientOptions) {
     this.projectRoot = path.resolve(options.projectRoot);
@@ -116,21 +119,57 @@ export class UnityDaemonClient implements vscode.Disposable {
       sendRequest: <T>(method: string, params?: unknown) => conn.sendRequest<T>(method, params),
       dispose: () => {
         try {
-          void conn.sendNotification('exit');
+          void Promise.resolve(conn.sendRequest('shutdown')).catch(() => {});
+        } catch {
+          // Ignore closing request error
+        }
+        try {
+          void Promise.resolve(conn.sendNotification('exit')).catch(() => {});
         } catch {
           // Ignore closing notification error
         }
         conn.dispose();
+        try {
+          child.stdin?.end();
+        } catch {
+          // Ignore stdin close error
+        }
         if (!child.killed) {
           child.kill();
+        }
+        if (this.shadowDaemonDir) {
+          try {
+            fs.rmSync(this.shadowDaemonDir, { recursive: true, force: true });
+          } catch {
+            // Ignore cleanup error if process is still exiting
+          }
+          this.shadowDaemonDir = null;
         }
       },
     };
   }
 
   private resolveDaemonDllPath(): string | null {
+    const extDaemonDll = path.join(this.extensionPath, 'bin', 'daemon', 'UnityBrain.Daemon.dll');
+    if (fs.existsSync(extDaemonDll)) {
+      try {
+        const runtimeRoot = path.join(os.tmpdir(), 'unitybrain-runtime');
+        const shadowDir = path.join(runtimeRoot, `daemon-${process.pid}-${Date.now()}`);
+        fs.mkdirSync(shadowDir, { recursive: true });
+        const sourceDir = path.dirname(extDaemonDll);
+        for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+          if (entry.isFile()) {
+            fs.copyFileSync(path.join(sourceDir, entry.name), path.join(shadowDir, entry.name));
+          }
+        }
+        this.shadowDaemonDir = shadowDir;
+        return path.join(shadowDir, 'UnityBrain.Daemon.dll');
+      } catch {
+        return extDaemonDll;
+      }
+    }
+
     const candidates = [
-      path.join(this.extensionPath, 'bin', 'daemon', 'UnityBrain.Daemon.dll'),
       path.join(this.extensionPath, '..', 'unity-daemon', 'bin', 'Release', 'net10.0', 'UnityBrain.Daemon.dll'),
       path.join(this.extensionPath, '..', 'unity-daemon', 'bin', 'Debug', 'net10.0', 'UnityBrain.Daemon.dll'),
     ];
@@ -297,8 +336,16 @@ export function parseCSharpDeclarations(sourceText: string): CSharpCodeDeclarati
         const fieldMatch = /^(?:\[[^\]]+\]\s*)*(?:public|private|protected|internal|\s)+[A-Za-z0-9_<>\[\].,\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)/.exec(
           trimmed,
         );
+        const autoPropMatch = pendingSerializeField
+          ? /^(?:\[[^\]]+\]\s*)*(?:(?:public|private|protected|internal|virtual|override|new)\s+)*[A-Za-z0-9_<>\[\].,?\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{\s*get\b/.exec(
+              trimmed,
+            )
+          : null;
         if (fieldMatch && (pendingSerializeField || isPublicField) && !trimmed.includes('(')) {
           serializedFields.push({ fieldName: fieldMatch[1], line: i });
+          pendingSerializeField = false;
+        } else if (autoPropMatch && !trimmed.includes('(')) {
+          serializedFields.push({ fieldName: autoPropMatch[1], line: i });
           pendingSerializeField = false;
         } else if (!trimmed.startsWith('[')) {
           pendingSerializeField = false;
@@ -431,9 +478,25 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
     if (serializedValues.length > 0) {
       const valuesByField = new Map<string, SerializedFieldValueEntry[]>();
       for (const entry of serializedValues) {
-        const list = valuesByField.get(entry.fieldName) ?? [];
-        list.push(entry);
-        valuesByField.set(entry.fieldName, list);
+        const normalizedFieldName = entry.fieldName.replace(
+          /<([A-Za-z_][A-Za-z0-9_]*)>k__BackingField/g,
+          '$1',
+        );
+        const directList = valuesByField.get(normalizedFieldName) ?? [];
+        directList.push(entry);
+        valuesByField.set(normalizedFieldName, directList);
+
+        const dotIdx = normalizedFieldName.indexOf('.');
+        if (dotIdx > 0) {
+          const rootField = normalizedFieldName.slice(0, dotIdx);
+          const subPath = normalizedFieldName.slice(dotIdx + 1);
+          const rootList = valuesByField.get(rootField) ?? [];
+          rootList.push({
+            ...entry,
+            value: `${subPath}=${entry.value}`,
+          });
+          valuesByField.set(rootField, rootList);
+        }
       }
 
       for (const field of decls.serializedFields) {
@@ -579,6 +642,18 @@ export function registerShowAssetUsagesCommand(defaultProjectRoot: string): vsco
     }
 
     const targetPath = path.resolve(root, selected.location.assetPath);
+    const openedInUnity = await openAssetInUnityEditor(
+      root,
+      selected.location.assetPath,
+      selected.location.gameObjectPath,
+    );
+    if (openedInUnity) {
+      void vscode.window.showInformationMessage(
+        `[UnityBrain] Unity Editor에서 '${selected.location.assetPath}' (${selected.location.gameObjectPath}) 위치를 열었습니다.`,
+      );
+      return selected.location;
+    }
+
     const targetUri = vscode.Uri.file(targetPath);
     const targetLine = Math.max(0, selected.location.line - 1);
     const pos = new vscode.Position(targetLine, 0);

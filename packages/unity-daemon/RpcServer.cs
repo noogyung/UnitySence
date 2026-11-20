@@ -108,6 +108,7 @@ public sealed class RpcServer
                     }
 
                     case "shutdown":
+                    case "exit":
                         shouldStop = true;
                         result = new { ok = true };
                         break;

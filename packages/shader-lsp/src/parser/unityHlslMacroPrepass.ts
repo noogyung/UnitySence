@@ -75,6 +75,60 @@ export const UNITY_BUILTIN_MACROS: readonly UnityMacroSpec[] = [
     pipeline: 'CoreRP',
   },
   {
+    name: 'SAMPLE_TEXTURE2D_X',
+    signature: 'SAMPLE_TEXTURE2D_X(textureName, samplerName, coord2)',
+    description: 'Cross-platform XR/Single-Pass Stereo 2D texture sample macro.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'SAMPLE_TEXTURE2D_X_LOD',
+    signature: 'SAMPLE_TEXTURE2D_X_LOD(textureName, samplerName, coord2, lod)',
+    description: 'Cross-platform XR/Single-Pass Stereo explicit mip-level 2D texture sample macro.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'LOAD_TEXTURE2D',
+    signature: 'LOAD_TEXTURE2D(textureName, unCoord2)',
+    description: 'Loads a texel from a 2D texture at integer texel coordinates without filtering.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'LOAD_TEXTURE2D_X',
+    signature: 'LOAD_TEXTURE2D_X(textureName, unCoord2)',
+    description: 'Loads a texel from a single-pass XR/Stereo 2D texture at integer texel coordinates.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'UNITY_DOTS_INSTANCING_START',
+    signature: 'UNITY_DOTS_INSTANCING_START(name)',
+    description: 'Begins a Unity DOTS Entities Graphics per-instance metadata/property block.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'UNITY_DOTS_INSTANCING_END',
+    signature: 'UNITY_DOTS_INSTANCING_END(name)',
+    description: 'Closes a Unity DOTS instancing property block.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'UNITY_DOTS_INSTANCED_PROP',
+    signature: 'UNITY_DOTS_INSTANCED_PROP(type, var)',
+    description: 'Declares a per-instance shader property inside a UNITY_DOTS_INSTANCING_START block.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'UNITY_ACCESS_DOTS_INSTANCED_PROP',
+    signature: 'UNITY_ACCESS_DOTS_INSTANCED_PROP(type, var)',
+    description: 'Reads a DOTS instanced property value for the current draw instance.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT',
+    signature: 'UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(type, var)',
+    description: 'Reads a DOTS instanced property value or falls back to the default CBUFFER value.',
+    pipeline: 'CoreRP',
+  },
+  {
     name: 'CBUFFER_START',
     signature: 'CBUFFER_START(name)',
     description: 'Begins an SRP-Batcher compatible constant buffer declaration.',
@@ -313,24 +367,47 @@ export class UnityHlslMacroPrepass {
       }
 
       const instPropMatch =
-        /^(\s*)UNITY_DEFINE_INSTANCED_PROP\(\s*([A-Za-z0-9_<> ]+?)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;?(.*)$/.exec(
+        /^(\s*)(UNITY_DEFINE_INSTANCED_PROP|UNITY_DOTS_INSTANCED_PROP)\(\s*([A-Za-z0-9_<> ]+?)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;?(.*)$/.exec(
           line,
         );
       if (instPropMatch) {
-        const [, indent, propType, propName, trailing] = instPropMatch;
-        normalized = `${indent}${propType.trim()} ${propName};${trailing}`;
+        const [, indent, macroName, propType, propName, trailing] = instPropMatch;
+        const cleanType = propType.trim();
+        normalized = `${indent}${cleanType} ${propName};${trailing}`;
         const col = line.indexOf(propName);
         synthesizedSymbols.push({
           name: propName,
           kind: 'variable',
-          returnType: propType.trim(),
-          signature: `${propType.trim()} ${propName}`,
+          returnType: cleanType,
+          signature: `${cleanType} ${propName}`,
+          documentation: `Expanded from ${macroName}(${cleanType}, ${propName})`,
           uri: fileUri,
           line: i,
           column: col >= 0 ? col : 0,
         });
         outLines.push(hasCr ? `${normalized}\r` : normalized);
         continue;
+      }
+
+      if (!/^\s*#/.test(normalized)) {
+        normalized = normalized.replace(
+          /\bUNITY_DOTS_INSTANCED_PROP\(\s*([A-Za-z0-9_<> ]+?)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;?/g,
+          (_full, rawType: string, propName: string, offset: number) => {
+            const cleanType = rawType.trim();
+            const col = line.indexOf(propName, offset);
+            synthesizedSymbols.push({
+              name: propName,
+              kind: 'variable',
+              returnType: cleanType,
+              signature: `${cleanType} ${propName}`,
+              documentation: `Expanded from UNITY_DOTS_INSTANCED_PROP(${cleanType}, ${propName})`,
+              uri: fileUri,
+              line: i,
+              column: col >= 0 ? col : 0,
+            });
+            return `${cleanType} ${propName};`;
+          },
+        );
       }
 
       // Inline macro normalizations while strictly keeping line count identical

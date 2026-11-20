@@ -162,10 +162,11 @@ export class IncludeDependencyGraph {
     if (this.reverseIndexBuilt) return;
     this.reverseIndexBuilt = true;
 
-    const assetsDir = path.join(this.context.projectRoot, 'Assets');
-    if (!fs.existsSync(assetsDir)) return;
-
-    const stack = [assetsDir];
+    const scanRoots = [
+      path.join(this.context.projectRoot, 'Assets'),
+      path.join(this.context.projectRoot, 'Packages'),
+    ];
+    const stack = scanRoots.filter((d) => fs.existsSync(d));
     const shaderExts = new Set(['.shader', '.hlsl', '.cginc', '.hlsli', '.compute']);
     while (stack.length > 0) {
       const dir = stack.pop();
@@ -177,6 +178,7 @@ export class IncludeDependencyGraph {
         continue;
       }
       for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue;
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           stack.push(full);
@@ -418,20 +420,26 @@ export class IncludeDependencyGraph {
     entryUriOrPath: string,
     expression: string,
     line: number,
-  ): { type: string | null; field: HlslSymbolEntry | null; ownerType: string | null } {
+  ): {
+    type: string | null;
+    field: HlslSymbolEntry | null;
+    ownerType: string | null;
+    rootSymbol: HlslSymbolEntry | null;
+  } {
     const segments = this.splitChainSegments(expression.trim());
-    if (segments.length === 0) return { type: null, field: null, ownerType: null };
+    if (segments.length === 0) return { type: null, field: null, ownerType: null, rootSymbol: null };
 
     let currentType = this.resolveRootSegmentType(entryUriOrPath, segments[0], line);
+    const rootSymbol = this.resolveRootSymbol(entryUriOrPath, segments[0], line);
     let lastField: HlslSymbolEntry | null = null;
     let ownerType: string | null = null;
 
     for (let i = 1; i < segments.length; i++) {
-      if (!currentType) return { type: null, field: null, ownerType: null };
+      if (!currentType) return { type: null, field: null, ownerType: null, rootSymbol };
       const rawSeg = segments[i].replace(/\[[^\]]*\]/g, '').trim();
       const callMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s*\(.*\)$/.exec(rawSeg);
       const memberName = callMatch ? callMatch[1] : rawSeg;
-      if (!memberName) return { type: null, field: null, ownerType: null };
+      if (!memberName) return { type: null, field: null, ownerType: null, rootSymbol };
 
       const cleanOwner = this.unwrapContainerType(currentType, segments[i].includes('['));
       const fields = this.findStructFields(entryUriOrPath, cleanOwner, line);
@@ -454,10 +462,60 @@ export class IncludeDependencyGraph {
         continue;
       }
 
-      return { type: null, field: null, ownerType: cleanOwner };
+      const builtinMethodType = this.resolveBuiltinObjectMethodType(cleanOwner, memberName);
+      if (builtinMethodType) {
+        ownerType = cleanOwner;
+        lastField = null;
+        currentType = builtinMethodType;
+        continue;
+      }
+
+      return { type: null, field: null, ownerType: cleanOwner, rootSymbol };
     }
 
-    return { type: currentType, field: lastField, ownerType };
+    return { type: currentType, field: lastField, ownerType, rootSymbol };
+  }
+
+  private resolveRootSymbol(
+    entryUriOrPath: string,
+    segment: string,
+    line: number,
+  ): HlslSymbolEntry | null {
+    const trimmed = segment.trim();
+    const fnCallMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s*\(.*\)$/.exec(trimmed);
+    const targetName = fnCallMatch
+      ? fnCallMatch[1]
+      : /^([A-Za-z_][A-Za-z0-9_]*)/.exec(trimmed)?.[1];
+    if (!targetName) return null;
+    const hits = this.findSymbolsVisibleFrom(entryUriOrPath, targetName, line);
+    if (fnCallMatch) {
+      return hits.find((s) => s.kind === 'function') ?? hits[0] ?? null;
+    }
+    return hits.find((s) => s.kind === 'variable' || s.kind === 'parameter') ?? hits[0] ?? null;
+  }
+
+  private resolveBuiltinObjectMethodType(ownerType: string, methodName: string): string | null {
+    if (
+      /^(?:Texture|RWTexture)/.test(ownerType) &&
+      (methodName === 'Sample' ||
+        methodName === 'SampleLevel' ||
+        methodName === 'SampleBias' ||
+        methodName === 'SampleGrad' ||
+        methodName === 'SampleCmp' ||
+        methodName === 'SampleCmpLevelZero' ||
+        methodName === 'Load')
+    ) {
+      return methodName.startsWith('SampleCmp') ? 'float' : 'float4';
+    }
+    if (
+      /^(?:StructuredBuffer|RWStructuredBuffer|AppendStructuredBuffer|ConsumeStructuredBuffer|Buffer|RWBuffer)$/.test(
+        ownerType,
+      ) &&
+      methodName === 'Load'
+    ) {
+      return 'float4';
+    }
+    return null;
   }
 
   private splitChainSegments(expr: string): string[] {
@@ -489,11 +547,49 @@ export class IncludeDependencyGraph {
   ): string | null {
     const hasIndex = segment.includes('[');
     const trimmed = segment.trim();
-    const fnCallMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s*\(.*\)$/.exec(trimmed);
+    const fnCallMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*)\)$/.exec(trimmed);
     if (fnCallMatch) {
-      const hits = this.findSymbolsVisibleFrom(entryUriOrPath, fnCallMatch[1], line);
+      const fnName = fnCallMatch[1];
+      const argsBody = fnCallMatch[2];
+      const hits = this.findSymbolsVisibleFrom(entryUriOrPath, fnName, line);
       const fn = hits.find((s) => s.kind === 'function' && s.returnType);
-      return fn?.returnType ?? null;
+      if (fn?.returnType) return fn.returnType;
+
+      if (
+        /^(?:SAMPLE_TEXTURE(?:2D|2D_X|2D_ARRAY|3D|CUBE)(?:_LOD|_BIAS|_GRAD)?|LOAD_TEXTURE(?:2D|2D_X|2D_ARRAY|3D)|tex2D)$/i.test(
+          fnName,
+        )
+      ) {
+        return 'float4';
+      }
+      if (/^SAMPLE_TEXTURE(?:2D|2D_X|2D_ARRAY|CUBE)_SHADOW$/i.test(fnName)) {
+        return 'float';
+      }
+      if (/^UNITY_ACCESS_DOTS_INSTANCED_PROP(?:_WITH_DEFAULT)?$/.test(fnName)) {
+        const argParts = argsBody.split(',');
+        const propIdent =
+          argParts.length >= 2 ? /^([A-Za-z_][A-Za-z0-9_]*)/.exec(argParts[1].trim())?.[1] : undefined;
+        if (propIdent) {
+          const propHits = this.findSymbolsVisibleFrom(entryUriOrPath, propIdent, line);
+          const varSym = propHits.find((s) => s.kind === 'variable' && s.returnType);
+          if (varSym?.returnType) return varSym.returnType;
+        }
+        const typeArgMatch = /^([A-Za-z_][A-Za-z0-9_]*)/.exec((argParts[0] ?? '').trim());
+        if (
+          typeArgMatch &&
+          /^(?:float|half|real|min16float|fixed|int|uint|bool)(?:[234](?:x[234])?)?$/.test(
+            typeArgMatch[1],
+          )
+        ) {
+          return typeArgMatch[1];
+        }
+        if (propIdent) {
+          const propHits = this.findSymbolsVisibleFrom(entryUriOrPath, propIdent, line);
+          const fallbackSym = propHits.find((s) => s.returnType);
+          if (fallbackSym?.returnType) return fallbackSym.returnType;
+        }
+      }
+      return null;
     }
 
     const identMatch = /^([A-Za-z_][A-Za-z0-9_]*)/.exec(trimmed);
@@ -504,23 +600,33 @@ export class IncludeDependencyGraph {
   }
 
   private unwrapIndexedElementType(typeName: string): string {
+    const withoutArrays = typeName.trim().replace(/(?:\[[^\]]*\])+$/, '').trim();
     const generic = /^(?:StructuredBuffer|RWStructuredBuffer|AppendStructuredBuffer|ConsumeStructuredBuffer|Buffer|RWBuffer)<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>$/.exec(
-      typeName.trim(),
+      withoutArrays,
     );
     if (generic) return generic[1];
-    return typeName.replace(/\[[^\]]*\]$/, '').trim();
+    return withoutArrays;
   }
 
   private unwrapContainerType(typeName: string, indexed: boolean): string {
     const base = indexed ? this.unwrapIndexedElementType(typeName) : typeName;
-    return base.replace(/<.*>$/, '').replace(/\[[^\]]*\]$/, '').trim();
+    return base.replace(/<.*>$/, '').replace(/(?:\[[^\]]*\])+$/, '').trim();
   }
 
   private resolveSwizzleType(ownerType: string, swizzle: string): string | null {
-    const vecMatch = /^(float|half|real|fixed|int|uint|bool)([234])$/.exec(ownerType);
+    const vecMatch = /^(float|half|real|min16float|fixed|int|uint|bool)([234])?$/.exec(
+      ownerType.trim(),
+    );
     if (!vecMatch) return null;
-    if (!/^(?:[xyzw]{1,4}|[rgba]{1,4})$/.test(swizzle)) return null;
     const scalar = vecMatch[1];
+    const dim = vecMatch[2] ? Number(vecMatch[2]) : 1;
+    const swizzlePatternByDim: Record<number, RegExp> = {
+      1: /^(?:x{1,4}|r{1,4})$/,
+      2: /^(?:[xy]{1,4}|[rg]{1,4})$/,
+      3: /^(?:[xyz]{1,4}|[rgb]{1,4})$/,
+      4: /^(?:[xyzw]{1,4}|[rgba]{1,4})$/,
+    };
+    if (!swizzlePatternByDim[dim]?.test(swizzle)) return null;
     return swizzle.length === 1 ? scalar : `${scalar}${swizzle.length}`;
   }
 

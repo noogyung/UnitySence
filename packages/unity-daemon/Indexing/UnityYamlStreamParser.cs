@@ -365,7 +365,8 @@ public static class UnityYamlStreamParser
 
         if (mb.PendingListName != null)
         {
-            if (indent >= mb.PendingListIndent &&
+            if (!mb.HasPendingNestedFields &&
+                indent >= mb.PendingListIndent &&
                 (trimmed.StartsWith("- ", StringComparison.Ordinal) || trimmed.SequenceEqual("-")))
             {
                 if (mb.PendingListItemIndent < 0 || indent == mb.PendingListItemIndent)
@@ -381,6 +382,26 @@ public static class UnityYamlStreamParser
             }
             else
             {
+                if (mb.PendingListCount == 0 &&
+                    !trimmed.StartsWith("- ", StringComparison.Ordinal) &&
+                    !trimmed.SequenceEqual("-") &&
+                    TrySplitKeyValue(trimmed, out var subKey, out var subVal))
+                {
+                    mb.HasPendingNestedFields = true;
+                    if (subVal.Length > 0 &&
+                        !subKey.StartsWith("m_", StringComparison.Ordinal) &&
+                        !subKey.SequenceEqual("fileID"))
+                    {
+                        string cleanSubKey = NormalizeBackingFieldKey(subKey.ToString());
+                        string nestedKey = $"{mb.PendingListName}.{cleanSubKey}";
+                        string cleanSubVal = UnquoteYamlScalar(subVal);
+                        if (cleanSubVal.Length > 0)
+                        {
+                            mb.Fields[nestedKey] = cleanSubVal;
+                            mb.FieldRecords.Add(new FieldEntry(nestedKey, cleanSubVal, lineNumber));
+                        }
+                    }
+                }
                 return;
             }
         }
@@ -432,7 +453,7 @@ public static class UnityYamlStreamParser
             return;
         }
 
-        string keyStr = key.ToString();
+        string keyStr = NormalizeBackingFieldKey(key.ToString());
         if (val.SequenceEqual("[]"))
         {
             mb.Fields[keyStr] = "[0 items]";
@@ -447,6 +468,7 @@ public static class UnityYamlStreamParser
             mb.PendingListIndent = indent;
             mb.PendingListItemIndent = -1;
             mb.PendingListCount = 0;
+            mb.HasPendingNestedFields = false;
             return;
         }
 
@@ -571,7 +593,7 @@ public static class UnityYamlStreamParser
     {
         if (mb != null && mb.PendingListName != null)
         {
-            if (mb.PendingListCount > 0)
+            if (mb.PendingListCount > 0 && !mb.HasPendingNestedFields)
             {
                 string summary = $"[{mb.PendingListCount} items]";
                 mb.Fields[mb.PendingListName] = summary;
@@ -580,6 +602,7 @@ public static class UnityYamlStreamParser
             mb.PendingListName = null;
             mb.PendingListCount = 0;
             mb.PendingListItemIndent = -1;
+            mb.HasPendingNestedFields = false;
         }
     }
 
@@ -760,6 +783,41 @@ public static class UnityYamlStreamParser
         return val.ToString();
     }
 
+    private static string NormalizeBackingFieldKey(string keyStr)
+    {
+        const string suffix = ">k__BackingField";
+        if (keyStr.Length > suffix.Length + 1 &&
+            keyStr[0] == '<' &&
+            keyStr.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            string inner = keyStr.Substring(1, keyStr.Length - 1 - suffix.Length);
+            if (IsValidCSharpIdentifier(inner))
+            {
+                return inner;
+            }
+        }
+        return keyStr;
+    }
+
+    private static bool IsValidCSharpIdentifier(string s)
+    {
+        if (s.Length == 0) return false;
+        char first = s[0];
+        if (!((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z') || first == '_'))
+        {
+            return false;
+        }
+        for (int i = 1; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static string CleanAssemblyTypeName(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
@@ -787,6 +845,7 @@ public static class UnityYamlStreamParser
         public int PendingListIndent { get; set; }
         public int PendingListItemIndent { get; set; } = -1;
         public int PendingListCount { get; set; }
+        public bool HasPendingNestedFields { get; set; }
 
         public MonoBehaviourBlock(string fileId, int startLine)
         {

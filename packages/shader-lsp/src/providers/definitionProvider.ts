@@ -91,6 +91,20 @@ export class ShaderDefinitionProvider {
             },
           ];
         }
+        if (resolved.type && resolved.rootSymbol) {
+          return [
+            {
+              uri: resolved.rootSymbol.uri,
+              range: {
+                start: { line: resolved.rootSymbol.line, character: resolved.rootSymbol.column },
+                end: {
+                  line: resolved.rootSymbol.line,
+                  character: resolved.rootSymbol.column + resolved.rootSymbol.name.length,
+                },
+              },
+            },
+          ];
+        }
       }
     }
 

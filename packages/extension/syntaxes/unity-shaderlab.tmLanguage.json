@@ -6,6 +6,7 @@
     { "include": "#comments" },
     { "include": "#preprocessor" },
     { "include": "#strings" },
+    { "include": "#property-attributes" },
     { "include": "#shaderlab-blocks" },
     { "include": "#hlsl-control-keywords" },
     { "include": "#hlsl-types" },
@@ -136,7 +137,15 @@
       "patterns": [
         {
           "name": "support.variable.semantic.hlsl",
-          "match": "\\b(POSITION[0-9]*|NORMAL[0-9]*|TANGENT[0-9]*|BINORMAL[0-9]*|COLOR[0-9]*|TEXCOORD[0-9]+|PSIZE[0-9]*|BLENDWEIGHT[0-9]*|BLENDINDICES[0-9]*|SV_POSITION|SV_Position|SV_Target[0-7]?|SV_TARGET[0-7]?|SV_Depth|SV_DEPTH|SV_InstanceID|SV_VertexID|SV_PrimitiveID|SV_IsFrontFace|SV_DispatchThreadID|SV_GroupID|SV_GroupThreadID|SV_GroupIndex|VPOS|VFACE|UNITY_VERTEX_INPUT_INSTANCE_ID|UNITY_VERTEX_OUTPUT_STEREO)\\b"
+          "match": "\\b(POSITION[0-9]*|NORMAL[0-9]*|TANGENT[0-9]*|BINORMAL[0-9]*|COLOR[0-9]*|TEXCOORD[0-9]*|PSIZE[0-9]*|BLENDWEIGHT[0-9]*|BLENDINDICES[0-9]*|SV_POSITION|SV_Position|SV_Target[0-7]?|SV_TARGET[0-7]?|SV_Depth|SV_DEPTH|SV_InstanceID|SV_VertexID|SV_PrimitiveID|SV_IsFrontFace|SV_DispatchThreadID|SV_GroupID|SV_GroupThreadID|SV_GroupIndex|VPOS|VFACE|UNITY_VERTEX_INPUT_INSTANCE_ID|UNITY_VERTEX_OUTPUT_STEREO)\\b"
+        }
+      ]
+    },
+    "property-attributes": {
+      "patterns": [
+        {
+          "name": "storage.modifier.attribute.shaderlab",
+          "match": "\\[(?:HDR|Gamma|HideInInspector|NoScaleOffset|Normal|MainTexture|MainColor|PerRendererData|IntRange|Toggle(?:\\([^)]*\\))?|ToggleOff|Enum\\([^)]*\\)|KeywordEnum\\([^)]*\\)|PowerSlider\\([^)]*\\)|Space(?:\\([^)]*\\))?|Header\\([^)]*\\))\\]"
         }
       ]
     },

@@ -206,7 +206,7 @@ export function parseShaderPragmas(hlslText: string): ShaderPragmaInfo {
     }
 
     const kwMatch =
-      /^\s*#pragma\s+((?:multi_compile|shader_feature)(?:_[a-zA-Z0-9]+)*)\s+(.+?)(?:\/\/.*)?$/.exec(line);
+      /^\s*#pragma\s+((?:multi_compile|shader_feature)(?:_[a-zA-Z0-9]+)*|dynamic_branch(?:_local)?(?:_vertex|_fragment)?)\s+(.+?)(?:\/\/.*)?$/.exec(line);
     if (kwMatch) {
       const directive = kwMatch[1];
       const tokens = kwMatch[2]

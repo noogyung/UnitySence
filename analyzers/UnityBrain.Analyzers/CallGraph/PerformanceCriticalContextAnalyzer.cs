@@ -86,7 +86,7 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
                     continue;
                 }
 
-                if (!info.IsRoot && (IsGetOrTryGetComponent(called) || IsExpensiveUnityLookup(called)))
+                if ((!info.IsRoot && IsGetOrTryGetComponent(called)) || IsExpensiveUnityLookup(called))
                 {
                     symbolCtx.ReportDiagnostic(Diagnostic.Create(
                         DiagnosticIds.UB1001Rule,
@@ -96,35 +96,32 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
                 }
             }
 
-            // 2. Member access: Camera.main in indirect helper
-            if (!info.IsRoot)
+            // 2. Member access: Camera.main in critical method or indirect helper
+            foreach (var memberAccess in methodSyntax.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
             {
-                foreach (var memberAccess in methodSyntax.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+                if (model.GetSymbolInfo(memberAccess, symbolCtx.CancellationToken).Symbol is IPropertySymbol prop &&
+                    prop.Name == "main" &&
+                    prop.ContainingType.ToDisplayString() == "UnityEngine.Camera")
                 {
-                    if (model.GetSymbolInfo(memberAccess, symbolCtx.CancellationToken).Symbol is IPropertySymbol prop &&
-                        prop.Name == "main" &&
-                        prop.ContainingType.ToDisplayString() == "UnityEngine.Camera")
-                    {
-                        symbolCtx.ReportDiagnostic(Diagnostic.Create(
-                            DiagnosticIds.UB1001Rule,
-                            memberAccess.GetLocation(),
-                            "Camera.main",
-                            info.CallChain));
-                    }
+                    symbolCtx.ReportDiagnostic(Diagnostic.Create(
+                        DiagnosticIds.UB1001Rule,
+                        memberAccess.GetLocation(),
+                        "Camera.main",
+                        info.CallChain));
                 }
+            }
 
-                // 3. Allocation: new WaitForSeconds(...)
-                foreach (var objCreation in methodSyntax.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
+            // 3. Allocation: new WaitForSeconds(...)
+            foreach (var objCreation in methodSyntax.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
+            {
+                var typeInfo = model.GetTypeInfo(objCreation, symbolCtx.CancellationToken).Type;
+                if (typeInfo?.ToDisplayString() == "UnityEngine.WaitForSeconds")
                 {
-                    var typeInfo = model.GetTypeInfo(objCreation, symbolCtx.CancellationToken).Type;
-                    if (typeInfo?.ToDisplayString() == "UnityEngine.WaitForSeconds")
-                    {
-                        symbolCtx.ReportDiagnostic(Diagnostic.Create(
-                            DiagnosticIds.UB1001Rule,
-                            objCreation.GetLocation(),
-                            "new WaitForSeconds",
-                            info.CallChain));
-                    }
+                    symbolCtx.ReportDiagnostic(Diagnostic.Create(
+                        DiagnosticIds.UB1001Rule,
+                        objCreation.GetLocation(),
+                        "new WaitForSeconds",
+                        info.CallChain));
                 }
             }
         }
@@ -194,7 +191,8 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
             (method.Name.StartsWith("FindObjectOfType", StringComparison.Ordinal) ||
              method.Name.StartsWith("FindObjectsOfType", StringComparison.Ordinal) ||
              method.Name.StartsWith("FindAnyObjectByType", StringComparison.Ordinal) ||
-             method.Name.StartsWith("FindFirstObjectByType", StringComparison.Ordinal)))
+             method.Name.StartsWith("FindFirstObjectByType", StringComparison.Ordinal) ||
+             method.Name.StartsWith("FindObjectsByType", StringComparison.Ordinal)))
         {
             return true;
         }

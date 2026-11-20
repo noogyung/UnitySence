@@ -299,4 +299,42 @@ public class CoroutineAndSceneTest : MonoBehaviour
         AssertEx.Equal(1, ub3001.Length, "StopCoroutine missing routine should trigger UB3001");
         AssertEx.Equal(1, ub3003.Length, "SceneManager.GetSceneByName missing scene should trigger UB3003");
     }
+
+    [Fact]
+    public async Task SuppressesCompilerWarningsOnSerializeFieldInMonoBehaviour()
+    {
+        const string code = @"
+using UnityEngine;
+
+public class FieldSuppressSample : MonoBehaviour
+{
+    [SerializeField]
+    private int _serializedReadOnly;
+
+    [SerializeField]
+    private int _serializedNeverUsed;
+
+    private int _plainReadOnly;
+    private int _plainNeverUsed;
+
+    public int ReadValues() => _serializedReadOnly + _plainReadOnly;
+}";
+
+        var diags = await RoslynTestHarness.GetDiagnosticsWithSuppressorAsync(
+            code,
+            new UnityImplicitUsageSuppressor());
+
+        var cs0649 = diags.Where(d => d.Id == "CS0649").ToArray();
+        var cs0169 = diags.Where(d => d.Id == "CS0169").ToArray();
+        string dump = string.Join(" | ", diags.Select(d => $"{d.Id}(sup={d.IsSuppressed}):{d.GetMessage()}"));
+
+        AssertEx.True(cs0649.Any(d => d.GetMessage().Contains("_serializedReadOnly") && d.IsSuppressed),
+            $"Expected CS0649 on [SerializeField] _serializedReadOnly to be suppressed. Diags: {dump}");
+        AssertEx.True(cs0649.Any(d => d.GetMessage().Contains("_plainReadOnly") && !d.IsSuppressed),
+            $"Expected CS0649 on plain _plainReadOnly NOT to be suppressed. Diags: {dump}");
+        AssertEx.True(cs0169.Any(d => d.GetMessage().Contains("_serializedNeverUsed") && d.IsSuppressed),
+            $"Expected CS0169 on [SerializeField] _serializedNeverUsed to be suppressed. Diags: {dump}");
+        AssertEx.True(cs0169.Any(d => d.GetMessage().Contains("_plainNeverUsed") && !d.IsSuppressed),
+            $"Expected CS0169 on plain _plainNeverUsed NOT to be suppressed. Diags: {dump}");
+    }
 }

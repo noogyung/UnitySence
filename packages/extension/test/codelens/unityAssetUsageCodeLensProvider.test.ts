@@ -275,4 +275,137 @@ describe('UnityAssetUsageCodeLensProvider', () => {
     provider.dispose();
     daemonClient.dispose();
   });
+
+  it('matches nested struct propertyPath entries to parent serialized field CodeLens', async () => {
+    const root = createTempProject();
+    const csPath = path.join(root, 'Assets', 'Scripts', 'StatsHolder.cs');
+    const source = [
+      'using UnityEngine;',
+      '',
+      'public class StatsHolder : MonoBehaviour',
+      '{',
+      '    [SerializeField]',
+      '    private CharacterStats stats;',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(csPath, source, 'utf8');
+    fs.writeFileSync(`${csPath}.meta`, 'guid: 99999999999999999999999999999999\n', 'utf8');
+
+    const daemonClient = new UnityDaemonClient({
+      projectRoot: root,
+      extensionPath: root,
+      transportFactory: () => ({
+        sendRequest: async <T>(method: string) => {
+          if (method === 'inspector/getSerializedValues') {
+            return {
+              fields: [
+                {
+                  fieldName: 'stats.maxHealth',
+                  value: '250',
+                  assetPath: 'Assets/Prefabs/Boss.prefab',
+                  assetType: 'prefab',
+                  gameObjectPath: 'Boss',
+                  fileId: '10',
+                  line: 15,
+                },
+              ],
+            } as T;
+          }
+          return { locations: [] } as T;
+        },
+        dispose: () => {},
+      }),
+    });
+
+    const provider = new UnityAssetUsageCodeLensProvider(root, daemonClient);
+    const doc = vscode.__mock.createTextDocument(vscode.Uri.file(csPath), source, 'csharp');
+    const lenses = await provider.provideCodeLenses(doc, new vscode.CancellationTokenSource().token);
+
+    const statsLens = lenses.find((l) => l.range.start.line === 5);
+    expect(statsLens?.command?.title).toContain('maxHealth=250 (Boss)');
+    provider.dispose();
+    daemonClient.dispose();
+  });
+
+  it('matches [field: SerializeField] auto-properties and <Prop>k__BackingField YAML entries', async () => {
+    const root = createTempProject();
+    const csPath = path.join(root, 'Assets', 'Scripts', 'HeroStats.cs');
+    const source = [
+      'using UnityEngine;',
+      '',
+      'public class HeroStats : MonoBehaviour',
+      '{',
+      '    [field: SerializeField] public float MoveSpeed { get; private set; }',
+      '    [field: SerializeField]',
+      '    public CharacterStats Stats { get; set; }',
+      '    public float IgnoredProp { get; set; }',
+      '    private void Update() {}',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(csPath, source, 'utf8');
+    fs.writeFileSync(`${csPath}.meta`, 'guid: 88888888888888888888888888888888\n', 'utf8');
+
+    const daemonClient = new UnityDaemonClient({
+      projectRoot: root,
+      extensionPath: root,
+      transportFactory: () => ({
+        sendRequest: async <T>(method: string) => {
+          if (method === 'inspector/getSerializedValues') {
+            return {
+              fields: [
+                {
+                  fieldName: '<MoveSpeed>k__BackingField',
+                  value: '11.5',
+                  assetPath: 'Assets/Scenes/Stage01.unity',
+                  assetType: 'scene',
+                  gameObjectPath: 'Player',
+                  fileId: '10',
+                  line: 18,
+                },
+                {
+                  fieldName: '<Stats>k__BackingField.maxHealth',
+                  value: '400',
+                  assetPath: 'Assets/Prefabs/Boss.prefab',
+                  assetType: 'prefab',
+                  gameObjectPath: 'Boss',
+                  fileId: '20',
+                  line: 25,
+                },
+                {
+                  fieldName: '<IgnoredProp>k__BackingField',
+                  value: '99',
+                  assetPath: 'Assets/Scenes/Stage01.unity',
+                  assetType: 'scene',
+                  gameObjectPath: 'Player',
+                  fileId: '10',
+                  line: 30,
+                },
+              ],
+            } as T;
+          }
+          return { locations: [] } as T;
+        },
+        dispose: () => {},
+      }),
+    });
+
+    const provider = new UnityAssetUsageCodeLensProvider(root, daemonClient);
+    const doc = vscode.__mock.createTextDocument(vscode.Uri.file(csPath), source, 'csharp');
+    const lenses = await provider.provideCodeLenses(doc, new vscode.CancellationTokenSource().token);
+
+    const speedLens = lenses.find((l) => l.range.start.line === 4);
+    expect(speedLens?.command?.title).toContain('[UnityBrain] 인스펙터 값: 11.5 (Stage01)');
+
+    const statsLens = lenses.find((l) => l.range.start.line === 6);
+    expect(statsLens?.command?.title).toContain('[UnityBrain] 인스펙터 값: maxHealth=400 (Boss)');
+
+    const ignoredLens = lenses.find((l) => l.range.start.line === 7);
+    expect(ignoredLens).toBeUndefined();
+
+    const updateLens = lenses.find((l) => l.range.start.line === 8);
+    expect(updateLens?.command?.title).toContain('유니티 이벤트 함수 (MonoBehaviour)');
+
+    provider.dispose();
+    daemonClient.dispose();
+  });
 });

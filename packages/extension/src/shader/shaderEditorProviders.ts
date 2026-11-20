@@ -486,6 +486,44 @@ export class ShaderDocumentHighlightProvider {
   }
 }
 
+function collectCrossFileOccurrences(
+  doc: vscode.TextDocument,
+  word: string,
+  shaderGraph: IncludeDependencyGraph,
+): Array<{ uri: vscode.Uri; filePath: string; line: number; col: number }> {
+  const uriStr = doc.uri.toString();
+  const entryNorm = shaderGraph.normalizeFilePath(uriStr);
+  shaderGraph.setOpenDocumentContent(uriStr, doc.getText());
+  const walk = shaderGraph.collectReachableFiles(uriStr);
+  const parents = shaderGraph.findParentIncludeFiles(uriStr);
+
+  const visitedFiles = new Set<string>();
+  const results: Array<{ uri: vscode.Uri; filePath: string; line: number; col: number }> = [];
+  const candidates = [...walk.files, ...parents];
+
+  for (const file of candidates) {
+    if (visitedFiles.has(file.filePath)) continue;
+    visitedFiles.add(file.filePath);
+
+    const content =
+      file.filePath === entryNorm
+        ? doc.getText()
+        : fs.existsSync(file.filePath)
+          ? fs.readFileSync(file.filePath, 'utf8')
+          : file.virtualHlsl;
+    const matches = collectIdentifierMatches(content, word);
+    for (const hit of matches) {
+      results.push({
+        uri: vscode.Uri.parse(file.uri),
+        filePath: file.filePath,
+        line: hit.line,
+        col: hit.col,
+      });
+    }
+  }
+  return results;
+}
+
 export class ShaderReferenceProvider {
   constructor(private readonly shaderGraph: IncludeDependencyGraph) {}
 
@@ -495,37 +533,259 @@ export class ShaderReferenceProvider {
     const word = doc.getText(wordRange);
     if (!word || SHADER_KEYWORDS_SKIP.has(word)) return [];
 
-    const uriStr = doc.uri.toString();
-    const entryNorm = this.shaderGraph.normalizeFilePath(uriStr);
-    this.shaderGraph.setOpenDocumentContent(uriStr, doc.getText());
-    const walk = this.shaderGraph.collectReachableFiles(uriStr);
-    const parents = this.shaderGraph.findParentIncludeFiles(uriStr);
+    return collectCrossFileOccurrences(doc, word, this.shaderGraph).map(
+      (occ) =>
+        new vscode.Location(occ.uri, new vscode.Range(occ.line, occ.col, occ.line, occ.col + word.length)),
+    );
+  }
+}
 
-    const visitedFiles = new Set<string>();
-    const locations: vscode.Location[] = [];
-    const candidates = [...walk.files, ...parents];
+export class ShaderRenameProvider {
+  constructor(private readonly shaderGraph: IncludeDependencyGraph) {}
 
-    for (const file of candidates) {
-      if (visitedFiles.has(file.filePath)) continue;
-      visitedFiles.add(file.filePath);
+  public prepareRename(doc: vscode.TextDocument, position: vscode.Position): vscode.Range {
+    const wordRange = doc.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+    if (!wordRange) {
+      throw new Error('[UnityBrain] 이름을 변경할 심볼 위에 커서를 두세요.');
+    }
+    const word = doc.getText(wordRange);
+    if (!word || SHADER_KEYWORDS_SKIP.has(word)) {
+      throw new Error('[UnityBrain] 셰이더 예약어는 이름을 변경할 수 없습니다.');
+    }
+    return wordRange;
+  }
 
-      const content =
-        file.filePath === entryNorm
-          ? doc.getText()
-          : fs.existsSync(file.filePath)
-            ? fs.readFileSync(file.filePath, 'utf8')
-            : file.virtualHlsl;
-      const matches = collectIdentifierMatches(content, word);
-      for (const hit of matches) {
-        locations.push(
-          new vscode.Location(
-            vscode.Uri.parse(file.uri),
-            new vscode.Range(hit.line, hit.col, hit.line, hit.col + word.length),
-          ),
-        );
+  public provideRenameEdits(
+    doc: vscode.TextDocument,
+    position: vscode.Position,
+    newName: string,
+  ): vscode.WorkspaceEdit | undefined {
+    const wordRange = doc.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+    if (!wordRange) return undefined;
+    const word = doc.getText(wordRange);
+    if (!word || SHADER_KEYWORDS_SKIP.has(word)) return undefined;
+
+    const edit = new vscode.WorkspaceEdit();
+    for (const occ of collectCrossFileOccurrences(doc, word, this.shaderGraph)) {
+      // Never modify read-only Unity PackageCache headers during rename
+      if (occ.filePath.replace(/\\/g, '/').toLowerCase().includes('/library/packagecache/')) {
+        continue;
+      }
+      edit.replace(
+        occ.uri,
+        new vscode.Range(occ.line, occ.col, occ.line, occ.col + word.length),
+        newName,
+      );
+    }
+    return edit;
+  }
+}
+
+export class ShaderFoldingRangeProvider {
+  public provideFoldingRanges(doc: vscode.TextDocument): vscode.FoldingRange[] {
+    const lines = doc.getText().split(/\r?\n/);
+    const ranges: vscode.FoldingRange[] = [];
+    const braceStack: number[] = [];
+    const directiveStack: number[] = [];
+    const programStack: number[] = [];
+    let blockCommentStart: number | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i];
+      const trimmed = raw.trim();
+
+      if (blockCommentStart !== null) {
+        if (trimmed.includes('*/')) {
+          if (i > blockCommentStart) {
+            ranges.push(new vscode.FoldingRange(blockCommentStart, i, vscode.FoldingRangeKind.Comment));
+          }
+          blockCommentStart = null;
+        }
+        continue;
+      }
+      if (trimmed.startsWith('/*') && !trimmed.includes('*/')) {
+        blockCommentStart = i;
+        continue;
+      }
+
+      if (/^#\s*(?:if|ifdef|ifndef)\b/.test(trimmed)) {
+        directiveStack.push(i);
+      } else if (/^#\s*endif\b/.test(trimmed) && directiveStack.length > 0) {
+        const start = directiveStack.pop()!;
+        if (i > start) ranges.push(new vscode.FoldingRange(start, i, vscode.FoldingRangeKind.Region));
+      }
+
+      if (/^(?:HLSLPROGRAM|HLSLINCLUDE|CGPROGRAM|CGINCLUDE)\b/.test(trimmed)) {
+        programStack.push(i);
+      } else if (/^(?:ENDHLSL|ENDCG)\b/.test(trimmed) && programStack.length > 0) {
+        const start = programStack.pop()!;
+        if (i > start) ranges.push(new vscode.FoldingRange(start, i, vscode.FoldingRangeKind.Region));
+      }
+
+      const codeOnly = raw.replace(/\/\/.*$/, '').replace(/"(?:\\.|[^"\\])*"/g, '');
+      for (const ch of codeOnly) {
+        if (ch === '{') braceStack.push(i);
+        else if (ch === '}' && braceStack.length > 0) {
+          const start = braceStack.pop()!;
+          if (i > start) ranges.push(new vscode.FoldingRange(start, i));
+        }
       }
     }
-
-    return locations;
+    return ranges;
   }
+}
+
+export class ShaderDocumentColorProvider {
+  public provideDocumentColors(doc: vscode.TextDocument): vscode.ColorInformation[] {
+    const lines = doc.getText().split(/\r?\n/);
+    const infos: vscode.ColorInformation[] = [];
+    const propColorRe = /\(\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*\)/g;
+    const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const isColorDecl =
+        /,\s*Color\s*\)\s*=/.test(line) || /\b(?:float4|half4|real4|fixed4)\s*\(/.test(line);
+      if (!isColorDecl) continue;
+
+      propColorRe.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = propColorRe.exec(line)) !== null) {
+        const r = clamp01(Number.parseFloat(m[1]));
+        const g = clamp01(Number.parseFloat(m[2]));
+        const b = clamp01(Number.parseFloat(m[3]));
+        const a = clamp01(Number.parseFloat(m[4]));
+        const range = new vscode.Range(i, m.index, i, m.index + m[0].length);
+        infos.push(new vscode.ColorInformation(range, new vscode.Color(r, g, b, a)));
+      }
+    }
+    return infos;
+  }
+
+  public provideColorPresentations(color: vscode.Color): vscode.ColorPresentation[] {
+    const fmt = (v: number) => Number(v.toFixed(3)).toString();
+    return [
+      new vscode.ColorPresentation(`(${fmt(color.red)}, ${fmt(color.green)}, ${fmt(color.blue)}, ${fmt(color.alpha)})`),
+    ];
+  }
+}
+
+const VALID_CULL_VALUES = new Set(['Back', 'Front', 'Off']);
+const VALID_ZWRITE_VALUES = new Set(['On', 'Off']);
+const VALID_ZTEST_VALUES = new Set([
+  'Less',
+  'Greater',
+  'LEqual',
+  'GEqual',
+  'Equal',
+  'NotEqual',
+  'Always',
+  'Never',
+  'Off',
+]);
+
+export function collectComputeAndShaderLabDiagnostics(
+  doc: vscode.TextDocument,
+  shaderGraph: IncludeDependencyGraph,
+): vscode.Diagnostic[] {
+  const text = doc.getText();
+  shaderGraph.setOpenDocumentContent(doc.uri.toString(), text);
+  const filePath = shaderGraph.normalizeFilePath(doc.uri.toString());
+  const virtualDoc = extractVirtualHlslDocument(text, filePath);
+  const visible = shaderGraph.findAllVisibleSymbols(doc.uri.toString());
+  const diags: vscode.Diagnostic[] = [];
+  const lines = text.split(/\r?\n/);
+
+  // 1. Validate #pragma kernel entry points (for .compute and compute blocks)
+  for (const ep of virtualDoc.pragmas.entryPoints) {
+    if (ep.stage !== 'kernel') continue;
+    const hasFn = visible.some((s) => s.name === ep.name && s.kind === 'function');
+    if (!hasFn) {
+      diags.push(
+        new vscode.Diagnostic(
+          new vscode.Range(ep.line, ep.column, ep.line, ep.column + ep.name.length),
+          `[UnityBrain] Compute Shader 커널 함수 '${ep.name}'이(가) 정의되지 않았습니다.`,
+          vscode.DiagnosticSeverity.Error,
+        ),
+      );
+    }
+  }
+
+  // 2. Validate [numthreads(x, y, z)] <= 1024 and ShaderLab render state values
+  const hlslRanges = virtualDoc.isShaderLab
+    ? virtualDoc.blocks.map((b) => ({ start: b.startLine, end: b.endLine }))
+    : [{ start: 0, end: Math.max(0, lines.length - 1) }];
+  const strippedLines = stripCommentsAndStringsByLine(lines);
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const strippedLine = strippedLines[i] ?? '';
+    const inHlsl = hlslRanges.some((r) => i >= r.start && i <= r.end);
+
+    if (inHlsl) {
+      const ntMatch = /\[\s*numthreads\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*\]/.exec(
+        strippedLine,
+      );
+      if (ntMatch) {
+        const total =
+          Number.parseInt(ntMatch[1], 10) *
+          Number.parseInt(ntMatch[2], 10) *
+          Number.parseInt(ntMatch[3], 10);
+        if (total > 1024) {
+          diags.push(
+            new vscode.Diagnostic(
+              new vscode.Range(i, ntMatch.index, i, ntMatch.index + ntMatch[0].length),
+              `[UnityBrain] [numthreads(${ntMatch[1]}, ${ntMatch[2]}, ${ntMatch[3]})] 총 스레드 수(${total})가 1024 한도를 초과합니다.`,
+              vscode.DiagnosticSeverity.Error,
+            ),
+          );
+        }
+      }
+      continue;
+    }
+
+    const codeOnly = line
+      .replace(/\/\/.*$/, '')
+      .replace(/"(?:\\.|[^"\\])*"/g, '')
+      .trim();
+    if (/\([^)]*\)\s*=/.test(codeOnly)) {
+      continue;
+    }
+
+    const cullM = /(?<![\w\[])Cull\s+([A-Za-z0-9_]+)/.exec(codeOnly);
+    if (cullM && !VALID_CULL_VALUES.has(cullM[1])) {
+      const col = line.indexOf(cullM[1]);
+      diags.push(
+        new vscode.Diagnostic(
+          new vscode.Range(i, col, i, col + cullM[1].length),
+          `[UnityBrain] 잘못된 ShaderLab Cull 값 '${cullM[1]}'입니다 (Back, Front, Off만 허용).`,
+          vscode.DiagnosticSeverity.Warning,
+        ),
+      );
+    }
+    const zwM = /(?<![\w\[])ZWrite\s+([A-Za-z0-9_]+)/.exec(codeOnly);
+    if (zwM && !VALID_ZWRITE_VALUES.has(zwM[1])) {
+      const col = line.indexOf(zwM[1]);
+      diags.push(
+        new vscode.Diagnostic(
+          new vscode.Range(i, col, i, col + zwM[1].length),
+          `[UnityBrain] 잘못된 ShaderLab ZWrite 값 '${zwM[1]}'입니다 (On, Off만 허용).`,
+          vscode.DiagnosticSeverity.Warning,
+        ),
+      );
+    }
+    const ztM = /(?<![\w\[])ZTest\s+([A-Za-z0-9_]+)/.exec(codeOnly);
+    if (ztM && !VALID_ZTEST_VALUES.has(ztM[1])) {
+      const col = line.indexOf(ztM[1]);
+      diags.push(
+        new vscode.Diagnostic(
+          new vscode.Range(i, col, i, col + ztM[1].length),
+          `[UnityBrain] 잘못된 ShaderLab ZTest 값 '${ztM[1]}'입니다.`,
+          vscode.DiagnosticSeverity.Warning,
+        ),
+      );
+    }
+  }
+
+  return diags;
 }

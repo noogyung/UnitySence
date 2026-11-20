@@ -8,6 +8,7 @@ import { ShaderDefinitionProvider } from '../../shader-lsp/src/providers/definit
 import { ShaderHoverProvider } from '../../shader-lsp/src/providers/hoverProvider.ts';
 import { UnityCSharpCodeActionProvider } from './analyzers/csharpCodeActionProvider.ts';
 import { MsbuildAnalyzerInjector } from './analyzers/msbuildInjector.ts';
+import { UnityAsmdefProvider } from './asmdef/unityAsmdefProvider.ts';
 import {
   type DaemonClientTransport,
   registerShowAssetUsagesCommand,
@@ -15,13 +16,24 @@ import {
   UnityDaemonClient,
 } from './codelens/unityAssetUsageCodeLensProvider.ts';
 import {
+  registerCSharpGoToDefinitionCommand,
+  UnityCSharpDefinitionProvider,
+} from './completion/unityCSharpDefinitionProvider.ts';
+import {
   registerGenerateEventFunctionsCommand,
   UnityEventCompletionProvider,
 } from './completion/unityEventGenerator.ts';
 import {
   detectApiParenOrStringContext,
+  type UiToolkitElementRef,
   UnityStringCompletionProvider,
 } from './completion/unityStringCompletionProvider.ts';
+import { registerUnityEditorCommands } from './editor/unityEditorIntegration.ts';
+import {
+  collectUiToolkitElements,
+  UnityUssCompletionProvider,
+  UnityUxmlDefinitionProvider,
+} from './uitoolkit/unityUiToolkitProvider.ts';
 import type {
   ProjectSettingsCache,
   ShaderSymbolIndex,
@@ -31,16 +43,21 @@ import type {
 import { UnityProjectContextManager } from './core/unityProjectContext.ts';
 import { MetaFileSyncManager } from './meta/metaFileSyncManager.ts';
 import {
+  collectComputeAndShaderLabDiagnostics,
   SHADER_SEMANTIC_TOKEN_MODIFIERS,
   SHADER_SEMANTIC_TOKEN_TYPES,
+  ShaderDocumentColorProvider,
   ShaderDocumentHighlightProvider,
   ShaderDocumentSymbolProvider,
+  ShaderFoldingRangeProvider,
   ShaderReferenceProvider,
+  ShaderRenameProvider,
   ShaderSemanticTokensProvider,
   ShaderSignatureHelpProvider,
 } from './shader/shaderEditorProviders.ts';
 import {
   analyzeShaderVariants,
+  buildShaderPreprocessorKeywordCompletions,
   isShaderDocument,
   ShaderKeywordContextStatusBar,
   ShaderVariantCodeLensProvider,
@@ -186,7 +203,7 @@ export async function activate(
     shaderGraph.setOpenDocumentContent(doc.uri.toString(), doc.getText());
     const walk = shaderGraph.collectReachableFiles(doc.uri.toString());
     const normDocPath = shaderGraph.normalizeFilePath(doc.uri.toString());
-    const diags = walk.unresolvedIncludes
+    const includeDiags = walk.unresolvedIncludes
       .filter((u) => u.fromUri === doc.uri.toString() || u.fromFile === normDocPath)
       .map(
         (u) =>
@@ -196,7 +213,8 @@ export async function activate(
             vscode.DiagnosticSeverity.Error,
           ),
       );
-    shaderDiagnosticCollection.set(doc.uri, diags);
+    const semanticDiags = collectComputeAndShaderLabDiagnostics(doc, shaderGraph);
+    shaderDiagnosticCollection.set(doc.uri, [...includeDiags, ...semanticDiags]);
   };
 
   let cachedShaderIndex: ShaderSymbolIndex | null = null;
@@ -263,6 +281,16 @@ export async function activate(
       shaderHoverProvider.setActiveKeywords(keywords);
       shaderVariantCodeLensProvider.refresh();
     },
+    getDefinedMacros: (uri) => {
+      const macros = new Set<string>();
+      const walk = shaderGraph.collectReachableFiles(uri.toString());
+      for (const file of walk.files) {
+        for (const sym of file.symbols) {
+          if (sym.kind === 'macro') macros.add(sym.name);
+        }
+      }
+      return macros;
+    },
   });
 
   const disposables: vscode.Disposable[] = [
@@ -327,7 +355,7 @@ export async function activate(
           const snippet = e.document.getText(
             new vscode.Range(new vscode.Position(startLine, 0), cursorPos),
           );
-          if (detectApiParenOrStringContext(snippet)) {
+          if (detectApiParenOrStringContext(snippet, e.document.getText())) {
             setTimeout(() => {
               void vscode.commands.executeCommand('editor.action.triggerSuggest');
             }, 20);
@@ -368,6 +396,15 @@ export async function activate(
       SHADER_SELECTOR,
       {
         provideCompletionItems(doc: vscode.TextDocument, pos: vscode.Position) {
+          const keywordToggleItems = buildShaderPreprocessorKeywordCompletions(
+            doc,
+            pos,
+            shaderKeywordStatusBar,
+          );
+          if (keywordToggleItems && keywordToggleItems.length > 0) {
+            return keywordToggleItems;
+          }
+
           const items = shaderCompletionProvider.provideCompletionItems(
             doc.uri.toString(),
             { line: pos.line, character: pos.character },
@@ -426,6 +463,7 @@ export async function activate(
     vscode.languages.registerCompletionItemProvider(
       CSHARP_SELECTOR,
       eventCompletionProvider,
+      ' ',
     ),
     vscode.languages.registerCodeActionsProvider(
       CSHARP_SELECTOR,
@@ -507,6 +545,9 @@ export async function activate(
   const shaderSignatureHelpProvider = new ShaderSignatureHelpProvider(shaderGraph);
   const shaderHighlightProvider = new ShaderDocumentHighlightProvider();
   const shaderReferenceProvider = new ShaderReferenceProvider(shaderGraph);
+  const shaderRenameProvider = new ShaderRenameProvider(shaderGraph);
+  const shaderFoldingRangeProvider = new ShaderFoldingRangeProvider();
+  const shaderColorProvider = new ShaderDocumentColorProvider();
 
   disposables.push(
     vscode.languages.registerDocumentSemanticTokensProvider(
@@ -518,9 +559,87 @@ export async function activate(
     vscode.languages.registerSignatureHelpProvider(SHADER_SELECTOR, shaderSignatureHelpProvider, '(', ','),
     vscode.languages.registerDocumentHighlightProvider(SHADER_SELECTOR, shaderHighlightProvider),
     vscode.languages.registerReferenceProvider(SHADER_SELECTOR, shaderReferenceProvider),
+    vscode.languages.registerRenameProvider(SHADER_SELECTOR, shaderRenameProvider),
+    vscode.languages.registerFoldingRangeProvider(SHADER_SELECTOR, shaderFoldingRangeProvider),
+    vscode.languages.registerColorProvider(SHADER_SELECTOR, shaderColorProvider),
   );
 
+  let cachedUiElements: UiToolkitElementRef[] | null = null;
+  const getUiToolkitElements = (): UiToolkitElementRef[] => {
+    if (!cachedUiElements) {
+      cachedUiElements = collectUiToolkitElements(unityContext.projectRoot);
+    }
+    return cachedUiElements;
+  };
+  stringCompletionProvider.setExtraSources({ getUiToolkitElements });
+
+  const asmdefProvider = new UnityAsmdefProvider(unityContext.projectRoot);
+  const asmdefDiagCollection = vscode.languages.createDiagnosticCollection('unitybrain-asmdef');
+  const updateAsmdefDiagnostics = (doc: vscode.TextDocument) => {
+    if (!/\.(?:asmdef|asmref)$/i.test(doc.fileName)) return;
+    asmdefDiagCollection.set(doc.uri, asmdefProvider.validateDocument(doc));
+  };
+  const ussCompletionProvider = new UnityUssCompletionProvider(getUiToolkitElements);
+  const uxmlDefinitionProvider = new UnityUxmlDefinitionProvider(
+    unityContext.projectRoot,
+    getUiToolkitElements,
+  );
+  const ASMDEF_SELECTOR: vscode.DocumentSelector = [{ pattern: '**/*.{asmdef,asmref}' }];
+  const USS_SELECTOR: vscode.DocumentSelector = [{ language: 'uss' }, { pattern: '**/*.uss' }];
+  const UXML_SELECTOR: vscode.DocumentSelector = [{ language: 'uxml' }, { pattern: '**/*.uxml' }];
+
+  const csharpDefinitionProvider = new UnityCSharpDefinitionProvider({
+    projectRoot: unityContext.projectRoot,
+    getCache: () => settingsWatcher.getCache(),
+    getUiToolkitElements,
+  });
+
+  disposables.push(
+    asmdefDiagCollection,
+    vscode.languages.registerDefinitionProvider(CSHARP_SELECTOR, csharpDefinitionProvider),
+    registerCSharpGoToDefinitionCommand(csharpDefinitionProvider),
+    vscode.languages.registerDefinitionProvider(ASMDEF_SELECTOR, asmdefProvider),
+    vscode.languages.registerCompletionItemProvider(ASMDEF_SELECTOR, asmdefProvider, '"', '[', ',', ' '),
+    vscode.languages.registerCompletionItemProvider(USS_SELECTOR, ussCompletionProvider, ':', '.', '#', '-'),
+    vscode.languages.registerDefinitionProvider(UXML_SELECTOR, uxmlDefinitionProvider),
+    ...registerUnityEditorCommands(unityContext.projectRoot),
+    vscode.workspace.onDidOpenTextDocument((doc) => updateAsmdefDiagnostics(doc)),
+    vscode.workspace.onDidChangeTextDocument((e) => updateAsmdefDiagnostics(e.document)),
+  );
+
+  const langWithInlayHints = vscode.languages as unknown as {
+    registerInlayHintsProvider?: (
+      selector: vscode.DocumentSelector,
+      provider: vscode.InlayHintsProvider,
+    ) => vscode.Disposable;
+  };
+  if (typeof langWithInlayHints.registerInlayHintsProvider === 'function') {
+    disposables.push(langWithInlayHints.registerInlayHintsProvider(ASMDEF_SELECTOR, asmdefProvider));
+  }
+
+  for (const openDoc of vscode.workspace.textDocuments) {
+    updateAsmdefDiagnostics(openDoc);
+  }
+
   if (enableWatchers) {
+    const invalidateEcosystemCaches = () => {
+      asmdefProvider.invalidate();
+      cachedUiElements = null;
+      for (const openDoc of vscode.workspace.textDocuments) {
+        updateAsmdefDiagnostics(openDoc);
+      }
+    };
+    for (const pat of ['Assets/**/*.{asmdef,asmref,uxml,uss}', 'Packages/**/*.{asmdef,asmref,uxml,uss}']) {
+      const uiAndAsmWatcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(unityContext.projectRoot, pat),
+      );
+      disposables.push(
+        uiAndAsmWatcher,
+        uiAndAsmWatcher.onDidChange(invalidateEcosystemCaches),
+        uiAndAsmWatcher.onDidCreate(invalidateEcosystemCaches),
+        uiAndAsmWatcher.onDidDelete(invalidateEcosystemCaches),
+      );
+    }
     for (const pat of ['Packages/**/*', 'Library/PackageCache/*']) {
       const watcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(unityContext.projectRoot, pat),

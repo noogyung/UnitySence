@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "overallStatus": "completed",
   "currentStepId": null,
-  "lastUpdatedAt": "2026-11-16T13:25:22.079Z",
+  "lastUpdatedAt": "2026-11-19T11:58:00.175Z",
   "steps": [
     {
       "id": "1-1",
@@ -640,6 +640,106 @@
         "node tools/cli.mjs package:vsix"
       ],
       "resumeNote": "Step 7-4 완료: Roslyn 분석기/데몬 Prefab Override/실시간 YAML 감시/.meta 정리 및 전체 빌드·테스트(Node/TS 40/40, Analyzers 20/20, Daemon 7/7)·VSIX(318 entries, 5437478 bytes) 통과"
+    },
+    {
+      "id": "8-1",
+      "phase": 8,
+      "name": "ShaderLab / HLSL / Compute Shader Rider Parity Finalization",
+      "status": "completed",
+      "optional": false,
+      "startedAt": "2026-11-19T11:35:55.420Z",
+      "completedAt": "2026-11-19T11:41:44.133Z",
+      "targetFiles": [
+        "node_modules/vscode/index.mjs",
+        "node_modules/vscode/index.d.ts",
+        "packages/extension/package.json",
+        "packages/extension/syntaxes/unity-shaderlab.tmLanguage.json",
+        "packages/shader-lsp/src/indexer/hlslSymbolTable.ts",
+        "packages/shader-lsp/src/indexer/hlslIncludeGraph.ts",
+        "packages/extension/src/shader/shaderKeywordContextStatusBar.ts",
+        "packages/extension/src/shader/shaderEditorProviders.ts",
+        "packages/extension/src/extension.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs typecheck",
+        "node tools/cli.mjs build:lsp",
+        "node tools/cli.mjs test"
+      ],
+      "resumeNote": "Step 8-1 완료: ShaderLab/HLSL/Compute Shader 기능 완성 및 40/40 테스트 통과"
+    },
+    {
+      "id": "8-2",
+      "phase": 8,
+      "name": "C# Event/String Edge Cases, C# String F12 Definition Provider & Nested Prefab/PropertyPath CodeLens",
+      "status": "completed",
+      "optional": false,
+      "startedAt": "2026-11-19T11:41:44.133Z",
+      "completedAt": "2026-11-19T11:50:47.671Z",
+      "targetFiles": [
+        "packages/extension/src/completion/unityEventGenerator.ts",
+        "packages/extension/src/completion/unityStringCompletionProvider.ts",
+        "packages/extension/src/completion/unityCSharpDefinitionProvider.ts",
+        "packages/unity-daemon/Cache/BinaryIndexCache.cs",
+        "packages/extension/src/codelens/unityAssetUsageCodeLensProvider.ts",
+        "packages/extension/src/extension.ts"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs typecheck",
+        "dotnet test UnityBrain.sln -nodeReuse:false -p:UseSharedCompilation=false -m:1",
+        "node tools/cli.mjs test"
+      ],
+      "resumeNote": "Step 8-2 완료: UIBehaviour, 문자열 F12 정의 이동, 다단계 Prefab Variant 및 중첩 propertyPath CodeLens 완성"
+    },
+    {
+      "id": "8-3",
+      "phase": 8,
+      "name": "Roslyn DiagnosticSuppressor (CS0649 / IDE0051 / CS0169)",
+      "status": "completed",
+      "optional": false,
+      "startedAt": "2026-11-19T11:50:47.671Z",
+      "completedAt": "2026-11-19T11:53:32.265Z",
+      "targetFiles": [
+        "analyzers/UnityBrain.Analyzers/DiagnosticIds.cs",
+        "analyzers/UnityBrain.Analyzers/Diagnostics/UnityImplicitUsageSuppressor.cs",
+        "analyzers/UnityBrain.Analyzers.Tests/UnityStringValidationAnalyzerTests.cs"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "dotnet test UnityBrain.sln -nodeReuse:false -p:UseSharedCompilation=false -m:1",
+        "node tools/cli.mjs build:analyzers"
+      ],
+      "resumeNote": "Step 8-3 완료: Roslyn DiagnosticSuppressor (CS0649/CS0169/IDE0051) 구현 및 빌드/테스트 통과"
+    },
+    {
+      "id": "8-4",
+      "phase": 8,
+      "name": "Ecosystem Expansion (.asmdef, UI Toolkit .uss/.uxml, .meta Importers & Unity Editor Live Integration)",
+      "status": "completed",
+      "optional": false,
+      "startedAt": "2026-11-19T11:53:32.265Z",
+      "completedAt": "2026-11-19T11:58:00.175Z",
+      "targetFiles": [
+        "packages/extension/src/asmdef/unityAsmdefProvider.ts",
+        "packages/extension/src/uitoolkit/unityUiToolkitProvider.ts",
+        "packages/extension/src/editor/unityEditorIntegration.ts",
+        "packages/extension/src/meta/metaFileSyncManager.ts",
+        "packages/extension/src/extension.ts",
+        "packages/extension/package.json"
+      ],
+      "completedFiles": [],
+      "verificationCommands": [
+        "node tools/cli.mjs typecheck",
+        "dotnet test UnityBrain.sln -nodeReuse:false -p:UseSharedCompilation=false -m:1",
+        "node tools/cli.mjs build:analyzers",
+        "node tools/cli.mjs build:daemon",
+        "node tools/cli.mjs build:lsp",
+        "node tools/cli.mjs build:extension",
+        "node tools/cli.mjs test",
+        "node tools/cli.mjs package:vsix"
+      ],
+      "resumeNote": "Step 8-4 완료: .asmdef/UI Toolkit/Editor 디버거·로그 연동/전용 .meta 템플릿 및 전체 빌드·테스트(Node/TS 45/45, Analyzers 21/21, Daemon 8/8)·VSIX 패키징 통과"
     }
   ]
 }

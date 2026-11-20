@@ -738,4 +738,71 @@
       <parameters />
     </message>
   </type>
+  <type kind="class" name="UIBehaviour" ns="UnityEngine.EventSystems" minimumVersion="2020.3">
+    <message name="Awake" static="false">
+      <summary>Awake is called when an enabled UIBehaviour script instance is being loaded.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnEnable" static="false">
+      <summary>This function is called when the UI object becomes enabled and active.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="Start" static="false">
+      <summary>Start is called on the frame when a UI script is enabled just before any of the Update methods are called the first time.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDisable" static="false">
+      <summary>This function is called when the UI behaviour becomes disabled or inactive.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDestroy" static="false">
+      <summary>Destroying the attached UIBehaviour will result in receiving OnDestroy.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnRectTransformDimensionsChange" static="false">
+      <summary>This callback is called if the associated RectTransform has its dimensions changed.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnBeforeTransformParentChanged" static="false">
+      <summary>This callback is called before the parent of the Transform changes.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnTransformParentChanged" static="false">
+      <summary>This callback is called when the parent property of the transform of the GameObject has changed.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnDidApplyAnimationProperties" static="false">
+      <summary>Callback for when properties have been changed by animation.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnCanvasGroupChanged" static="false">
+      <summary>Callback for when a CanvasGroup has changed.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="OnCanvasHierarchyChanged" static="false">
+      <summary>Called when the state of a parent Canvas is changed.</summary>
+      <returns type="void" />
+      <parameters />
+    </message>
+    <message name="IsActive" static="false">
+      <summary>Returns true if the GameObject and the Component are active.</summary>
+      <returns type="bool" />
+      <parameters />
+    </message>
+    <message name="IsDestroyed" static="false">
+      <summary>Returns true if the native representation of the behaviour has been destroyed.</summary>
+      <returns type="bool" />
+      <parameters />
+    </message>
+  </type>
 </api>

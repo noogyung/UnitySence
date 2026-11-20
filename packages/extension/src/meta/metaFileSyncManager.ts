@@ -248,6 +248,61 @@ export class MetaFileSyncManager implements vscode.Disposable {
       ].join('\n');
     }
 
+    if (ext === '.asmdef') {
+      return [
+        'fileFormatVersion: 2',
+        `guid: ${guid}`,
+        'AssemblyDefinitionImporter:',
+        '  externalObjects: {}',
+        '  userData: ',
+        '  assetBundleName: ',
+        '  assetBundleVariant: ',
+        '',
+      ].join('\n');
+    }
+
+    if (ext === '.asmref') {
+      return [
+        'fileFormatVersion: 2',
+        `guid: ${guid}`,
+        'AssemblyDefinitionReferenceImporter:',
+        '  externalObjects: {}',
+        '  userData: ',
+        '  assetBundleName: ',
+        '  assetBundleVariant: ',
+        '',
+      ].join('\n');
+    }
+
+    if (ext === '.png' || ext === '.jpg' || ext === '.jpeg' || ext === '.tga' || ext === '.psd') {
+      return [
+        'fileFormatVersion: 2',
+        `guid: ${guid}`,
+        'TextureImporter:',
+        '  fileIDToRecycleName: {}',
+        '  externalObjects: {}',
+        '  serializedVersion: 13',
+        '  userData: ',
+        '  assetBundleName: ',
+        '  assetBundleVariant: ',
+        '',
+      ].join('\n');
+    }
+
+    if (ext === '.wav' || ext === '.mp3' || ext === '.ogg') {
+      return [
+        'fileFormatVersion: 2',
+        `guid: ${guid}`,
+        'AudioImporter:',
+        '  externalObjects: {}',
+        '  serializedVersion: 4',
+        '  userData: ',
+        '  assetBundleName: ',
+        '  assetBundleVariant: ',
+        '',
+      ].join('\n');
+    }
+
     return [
       'fileFormatVersion: 2',
       `guid: ${guid}`,

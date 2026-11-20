@@ -2,8 +2,24 @@
   "name": "unitybrain",
   "displayName": "UnityBrain",
   "description": "JetBrains Rider 수준의 Unity 개발 지능형 지원 확장 (ShaderLab/HLSL LSP, Roslyn 분석기, YAML 에셋 인덱서, .meta 자동 동기화).",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "publisher": "unitybrain",
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unitybrain/unitybrain.git"
+  },
+  "keywords": [
+    "unity",
+    "unity3d",
+    "shaderlab",
+    "hlsl",
+    "csharp",
+    "roslyn",
+    "uitoolkit",
+    "gamedev"
+  ],
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -15,18 +31,8 @@
     "Other"
   ],
   "activationEvents": [
-    "*",
-    "onStartupFinished",
     "workspaceContains:ProjectSettings/ProjectVersion.txt",
-    "workspaceContains:Assets",
-    "onLanguage:unity-shaderlab",
-    "onLanguage:shaderlab",
-    "onLanguage:hlsl",
-    "onLanguage:csharp",
-    "onCommand:unityBrain.generateEventFunctions",
-    "onCommand:unityBrain.switchShaderKeywords",
-    "onCommand:unityBrain.showAssetUsages",
-    "onCommand:unityBrain.rebuildAssetIndex"
+    "workspaceContains:Assets"
   ],
   "scripts": {
     "build": "node ../../tools/cli.mjs build:extension",
@@ -46,12 +52,22 @@
       {
         "id": "unity-shaderlab",
         "aliases": ["Unity ShaderLab", "ShaderLab"],
-        "extensions": [".shader", ".shadergraph", ".urtshader"]
+        "extensions": [".shader", ".urtshader"]
       },
       {
         "id": "hlsl",
         "aliases": ["HLSL", "Unity HLSL"],
         "extensions": [".hlsl", ".hlsli", ".cginc", ".cg", ".compute", ".hlslinc"]
+      },
+      {
+        "id": "uxml",
+        "aliases": ["Unity UXML", "UXML"],
+        "extensions": [".uxml"]
+      },
+      {
+        "id": "uss",
+        "aliases": ["Unity USS", "USS"],
+        "extensions": [".uss"]
       }
     ],
     "grammars": [
@@ -81,6 +97,10 @@
         "title": "[UnityBrain] 셰이더 키워드 컨텍스트 전환..."
       },
       {
+        "command": "unityBrain.toggleShaderKeyword",
+        "title": "[UnityBrain] 셰이더 키워드 On/Off 전환"
+      },
+      {
         "command": "unityBrain.showAssetUsages",
         "title": "[UnityBrain] 유니티 에셋 참조 위치 보기"
       },
@@ -91,6 +111,25 @@
       {
         "command": "unityBrain.cleanOrphanMetaFiles",
         "title": "[UnityBrain] 고아 .meta 파일 정리"
+      },
+      {
+        "command": "unityBrain.generateDebugConfig",
+        "title": "[UnityBrain] 유니티 디버거 설정(launch.json) 생성"
+      },
+      {
+        "command": "unityBrain.openUnityEditorLog",
+        "title": "[UnityBrain] 유니티 에디터 콘솔 로그(Editor.log) 열기"
+      },
+      {
+        "command": "unityBrain.csharpGoToDefinition",
+        "title": "[UnityBrain] C# Unity 에셋/심볼 정의로 이동"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "unityBrain.csharpGoToDefinition",
+        "key": "f12",
+        "when": "editorTextFocus && editorLangId == csharp"
       }
     ],
     "configuration": {

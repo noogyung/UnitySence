@@ -294,4 +294,90 @@ PrefabInstance:
             }
         }
     }
+
+    [Fact]
+    public void ResolvesMultiHopPrefabVariantModificationsToScriptGuid()
+    {
+        string tempRoot = Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "test-output",
+            "daemon-multihop-variant-" + Guid.NewGuid().ToString("N"));
+        string prefabsDir = Path.Combine(tempRoot, "Assets", "Prefabs");
+        string scenesDir = Path.Combine(tempRoot, "Assets", "Scenes");
+        string cacheFile = Path.Combine(tempRoot, "Library", "UnityBrainCache", "asset-index.bin");
+        Directory.CreateDirectory(prefabsDir);
+        Directory.CreateDirectory(scenesDir);
+
+        try
+        {
+            const string basePrefabGuid = "11111111111111111111111111111111";
+            const string variantPrefabGuid = "22222222222222222222222222222222";
+            const string leafSceneGuid = "33333333333333333333333333333333";
+
+            File.WriteAllText(
+                Path.Combine(prefabsDir, "BaseHero.prefab.meta"),
+                $"fileFormatVersion: 2\nguid: {basePrefabGuid}\n");
+            File.WriteAllText(
+                Path.Combine(prefabsDir, "BaseHero.prefab"),
+                $@"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400002
+MonoBehaviour:
+  m_GameObject: {{fileID: 10}}
+  m_Script: {{fileID: 11500000, guid: {PlayerScriptGuid}, type: 3}}
+  moveSpeed: 5
+");
+
+            File.WriteAllText(
+                Path.Combine(prefabsDir, "HeroVariant.prefab.meta"),
+                $"fileFormatVersion: 2\nguid: {variantPrefabGuid}\n");
+            File.WriteAllText(
+                Path.Combine(prefabsDir, "HeroVariant.prefab"),
+                $@"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1001 &9001
+PrefabInstance:
+  m_TransformParent: {{fileID: 0}}
+  m_Modification:
+    m_Modifications:
+    - target: {{fileID: 11400002, guid: {basePrefabGuid}, type: 3}}
+      propertyPath: moveSpeed
+      value: 10
+");
+
+            File.WriteAllText(
+                Path.Combine(scenesDir, "LeafStage.unity.meta"),
+                $"fileFormatVersion: 2\nguid: {leafSceneGuid}\n");
+            File.WriteAllText(
+                Path.Combine(scenesDir, "LeafStage.unity"),
+                $@"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1001 &9002
+PrefabInstance:
+  m_TransformParent: {{fileID: 0}}
+  m_Modification:
+    m_Modifications:
+    - target: {{fileID: 11400002, guid: {variantPrefabGuid}, type: 3}}
+      propertyPath: moveSpeed
+      value: 25
+");
+
+            var cache = new BinaryIndexCache();
+            cache.BuildOrUpdateIndex(tempRoot, cacheFile, forceRebuild: true);
+
+            var usages = cache.FindByScriptGuid(PlayerScriptGuid);
+            AssertEx.True(usages.Any(u => u.AssetPath.EndsWith("HeroVariant.prefab")));
+            AssertEx.True(usages.Any(u => u.AssetPath.EndsWith("LeafStage.unity")));
+
+            var values = cache.GetSerializedValues(PlayerScriptGuid, "moveSpeed");
+            AssertEx.True(values.Any(v => v.Value == "25" && v.AssetPath.EndsWith("LeafStage.unity")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
 }

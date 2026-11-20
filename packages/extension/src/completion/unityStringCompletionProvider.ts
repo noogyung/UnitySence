@@ -19,14 +19,23 @@ export type UnityStringContextKind =
   | 'resource'
   | 'animator'
   | 'coroutine'
-  | 'invoke';
+  | 'invoke'
+  | 'uiElement';
 
 export type AnimatorFilterKind = 'Float' | 'Int' | 'Bool' | 'Trigger' | 'State';
+
+export interface UiToolkitElementRef {
+  name?: string;
+  className?: string;
+  assetPath: string;
+  line: number;
+}
 
 export interface UnityStringExtraSources {
   getInputActions?: () => readonly InputActionEntry[];
   getResourcePaths?: () => readonly string[];
   getShaderKeywords?: () => readonly string[];
+  getUiToolkitElements?: () => readonly UiToolkitElementRef[];
 }
 
 export interface ParsedCSharpMethod {
@@ -121,7 +130,30 @@ interface ApiMatchResult {
   animatorSubKind?: AnimatorFilterKind;
 }
 
-function matchUnityStringApiBeforeArg(beforeArg: string, allowAssignment: boolean): ApiMatchResult | null {
+export function extractDeclaredAnimatorVars(documentText?: string): ReadonlySet<string> {
+  const vars = new Set<string>();
+  if (!documentText) return vars;
+
+  const declRe = /\b(?:UnityEngine\.)?Animator\s+([A-Za-z_][A-Za-z0-9_]*)(?!\s*\()/g;
+  let m: RegExpExecArray | null;
+  while ((m = declRe.exec(documentText)) !== null) {
+    vars.add(m[1]);
+  }
+
+  const getCompRe =
+    /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[^;\n]*(?:GetComponent(?:InChildren|InParent)?|AddComponent)<\s*(?:UnityEngine\.)?Animator\s*>/g;
+  while ((m = getCompRe.exec(documentText)) !== null) {
+    vars.add(m[1]);
+  }
+
+  return vars;
+}
+
+function matchUnityStringApiBeforeArg(
+  beforeArg: string,
+  allowAssignment: boolean,
+  animatorVars?: ReadonlySet<string>,
+): ApiMatchResult | null {
   const windowLines = beforeArg.split(/\r?\n/).slice(-4).join(' ');
 
   if (/(?:CompareTag|FindWithTag|FindGameObjects?WithTag)\s*\(\s*$/.test(windowLines)) {
@@ -170,16 +202,26 @@ function matchUnityStringApiBeforeArg(beforeArg: string, allowAssignment: boolea
     return { kind: 'shaderKeyword' };
   }
 
+  if (/\.(?:Q|Query)(?:<[^>]+>)?\s*\(\s*(?:(?:name|className)\s*:\s*)?$/.test(windowLines)) {
+    return { kind: 'uiElement' };
+  }
+
   if (/Animator\.StringToHash\s*\(\s*$/.test(windowLines)) {
     return { kind: 'animator' };
   }
 
-  const animMethodMatch =
-    /(?<![A-Za-z])_?(?:anim|animator|Animator)[A-Za-z0-9_]*\.(SetFloat|GetFloat|SetInteger|GetInteger|SetBool|GetBool|SetTrigger|ResetTrigger|Play|CrossFade|CrossFadeInFixedTime|IsName)\s*\(\s*$/.exec(
+  const receiverMethodMatch =
+    /\b(?:this\.)?([A-Za-z_][A-Za-z0-9_]*)\.(SetFloat|GetFloat|SetInteger|GetInteger|SetBool|GetBool|SetTrigger|ResetTrigger|Play|CrossFade|CrossFadeInFixedTime|IsName)\s*\(\s*$/.exec(
       windowLines,
-    ) ?? /\.(SetTrigger|ResetTrigger|SetBool|GetBool|CrossFade|CrossFadeInFixedTime)\s*\(\s*$/.exec(windowLines);
+    );
+  const animMethodMatch =
+    (receiverMethodMatch && animatorVars?.has(receiverMethodMatch[1]) ? receiverMethodMatch : null) ??
+    /(?:GetComponent(?:InChildren|InParent)?<\s*(?:UnityEngine\.)?Animator\s*>\s*\(\s*\)|(?<![A-Za-z])_?(?:anim|animator|Animator)[A-Za-z0-9_]*)\.(SetFloat|GetFloat|SetInteger|GetInteger|SetBool|GetBool|SetTrigger|ResetTrigger|Play|CrossFade|CrossFadeInFixedTime|IsName)\s*\(\s*$/.exec(
+      windowLines,
+    ) ??
+    /\.(SetTrigger|ResetTrigger|SetBool|GetBool|CrossFade|CrossFadeInFixedTime)\s*\(\s*$/.exec(windowLines);
   if (animMethodMatch) {
-    const mName = animMethodMatch[1];
+    const mName = animMethodMatch === receiverMethodMatch ? receiverMethodMatch[2] : animMethodMatch[1];
     let sub: AnimatorFilterKind | undefined;
     if (mName.includes('Float')) sub = 'Float';
     else if (mName.includes('Integer')) sub = 'Int';
@@ -219,15 +261,19 @@ function matchUnityStringApiBeforeArg(beforeArg: string, allowAssignment: boolea
   return null;
 }
 
-export function detectApiStringContext(textBeforeCursor: string): UnityStringContextKind | null {
+export function detectApiStringContext(textBeforeCursor: string, documentText?: string): UnityStringContextKind | null {
   const state = analyzeCursorLexicalState(textBeforeCursor);
   if (!state.inString || state.stringStart === -1) return null;
 
   const beforeQuote = textBeforeCursor.slice(0, state.stringStart);
-  return matchUnityStringApiBeforeArg(beforeQuote, true)?.kind ?? null;
+  const animatorVars = extractDeclaredAnimatorVars(documentText);
+  return matchUnityStringApiBeforeArg(beforeQuote, true, animatorVars)?.kind ?? null;
 }
 
-export function detectApiParenOrStringContext(textBeforeCursor: string): {
+export function detectApiParenOrStringContext(
+  textBeforeCursor: string,
+  documentText?: string,
+): {
   kind: UnityStringContextKind;
   animatorSubKind?: AnimatorFilterKind;
   insideQuotes: boolean;
@@ -239,9 +285,11 @@ export function detectApiParenOrStringContext(textBeforeCursor: string): {
     return null;
   }
 
+  const animatorVars = extractDeclaredAnimatorVars(documentText);
+
   if (state.inString && state.stringStart !== -1) {
     const beforeQuote = textBeforeCursor.slice(0, state.stringStart);
-    const hit = matchUnityStringApiBeforeArg(beforeQuote, true);
+    const hit = matchUnityStringApiBeforeArg(beforeQuote, true, animatorVars);
     return hit
       ? {
           kind: hit.kind,
@@ -260,7 +308,7 @@ export function detectApiParenOrStringContext(textBeforeCursor: string): {
     ? state.codeWithoutComments.slice(0, state.codeWithoutComments.length - partialIdent.length)
     : state.codeWithoutComments;
 
-  const hit = matchUnityStringApiBeforeArg(beforeIdent, false);
+  const hit = matchUnityStringApiBeforeArg(beforeIdent, false, animatorVars);
   return hit
     ? {
         kind: hit.kind,
@@ -293,7 +341,7 @@ export function extractCSharpClassMethods(sourceText: string): ParsedCSharpMetho
 export class UnityStringCompletionProvider implements vscode.CompletionItemProvider {
   private readonly getCache: () => ProjectSettingsCache;
   private readonly getShaderIndex: () => Promise<ShaderSymbolIndex | null> | ShaderSymbolIndex | null;
-  private readonly extraSources?: UnityStringExtraSources;
+  private extraSources?: UnityStringExtraSources;
 
   constructor(
     getCache: () => ProjectSettingsCache,
@@ -305,6 +353,10 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
     this.extraSources = extraSources;
   }
 
+  public setExtraSources(extra: Partial<UnityStringExtraSources>): void {
+    this.extraSources = { ...this.extraSources, ...extra };
+  }
+
   public async provideCompletionItems(
     document: vscode.TextDocument,
     position: vscode.Position,
@@ -314,7 +366,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
       new vscode.Range(new vscode.Position(startLine, 0), position),
     );
 
-    const detected = detectApiParenOrStringContext(textBeforeCursor);
+    const fullDocumentText = document.getText();
+    const detected = detectApiParenOrStringContext(textBeforeCursor, fullDocumentText);
     if (!detected) {
       return undefined;
     }
@@ -477,7 +530,7 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
       }
       case 'coroutine':
       case 'invoke': {
-        const methods = extractCSharpClassMethods(document.getText());
+        const methods = extractCSharpClassMethods(fullDocumentText);
         for (const method of methods) {
           const isCoroutine = method.returnType.includes('IEnumerator');
           const item = new vscode.CompletionItem(method.name, vscode.CompletionItemKind.Method);
@@ -492,9 +545,33 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
         }
         break;
       }
+      case 'uiElement': {
+        const uiElems = this.extraSources?.getUiToolkitElements?.() ?? [];
+        const seenNames = new Set<string>();
+        const seenClasses = new Set<string>();
+        for (const el of uiElems) {
+          const assetName = path.basename(el.assetPath);
+          if (el.name && !seenNames.has(el.name)) {
+            seenNames.add(el.name);
+            const item = new vscode.CompletionItem(el.name, vscode.CompletionItemKind.Field);
+            item.detail = `[UnityBrain] UI Toolkit 요소 이름 (${assetName})`;
+            item.documentation = `[UnityBrain] ${el.assetPath}:${el.line + 1}에 선언된 name="${el.name}" 요소입니다.`;
+            items.push(item);
+          }
+          if (el.className && !seenClasses.has(el.className)) {
+            seenClasses.add(el.className);
+            const item = new vscode.CompletionItem(el.className, vscode.CompletionItemKind.Class);
+            item.detail = `[UnityBrain] UI Toolkit USS 클래스 (${assetName})`;
+            item.documentation = `[UnityBrain] ${el.assetPath}:${el.line + 1}에 정의된 USS 클래스 '.${el.className}'입니다.`;
+            items.push(item);
+          }
+        }
+        break;
+      }
     }
 
     let replaceRange: vscode.Range | undefined;
+    let hasClosingQuote = true;
     const fullLineText = document.lineAt(position.line).text;
     if (detected.insideQuotes) {
       const curBeforeCursor = fullLineText.slice(0, position.character);
@@ -512,7 +589,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
             break;
           }
         }
-        const endCol = closingOffset >= 0 ? position.character + closingOffset : position.character;
+        hasClosingQuote = closingOffset >= 0;
+        const endCol = hasClosingQuote ? position.character + closingOffset : position.character;
         replaceRange = new vscode.Range(
           new vscode.Position(position.line, lastQuoteCol + 1),
           new vscode.Position(position.line, endCol),
@@ -532,6 +610,9 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
         item.filterText = detected.partialIdent
           ? `${detected.partialIdent} "${item.label}" ${item.label}`
           : `"${item.label}" ${item.label}`;
+      } else if (!hasClosingQuote) {
+        item.insertText = `${item.label}"`;
+        item.filterText = String(item.label);
       }
       if (replaceRange) {
         item.range = replaceRange;

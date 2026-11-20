@@ -148,6 +148,9 @@ namespace UnityEngine
     [AttributeUsage(AttributeTargets.Field)]
     public sealed class SerializeField : Attribute { }
 
+    [AttributeUsage(AttributeTargets.Field)]
+    public sealed class SerializeReference : Attribute { }
+
     namespace Serialization
     {
         [AttributeUsage(AttributeTargets.Field, AllowMultiple = true)]
@@ -227,6 +230,34 @@ public static class RoslynTestHarness
 
         var withAnalyzers = compilation.WithAnalyzers(ImmutableArray.Create(analyzer), opts);
         var allDiags = await withAnalyzers.GetAnalyzerDiagnosticsAsync().ConfigureAwait(false);
+        return allDiags
+            .Where(d => d.Location.SourceTree == userTree)
+            .OrderBy(d => d.Location.SourceSpan.Start)
+            .ToImmutableArray();
+    }
+
+    public static async Task<ImmutableArray<Diagnostic>> GetDiagnosticsWithSuppressorAsync(
+        string userSource,
+        DiagnosticSuppressor suppressor)
+    {
+        var parseOpts = new CSharpParseOptions(LanguageVersion.Latest);
+        var userTree = CSharpSyntaxTree.ParseText(userSource, parseOpts, "TestScript.cs");
+        var stubTree = CSharpSyntaxTree.ParseText(UnityTestStubs.UnityStubsSource, parseOpts, "UnityStubs.cs");
+
+        var compilation = CSharpCompilation.Create(
+            "TestAssembly",
+            new[] { userTree, stubTree },
+            CoreReferences,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, reportSuppressedDiagnostics: true));
+
+        var cwaOptions = new CompilationWithAnalyzersOptions(
+            options: new AnalyzerOptions(ImmutableArray<AdditionalText>.Empty),
+            onAnalyzerException: null,
+            concurrentAnalysis: false,
+            logAnalyzerExecutionTime: false,
+            reportSuppressedDiagnostics: true);
+        var withAnalyzers = compilation.WithAnalyzers(ImmutableArray.Create<DiagnosticAnalyzer>(suppressor), cwaOptions);
+        var allDiags = await withAnalyzers.GetAllDiagnosticsAsync().ConfigureAwait(false);
         return allDiags
             .Where(d => d.Location.SourceTree == userTree)
             .OrderBy(d => d.Location.SourceSpan.Start)

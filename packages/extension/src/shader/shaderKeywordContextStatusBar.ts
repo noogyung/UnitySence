@@ -60,7 +60,10 @@ export function parsePragmaDirectiveLine(rawLine: string, lineNumber: number): P
   let kind: 'multi_compile' | 'shader_feature' | null = null;
   if (/^multi_compile(?:_local)?(?:_vertex|_fragment)?$/.test(directive)) {
     kind = 'multi_compile';
-  } else if (/^shader_feature(?:_local)?(?:_vertex|_fragment)?$/.test(directive)) {
+  } else if (
+    /^shader_feature(?:_local)?(?:_vertex|_fragment)?$/.test(directive) ||
+    /^dynamic_branch(?:_local)?(?:_vertex|_fragment)?$/.test(directive)
+  ) {
     kind = 'shader_feature';
   }
 
@@ -284,8 +287,12 @@ export function evaluateInactivePreprocessorRanges(
   const isParentActive = (): boolean => (stack.length === 0 ? true : stack[stack.length - 1].currentActive);
 
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].replace(/\/\/.*$/, '').trim();
+    let trimmed = lines[i].replace(/\/\/.*$/, '').trim();
     if (!trimmed.startsWith('#')) continue;
+
+    while (trimmed.endsWith('\\') && i + 1 < lines.length) {
+      trimmed = trimmed.slice(0, -1).trimEnd() + ' ' + lines[++i].replace(/\/\/.*$/, '').trim();
+    }
 
     const ifdefMatch = /^#\s*(ifdef|ifndef)\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(trimmed);
     if (ifdefMatch) {
@@ -390,8 +397,165 @@ export function evaluateInactivePreprocessorRanges(
   return ranges;
 }
 
+export interface PreprocessorKeywordContext {
+  isPreprocessorKeywordLine: boolean;
+  keywords: string[];
+  wordToken: {
+    text: string;
+    startCol: number;
+    endCol: number;
+  };
+}
+
+const PREPROCESSOR_CONDITION_IGNORED_TOKENS = new Set(['defined', 'true', 'false']);
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function extractPreprocessorDirectiveKeywordsAtPosition(
+  documentText: string,
+  position: { line: number; character: number },
+): PreprocessorKeywordContext {
+  const lines = documentText.split(/\r?\n/);
+  const fallback: PreprocessorKeywordContext = {
+    isPreprocessorKeywordLine: false,
+    keywords: [],
+    wordToken: {
+      text: '',
+      startCol: position.character,
+      endCol: position.character,
+    },
+  };
+
+  if (position.line < 0 || position.line >= lines.length) {
+    return fallback;
+  }
+
+  const physicalLine = lines[position.line] ?? '';
+  let wordToken = fallback.wordToken;
+  const wordRe = /[A-Za-z0-9_]+/g;
+  let wordMatch: RegExpExecArray | null;
+  while ((wordMatch = wordRe.exec(physicalLine)) !== null) {
+    const start = wordMatch.index;
+    const end = start + wordMatch[0].length;
+    if (start <= position.character && position.character <= end) {
+      wordToken = { text: wordMatch[0], startCol: start, endCol: end };
+      break;
+    }
+  }
+
+  let startLine = position.line;
+  while (startLine > 0) {
+    const prevStripped = lines[startLine - 1].replace(/\/\/.*$/, '').trimEnd();
+    if (!prevStripped.endsWith('\\')) {
+      break;
+    }
+    startLine -= 1;
+  }
+
+  let endLine = position.line;
+  while (endLine + 1 < lines.length) {
+    const currStripped = lines[endLine].replace(/\/\/.*$/, '').trimEnd();
+    if (!currStripped.endsWith('\\')) {
+      break;
+    }
+    endLine += 1;
+  }
+
+  const logicalParts: string[] = [];
+  for (let i = startLine; i <= endLine; i++) {
+    let part = lines[i].replace(/\/\/.*$/, '').trimEnd();
+    if (part.endsWith('\\')) {
+      part = part.slice(0, -1).trimEnd();
+    }
+    logicalParts.push(part.trim());
+  }
+  const joined = logicalParts.join(' ').trim();
+  if (!joined.startsWith('#')) {
+    return { isPreprocessorKeywordLine: false, keywords: [], wordToken };
+  }
+
+  const extractedSet = new Set<string>();
+  const condMatch = /^#\s*(?:if|elif|ifdef|ifndef)\b(.*)$/.exec(joined);
+  if (condMatch) {
+    const condExpr = condMatch[1].replace(/\/\*.*?\*\//g, ' ');
+    const identMatches = condExpr.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
+    for (const ident of identMatches) {
+      if (!PREPROCESSOR_CONDITION_IGNORED_TOKENS.has(ident)) {
+        extractedSet.add(ident);
+      }
+    }
+  } else if (/^#\s*pragma\b/.test(joined)) {
+    const pragma = parsePragmaDirectiveLine(joined, startLine);
+    if (pragma) {
+      for (const kw of pragma.keywords) {
+        if (!/^_+$/.test(kw)) {
+          extractedSet.add(kw);
+        }
+      }
+    }
+  }
+
+  const extractedKeywords = Array.from(extractedSet);
+  if (extractedKeywords.length === 0) {
+    return { isPreprocessorKeywordLine: false, keywords: [], wordToken };
+  }
+
+  const ordered: string[] = [];
+  const added = new Set<string>();
+  const pushKw = (kw: string) => {
+    if (!added.has(kw)) {
+      added.add(kw);
+      ordered.push(kw);
+    }
+  };
+
+  if (wordToken.text && extractedSet.has(wordToken.text)) {
+    pushKw(wordToken.text);
+  }
+
+  const physicalCode = physicalLine.replace(/\/\/.*$/, '');
+  const sameLineDistances: Array<{ kw: string; dist: number }> = [];
+  for (const kw of extractedKeywords) {
+    if (added.has(kw)) continue;
+    const kwRe = new RegExp(`\\b${escapeRegExp(kw)}\\b`, 'g');
+    let m: RegExpExecArray | null;
+    let bestDist = Number.POSITIVE_INFINITY;
+    while ((m = kwRe.exec(physicalCode)) !== null) {
+      const s = m.index;
+      const e = s + kw.length;
+      const dist =
+        position.character >= s && position.character <= e
+          ? 0
+          : Math.min(Math.abs(position.character - s), Math.abs(position.character - e));
+      if (dist < bestDist) {
+        bestDist = dist;
+      }
+    }
+    if (Number.isFinite(bestDist)) {
+      sameLineDistances.push({ kw, dist: bestDist });
+    }
+  }
+  sameLineDistances.sort((a, b) => a.dist - b.dist);
+  for (const entry of sameLineDistances) {
+    pushKw(entry.kw);
+  }
+
+  for (const kw of extractedKeywords) {
+    pushKw(kw);
+  }
+
+  return {
+    isPreprocessorKeywordLine: true,
+    keywords: ordered,
+    wordToken,
+  };
+}
+
 export interface ShaderKeywordStatusBarOptions {
   onKeywordsChanged?: (uri: vscode.Uri | undefined, keywords: string[]) => void | Promise<void>;
+  getDefinedMacros?: (uri: vscode.Uri) => ReadonlySet<string> | undefined;
 }
 
 export class ShaderKeywordContextStatusBar implements vscode.Disposable {
@@ -401,11 +565,13 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
     uri: vscode.Uri | undefined,
     keywords: string[],
   ) => void | Promise<void>;
+  private readonly getDefinedMacros?: (uri: vscode.Uri) => ReadonlySet<string> | undefined;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly keywordsByUri = new Map<string, string[]>();
 
   constructor(options: ShaderKeywordStatusBarOptions = {}) {
     this.onKeywordsChanged = options.onKeywordsChanged;
+    this.getDefinedMacros = options.getDefinedMacros;
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     this.statusBarItem.command = 'unityBrain.switchShaderKeywords';
     this.inactiveDecorationType =
@@ -421,6 +587,31 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
       this.statusBarItem,
       vscode.commands.registerCommand('unityBrain.switchShaderKeywords', (explicitKeywords?: unknown) =>
         this.switchKeywordsCommand(Array.isArray(explicitKeywords) ? (explicitKeywords as string[]) : undefined),
+      ),
+      vscode.commands.registerCommand(
+        'unityBrain.toggleShaderKeyword',
+        (uri?: unknown, keyword?: unknown, enabled?: unknown) => {
+          const targetUri =
+            uri && typeof uri === 'object' && 'scheme' in uri ? (uri as vscode.Uri) : undefined;
+          if (typeof keyword === 'string' && keyword.length > 0) {
+            return this.setKeywordState(
+              targetUri,
+              keyword,
+              typeof enabled === 'boolean' ? enabled : undefined,
+            );
+          }
+          const editor = vscode.window.activeTextEditor;
+          if (editor && isShaderDocument(editor.document)) {
+            const ctx = extractPreprocessorDirectiveKeywordsAtPosition(
+              editor.document.getText(),
+              editor.selection.active,
+            );
+            if (ctx.isPreprocessorKeywordLine && ctx.keywords.length > 0) {
+              return this.setKeywordState(targetUri ?? editor.document.uri, ctx.keywords[0]);
+            }
+          }
+          return this.switchKeywordsCommand();
+        },
       ),
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         this.updateForDocument(editor?.document);
@@ -447,7 +638,12 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
       return;
     }
     const active = new Set(this.getActiveKeywords(editor.document.uri));
-    const inactiveRanges = evaluateInactivePreprocessorRanges(editor.document.getText(), active);
+    const crossMacros = this.getDefinedMacros?.(editor.document.uri);
+    const inactiveRanges = evaluateInactivePreprocessorRanges(
+      editor.document.getText(),
+      active,
+      crossMacros,
+    );
     const decorations = inactiveRanges.map((r) => {
       const endLineLen = editor.document.lineAt(Math.min(r.endLine, editor.document.lineCount - 1)).text.length;
       return new vscode.Range(r.startLine, 0, r.endLine, endLineLen);
@@ -462,6 +658,26 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
   public getActiveKeywords(uri?: vscode.Uri): string[] {
     if (!uri) return [];
     return [...(this.keywordsByUri.get(uri.toString()) ?? [])];
+  }
+
+  public async setKeywordState(
+    uri: vscode.Uri | undefined,
+    keyword: string,
+    enabled?: boolean,
+  ): Promise<string[]> {
+    const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+    const trimmed = keyword.trim();
+    if (!trimmed) {
+      return this.getActiveKeywords(targetUri);
+    }
+    const current = new Set(this.getActiveKeywords(targetUri));
+    const nextState = enabled !== undefined ? enabled : !current.has(trimmed);
+    if (nextState) {
+      current.add(trimmed);
+    } else {
+      current.delete(trimmed);
+    }
+    return this.setActiveKeywords(targetUri, Array.from(current));
   }
 
   public async setActiveKeywords(uri: vscode.Uri | undefined, keywords: string[]): Promise<string[]> {
@@ -534,4 +750,75 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
       this.disposables.pop()?.dispose();
     }
   }
+}
+
+export function buildShaderPreprocessorKeywordCompletions(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+  statusBar: ShaderKeywordContextStatusBar,
+): vscode.CompletionItem[] | null {
+  const ctx = extractPreprocessorDirectiveKeywordsAtPosition(document.getText(), position);
+  if (!ctx.isPreprocessorKeywordLine || ctx.keywords.length === 0) {
+    return null;
+  }
+
+  const activeSet = new Set(statusBar.getActiveKeywords(document.uri));
+  const replaceRange = new vscode.Range(
+    position.line,
+    ctx.wordToken.startCol,
+    position.line,
+    ctx.wordToken.endCol,
+  );
+
+  const items: vscode.CompletionItem[] = [];
+  for (let idx = 0; idx < ctx.keywords.length; idx++) {
+    const kw = ctx.keywords[idx];
+    const isActive = activeSet.has(kw);
+    const filterText = ctx.wordToken.text ? `${ctx.wordToken.text} ${kw} ON OFF` : `${kw} ON OFF`;
+
+    const targetState = !isActive;
+    const stateTag = targetState ? 'ON' : 'OFF';
+    const currentTag = isActive ? 'ON' : 'OFF';
+    const toggleItem = new vscode.CompletionItem(
+      `[${stateTag}] ${kw} — 셰이더 키워드 ${targetState ? '켜기' : '끄기'} (현재: ${currentTag})`,
+      vscode.CompletionItemKind.Event,
+    );
+    toggleItem.detail = `[UnityBrain] ${kw}: ${currentTag} -> ${stateTag} 전환`;
+    toggleItem.documentation = new vscode.MarkdownString(
+      `[UnityBrain] 선택 시 텍스트 변경 없이 **\`${kw}\`** 전처리기 키워드를 **${stateTag}** 상태로 전환합니다.`,
+    );
+    toggleItem.range = replaceRange;
+    toggleItem.insertText = ctx.wordToken.text;
+    toggleItem.filterText = filterText;
+    toggleItem.sortText = `\u0000_${String(idx * 2).padStart(2, '0')}_${kw}`;
+    toggleItem.preselect = idx === 0;
+    toggleItem.command = {
+      command: 'unityBrain.toggleShaderKeyword',
+      title: '[UnityBrain] 셰이더 키워드 On/Off 전환',
+      arguments: [document.uri, kw, targetState],
+    };
+    items.push(toggleItem);
+
+    const sameTag = isActive ? 'ON' : 'OFF';
+    const keepItem = new vscode.CompletionItem(
+      `[${sameTag}] ${kw} — 셰이더 키워드 ${isActive ? '켜기' : '끄기'} (현재: ${sameTag} 유지)`,
+      vscode.CompletionItemKind.Keyword,
+    );
+    keepItem.detail = `[UnityBrain] ${kw}: ${sameTag} 상태 유지`;
+    keepItem.documentation = new vscode.MarkdownString(
+      `[UnityBrain] 현재 **\`${kw}\`** 키워드 상태를 **${sameTag}**로 명시적으로 설정합니다.`,
+    );
+    keepItem.range = replaceRange;
+    keepItem.insertText = ctx.wordToken.text;
+    keepItem.filterText = filterText;
+    keepItem.sortText = `\u0000_${String(idx * 2 + 1).padStart(2, '0')}_${kw}`;
+    keepItem.command = {
+      command: 'unityBrain.toggleShaderKeyword',
+      title: '[UnityBrain] 셰이더 키워드 On/Off 전환',
+      arguments: [document.uri, kw, isActive],
+    };
+    items.push(keepItem);
+  }
+
+  return items;
 }

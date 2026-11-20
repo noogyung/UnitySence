@@ -392,26 +392,34 @@ function cmdPackageVsix() {
 
   const contentTypesXml = `<?xml version="1.0" encoding="utf-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension=".json" ContentType="application/json" />
-  <Default Extension=".js" ContentType="application/javascript" />
-  <Default Extension=".dll" ContentType="application/octet-stream" />
-  <Default Extension=".exe" ContentType="application/octet-stream" />
-  <Default Extension=".vsixmanifest" ContentType="text/xml" />
+  <Default Extension="json" ContentType="application/json" />
+  <Default Extension="js" ContentType="application/javascript" />
+  <Default Extension="cjs" ContentType="application/javascript" />
+  <Default Extension="dll" ContentType="application/octet-stream" />
+  <Default Extension="pdb" ContentType="application/octet-stream" />
+  <Default Extension="exe" ContentType="application/octet-stream" />
+  <Default Extension="vsixmanifest" ContentType="text/xml" />
+  <Default Extension="xml" ContentType="text/xml" />
+  <Default Extension="md" ContentType="text/plain" />
+  <Default Extension="txt" ContentType="text/plain" />
+  <Default Extension="png" ContentType="image/png" />
 </Types>`;
 
+  const iconRel = pkg.icon ? String(pkg.icon).replace(/^\.\//, '') : '';
+  const hasIcon = iconRel && fs.existsSync(path.join(extDir, iconRel));
   const manifestXml = `<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
   <Metadata>
     <Identity Language="en-US" Id="${pkg.name}" Version="${pkg.version}" Publisher="${pkg.publisher || 'unitybrain'}" />
     <DisplayName>${pkg.displayName || 'UnityBrain'}</DisplayName>
-    <Description xml:space="preserve">${pkg.description || ''}</Description>
+    <Description xml:space="preserve">${pkg.description || ''}</Description>${hasIcon ? `\n    <Icon>extension/${iconRel}</Icon>` : ''}
   </Metadata>
   <Installation>
     <InstallationTarget Id="Microsoft.VisualStudio.Code" />
   </Installation>
   <Dependencies />
   <Assets>
-    <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />
+    <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />${hasIcon ? `\n    <Asset Type="Microsoft.VisualStudio.Services.Icons.Default" Path="extension/${iconRel}" Addressable="true" />` : ''}
   </Assets>
 </PackageManifest>`;
 
@@ -420,6 +428,15 @@ function cmdPackageVsix() {
     { name: 'extension.vsixmanifest', data: Buffer.from(manifestXml, 'utf8') },
     { name: 'extension/package.json', data: fs.readFileSync(path.join(extDir, 'package.json')) }
   ];
+
+  for (const docFile of ['README.md', 'CHANGELOG.md', 'LICENSE']) {
+    const extDoc = path.join(extDir, docFile);
+    const rootDoc = path.join(ROOT, docFile);
+    const chosen = fs.existsSync(extDoc) ? extDoc : (fs.existsSync(rootDoc) ? rootDoc : null);
+    if (chosen) {
+      entries.push({ name: `extension/${docFile}`, data: fs.readFileSync(chosen) });
+    }
+  }
 
   for (const folder of ['dist', 'resources', 'syntaxes', 'analyzers', 'bin']) {
     collectFilesRecursive(path.join(extDir, folder), `extension/${folder}`, entries);
@@ -450,6 +467,10 @@ function cmdPackageVsix() {
   fs.mkdirSync(outDir, { recursive: true });
   const vsixPath = path.join(outDir, `${pkg.name}-${pkg.version}.vsix`);
   fs.writeFileSync(vsixPath, zipBuf);
+  const aliasPath = path.join(outDir, `${pkg.name}-0.1.0.vsix`);
+  if (aliasPath !== vsixPath) {
+    fs.writeFileSync(aliasPath, zipBuf);
+  }
   console.log(`Packaged ${vsixPath} (${entries.length} entries, ${zipBuf.length} bytes)`);
 }
 

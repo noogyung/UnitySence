@@ -343,7 +343,7 @@ public sealed class BinaryIndexCache
         var fieldsByGuid = new Dictionary<string, List<SerializedFieldValueEntryDto>>(StringComparer.OrdinalIgnoreCase);
 
         // Pass 1: Build cross-asset lookup table (TargetAssetGuid, ComponentFileId) -> C# ScriptGuid
-        // so PrefabInstance (!u!1001) m_Modifications overrides resolve cleanly to the script GUID.
+        // or parent Prefab GUID so multi-hop Prefab Variant m_Modifications resolve to the script GUID.
         var componentScriptMap = new Dictionary<(string AssetGuid, string FileId), string>();
         foreach (var entry in nextAssets.Values)
         {
@@ -359,16 +359,45 @@ public sealed class BinaryIndexCache
                 }
             }
         }
+        foreach (var entry in nextAssets.Values)
+        {
+            var doc = entry.Document;
+            if (string.IsNullOrEmpty(doc.AssetGuid)) continue;
+            foreach (var comp in doc.ComponentUsages)
+            {
+                if (comp.UsageKind == "prefabOverride" &&
+                    !string.IsNullOrEmpty(comp.FileId) &&
+                    !string.IsNullOrEmpty(comp.ScriptGuid))
+                {
+                    var key = (doc.AssetGuid.ToLowerInvariant(), comp.FileId);
+                    if (!componentScriptMap.ContainsKey(key))
+                    {
+                        componentScriptMap[key] = comp.ScriptGuid;
+                    }
+                }
+            }
+        }
 
         string ResolveOverrideScriptGuid(string rawGuid, string fileId)
         {
-            if (!string.IsNullOrEmpty(rawGuid) &&
-                !string.IsNullOrEmpty(fileId) &&
-                componentScriptMap.TryGetValue((rawGuid.ToLowerInvariant(), fileId), out var resolvedScript))
+            string current = rawGuid;
+            if (string.IsNullOrEmpty(current) || string.IsNullOrEmpty(fileId))
             {
-                return resolvedScript;
+                return current;
             }
-            return rawGuid;
+            for (int hop = 0; hop < 4; hop++)
+            {
+                if (componentScriptMap.TryGetValue((current.ToLowerInvariant(), fileId), out var next) &&
+                    !string.Equals(next, current, StringComparison.OrdinalIgnoreCase))
+                {
+                    current = next;
+                }
+                else
+                {
+                    break;
+                }
+            }
+            return current;
         }
 
         foreach (var entry in nextAssets.Values)

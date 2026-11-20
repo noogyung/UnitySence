@@ -113,4 +113,19 @@ public static class DiagnosticIds
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "SceneManager.LoadScene 문자열 인자를 ProjectSettings 캐시의 빌드 씬 목록과 대조 검증합니다.");
+
+    public static readonly SuppressionDescriptor SuppressCS0649Rule = new(
+        id: "UBSUP0001",
+        suppressedDiagnosticId: "CS0649",
+        justification: "[UnityBrain] Unity 직렬화 필드([SerializeField]/[SerializeReference])는 인스펙터에서 할당됩니다.");
+
+    public static readonly SuppressionDescriptor SuppressCS0169Rule = new(
+        id: "UBSUP0002",
+        suppressedDiagnosticId: "CS0169",
+        justification: "[UnityBrain] Unity 직렬화 필드는 엔진에서 암시적으로 사용됩니다.");
+
+    public static readonly SuppressionDescriptor SuppressIDE0051Rule = new(
+        id: "UBSUP0003",
+        suppressedDiagnosticId: "IDE0051",
+        justification: "[UnityBrain] Unity 이벤트 함수 및 직렬화 필드는 엔진 런타임에서 호출/사용됩니다.");
 }

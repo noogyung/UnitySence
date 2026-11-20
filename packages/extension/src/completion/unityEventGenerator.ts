@@ -73,20 +73,114 @@ export function shortenCSharpType(fullType: string): string {
   return lastDot >= 0 ? fullType.slice(lastDot + 1) : fullType;
 }
 
+function maskCSharpCommentsAndStrings(source: string): string {
+  const out: string[] = [];
+  let i = 0;
+  const n = source.length;
+  while (i < n) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === '/' && next === '/') {
+      out.push(' ', ' ');
+      i += 2;
+      while (i < n && source[i] !== '\n') {
+        out.push(' ');
+        i++;
+      }
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      out.push(' ', ' ');
+      i += 2;
+      while (i < n) {
+        if (source[i] === '*' && source[i + 1] === '/') {
+          out.push(' ', ' ');
+          i += 2;
+          break;
+        }
+        out.push(source[i] === '\n' ? '\n' : ' ');
+        i++;
+      }
+      continue;
+    }
+    if (ch === '@' && next === '"') {
+      out.push(' ', ' ');
+      i += 2;
+      while (i < n) {
+        if (source[i] === '"' && source[i + 1] === '"') {
+          out.push(' ', ' ');
+          i += 2;
+          continue;
+        }
+        if (source[i] === '"') {
+          out.push(' ');
+          i++;
+          break;
+        }
+        out.push(source[i] === '\n' ? '\n' : ' ');
+        i++;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      out.push(' ');
+      i++;
+      while (i < n) {
+        if (source[i] === '\\' && i + 1 < n) {
+          out.push(' ', source[i + 1] === '\n' ? '\n' : ' ');
+          i += 2;
+          continue;
+        }
+        if (source[i] === '"') {
+          out.push(' ');
+          i++;
+          break;
+        }
+        out.push(source[i] === '\n' ? '\n' : ' ');
+        i++;
+      }
+      continue;
+    }
+    if (ch === "'") {
+      out.push(' ');
+      i++;
+      while (i < n) {
+        if (source[i] === '\\' && i + 1 < n) {
+          out.push(' ', ' ');
+          i += 2;
+          continue;
+        }
+        if (source[i] === "'") {
+          out.push(' ');
+          i++;
+          break;
+        }
+        out.push(source[i] === '\n' ? '\n' : ' ');
+        i++;
+      }
+      continue;
+    }
+    out.push(ch);
+    i++;
+  }
+  return out.join('');
+}
+
 export function findEnclosingClassContext(sourceText: string, cursorOffset: number): ClassContextInfo | null {
+  const masked = maskCSharpCommentsAndStrings(sourceText);
   const classRegex = /\bclass\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?(?:\s*:\s*([^{]+))?\s*\{/g;
   let match: RegExpExecArray | null;
   let best: ClassContextInfo | null = null;
 
-  while ((match = classRegex.exec(sourceText)) !== null) {
+  while ((match = classRegex.exec(masked)) !== null) {
     const className = match[1];
     const baseListRaw = match[2] ?? '';
     const openBraceOffset = match.index + match[0].length - 1;
     let depth = 0;
-    let closeBraceOffset = sourceText.length - 1;
-    for (let i = openBraceOffset; i < sourceText.length; i++) {
-      if (sourceText[i] === '{') depth++;
-      else if (sourceText[i] === '}') {
+    let closeBraceOffset = masked.length - 1;
+    for (let i = openBraceOffset; i < masked.length; i++) {
+      if (masked[i] === '{') depth++;
+      else if (masked[i] === '}') {
         depth--;
         if (depth === 0) {
           closeBraceOffset = i;
@@ -98,12 +192,25 @@ export function findEnclosingClassContext(sourceText: string, cursorOffset: numb
     if (cursorOffset >= openBraceOffset && cursorOffset <= closeBraceOffset) {
       let localDepth = 0;
       for (let i = openBraceOffset; i < cursorOffset; i++) {
-        if (sourceText[i] === '{') localDepth++;
-        else if (sourceText[i] === '}') localDepth--;
+        if (masked[i] === '{') localDepth++;
+        else if (masked[i] === '}') localDepth--;
       }
 
-      const classBody = sourceText.slice(openBraceOffset + 1, closeBraceOffset);
-      const existingMethods = extractMethodNamesAtTopLevel(classBody);
+      let maskedBody = masked.slice(openBraceOffset + 1, closeBraceOffset);
+      if (localDepth === 1) {
+        const relCursor = cursorOffset - (openBraceOffset + 1);
+        const lineStart = Math.max(0, maskedBody.lastIndexOf('\n', Math.max(0, relCursor - 1)) + 1);
+        const rawEnd = maskedBody.indexOf('\n', Math.max(0, relCursor));
+        const lineEnd = rawEnd >= 0 ? rawEnd : maskedBody.length;
+        const cursorLineText = maskedBody.slice(lineStart, lineEnd);
+        const braceIdx = cursorLineText.indexOf('{');
+        const blankLen = braceIdx >= 0 ? braceIdx : cursorLineText.length;
+        maskedBody =
+          maskedBody.slice(0, lineStart) +
+          ' '.repeat(blankLen) +
+          maskedBody.slice(lineStart + blankLen);
+      }
+      const existingMethods = extractMethodNamesAtTopLevel(maskedBody);
       const cleanBaseList = baseListRaw.replace(/\bwhere\b[\s\S]*$/, '');
       const baseTypes = cleanBaseList
         .split(',')
@@ -205,35 +312,85 @@ const VIRTUAL_OVERRIDE_EVENTS: Record<string, ReadonlySet<string>> = {
   ]),
 };
 
-function resolveMethodModifier(ev: UnityEventFunction, ownerFullName?: string): string {
-  if (ev.isStatic) return 'private static';
-  if (ownerFullName && VIRTUAL_OVERRIDE_EVENTS[ownerFullName]?.has(ev.name)) {
-    return 'public override';
+const PROTECTED_OVERRIDE_EVENTS: Record<string, ReadonlySet<string>> = {
+  'UnityEngine.EventSystems.UIBehaviour': new Set([
+    'Awake',
+    'OnEnable',
+    'Start',
+    'OnDisable',
+    'OnDestroy',
+    'OnRectTransformDimensionsChange',
+    'OnBeforeTransformParentChanged',
+    'OnTransformParentChanged',
+    'OnDidApplyAnimationProperties',
+    'OnCanvasGroupChanged',
+    'OnCanvasHierarchyChanged',
+    'IsActive',
+    'IsDestroyed',
+  ]),
+};
+
+function resolveMethodModifier(
+  ev: UnityEventFunction,
+  ownerFullName?: string,
+  explicitAccessModifier?: string,
+): string {
+  if (ev.isStatic) {
+    return explicitAccessModifier ? `${explicitAccessModifier} static` : 'private static';
   }
-  return 'private';
+  const isPublicOverride = Boolean(ownerFullName && VIRTUAL_OVERRIDE_EVENTS[ownerFullName]?.has(ev.name));
+  const isProtectedOverride = Boolean(ownerFullName && PROTECTED_OVERRIDE_EVENTS[ownerFullName]?.has(ev.name));
+  if (isPublicOverride || isProtectedOverride) {
+    const access = explicitAccessModifier ?? (isProtectedOverride ? 'protected' : 'public');
+    return `${access} override`;
+  }
+  return explicitAccessModifier ?? 'private';
 }
 
 export function formatUnityEventMethod(
   ev: UnityEventFunction,
-  options: { asCoroutine?: boolean; snippet?: boolean; indent?: string; ownerFullName?: string } = {},
+  options: {
+    asCoroutine?: boolean;
+    asAwaitable?: boolean;
+    snippet?: boolean;
+    indent?: string;
+    ownerFullName?: string;
+    explicitAccessModifier?: string;
+    signatureOnly?: boolean;
+  } = {},
 ): string {
   const indent = options.indent ?? '    ';
   const bodyIndent = `${indent}    `;
-  const modifier = resolveMethodModifier(ev, options.ownerFullName);
-  const returnType = options.asCoroutine ? 'IEnumerator' : shortenCSharpType(ev.returnType);
+  const modifier = resolveMethodModifier(ev, options.ownerFullName, options.explicitAccessModifier);
+  const effectiveModifier = options.asAwaitable ? `${modifier} async` : modifier;
+  const returnType = options.asAwaitable
+    ? 'Awaitable'
+    : options.asCoroutine
+      ? 'IEnumerator'
+      : shortenCSharpType(ev.returnType);
   const paramsStr = ev.parameters
     .map((p) => `${shortenCSharpType(p.type)} ${p.name}`)
     .join(', ');
 
-  if (options.snippet) {
-    const inner = options.asCoroutine ? `${bodyIndent}$0\n${bodyIndent}yield break;` : `${bodyIndent}$0`;
-    return `${modifier} ${returnType} ${ev.name}(${paramsStr})\n{\n${inner}\n}`;
+  if (options.signatureOnly) {
+    return `${effectiveModifier} ${returnType} ${ev.name}(${paramsStr})`;
   }
 
-  const inner = options.asCoroutine
-    ? `${bodyIndent}// TODO: yield\n${bodyIndent}yield break;`
-    : `${bodyIndent}`;
-  return `${indent}${modifier} ${returnType} ${ev.name}(${paramsStr})\n${indent}{\n${inner}\n${indent}}`;
+  if (options.snippet) {
+    const inner = options.asAwaitable
+      ? `${bodyIndent}$0\n${bodyIndent}await Awaitable.NextFrameAsync();`
+      : options.asCoroutine
+        ? `${bodyIndent}$0\n${bodyIndent}yield break;`
+        : `${bodyIndent}$0`;
+    return `${effectiveModifier} ${returnType} ${ev.name}(${paramsStr})\n{\n${inner}\n}`;
+  }
+
+  const inner = options.asAwaitable
+    ? `${bodyIndent}await Awaitable.NextFrameAsync();`
+    : options.asCoroutine
+      ? `${bodyIndent}// TODO: yield\n${bodyIndent}yield break;`
+      : `${bodyIndent}`;
+  return `${indent}${effectiveModifier} ${returnType} ${ev.name}(${paramsStr})\n${indent}{\n${inner}\n${indent}}`;
 }
 
 export function extractClassInheritanceFromSource(
@@ -287,9 +444,10 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
       const now = Date.now();
       if (!this.cachedProjectInheritance || now - this.lastScanMs > 5000) {
         const scanned = new Map<string, string[]>();
-        const assetsDir = path.join(projectRoot, 'Assets');
-        if (fs.existsSync(assetsDir)) {
-          const stack = [assetsDir];
+        const scanRoots = [path.join(projectRoot, 'Assets'), path.join(projectRoot, 'Packages')];
+        for (const rootDir of scanRoots) {
+          if (!fs.existsSync(rootDir)) continue;
+          const stack = [rootDir];
           while (stack.length > 0) {
             const dir = stack.pop();
             if (!dir) continue;
@@ -300,6 +458,7 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
               continue;
             }
             for (const entry of entries) {
+              if (entry.name.startsWith('.')) continue;
               const full = path.join(dir, entry.name);
               if (entry.isDirectory()) stack.push(full);
               else if (entry.isFile() && entry.name.endsWith('.cs')) {
@@ -370,6 +529,8 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
   public provideCompletionItems(
     document: vscode.TextDocument,
     position: vscode.Position,
+    _token?: vscode.CancellationToken,
+    context?: vscode.CompletionContext,
   ): vscode.CompletionItem[] | undefined {
     const enabled = vscode.workspace
       .getConfiguration('unityBrain')
@@ -380,39 +541,130 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
     const lineText = rawLineBeforeCursor.trimStart();
     if (lineText.startsWith('//') || lineText.startsWith('/*')) return undefined;
 
+    const triggerKindChar =
+      (vscode as unknown as { CompletionTriggerKind?: { TriggerCharacter: number } })
+        .CompletionTriggerKind?.TriggerCharacter ?? 1;
+    if (
+      context?.triggerKind === triggerKindChar &&
+      context.triggerCharacter === ' ' &&
+      !/^\s*(?:(?:public|private|protected|internal|static|virtual|override|async|new)\s+)*(?:override|void|IEnumerator|Awaitable|VisualElement|private|protected|public|static|async)\s+$/.test(
+        rawLineBeforeCursor,
+      )
+    ) {
+      return undefined;
+    }
+
     const missing = this.getMissingEventsForDocument(document, position);
     if (!missing || !missing.classCtx.isAtMemberDeclarationLevel) {
       return undefined;
     }
 
     const prefixMatch =
-      /^(\s*)((?:(?:public|private|protected|internal|static|virtual|override|async|new)\s+)*(?:(?:void|bool|float|int|IEnumerator|VisualElement)\s+)?)([A-Za-z_][A-Za-z0-9_]*)?$/.exec(
+      /^(\s*)((?:(?:public|private|protected|internal|static|virtual|override|async|new)\s+)*(?:(?:void|bool|float|int|IEnumerator|Awaitable|VisualElement)\s+)?)([A-Za-z_][A-Za-z0-9_]*)?$/.exec(
         rawLineBeforeCursor,
       );
     const modifierPrefix = prefixMatch?.[2] ?? '';
+    const typedPartial = prefixMatch?.[3] ?? '';
+    const explicitAccessMatch = /\b(public|private|protected|internal)\b/.exec(modifierPrefix);
+    const explicitAccessModifier = explicitAccessMatch?.[1];
+    const hasTypedOverride = /\boverride\b/.test(modifierPrefix);
+    const hasTypedAsyncOrAwaitable = /\b(?:async|Awaitable)\b/.test(modifierPrefix);
+    const afterCursor = document.lineAt(position.line).text.slice(position.character);
+    const trailingSigMatch = /^[A-Za-z0-9_]*(?:\s*\(\s*[^)]*\s*\))?/.exec(afterCursor);
+    const trailingLen = trailingSigMatch ? trailingSigMatch[0].length : 0;
+    const replaceStartCol =
+      prefixMatch && (modifierPrefix.length > 0 || trailingLen > 0)
+        ? prefixMatch[1].length
+        : position.character;
+    const replaceEndCol = position.character + trailingLen;
     const replaceRange =
-      modifierPrefix.length > 0 && prefixMatch
-        ? new vscode.Range(new vscode.Position(position.line, prefixMatch[1].length), position)
+      modifierPrefix.length > 0 || trailingLen > 0
+        ? new vscode.Range(
+            new vscode.Position(position.line, replaceStartCol),
+            new vscode.Position(position.line, replaceEndCol),
+          )
         : undefined;
+
+    const restAfterSig = afterCursor.slice(trailingLen).trim();
+    let hasExistingBody = restAfterSig.startsWith('{');
+    if (!hasExistingBody && restAfterSig.length === 0) {
+      for (let ln = position.line + 1; ln < document.lineCount && ln <= position.line + 3; ln++) {
+        const nextTrim = document.lineAt(ln).text.trim();
+        if (!nextTrim) continue;
+        hasExistingBody = nextTrim.startsWith('{');
+        break;
+      }
+    }
 
     const items: vscode.CompletionItem[] = [];
     for (const ev of missing.events) {
+      const canonicalMod = resolveMethodModifier(ev, missing.apiType.fullName);
+      const effectiveExplicit =
+        hasTypedOverride && explicitAccessModifier && !canonicalMod.startsWith(explicitAccessModifier)
+          ? undefined
+          : explicitAccessModifier;
+      const chosenMod = resolveMethodModifier(ev, missing.apiType.fullName, effectiveExplicit);
+      const isPrefixMatch =
+        typedPartial.length > 0 && ev.name.toLowerCase().startsWith(typedPartial.toLowerCase());
+
       const baseItem = new vscode.CompletionItem(ev.name, vscode.CompletionItemKind.Method);
-      baseItem.detail = `[UnityBrain] 유니티 이벤트 함수 (${missing.apiType.fullName})`;
+      baseItem.detail =
+        hasExistingBody && chosenMod !== canonicalMod
+          ? `[UnityBrain] 유니티 이벤트 시그니처 변환 (${chosenMod})`
+          : `[UnityBrain] 유니티 이벤트 함수 (${missing.apiType.fullName})`;
       baseItem.documentation = new vscode.MarkdownString(`[UnityBrain] ${ev.description}`);
       baseItem.insertText = new vscode.SnippetString(
         formatUnityEventMethod(ev, {
           asCoroutine: false,
           snippet: true,
           ownerFullName: missing.apiType.fullName,
+          explicitAccessModifier: effectiveExplicit,
+          signatureOnly: hasExistingBody,
         }),
       );
       if (replaceRange) {
         baseItem.range = replaceRange;
         baseItem.filterText = `${modifierPrefix}${ev.name}`;
       }
-      baseItem.sortText = `1_unity_${ev.name}`;
+      baseItem.sortText = hasTypedAsyncOrAwaitable
+        ? isPrefixMatch
+          ? `0_unity_${ev.name}_1void`
+          : `1_unity_${ev.name}`
+        : isPrefixMatch
+          ? `0_unity_${ev.name}`
+          : `1_unity_${ev.name}`;
+      (baseItem as vscode.CompletionItem & { preselect?: boolean }).preselect =
+        !hasTypedAsyncOrAwaitable && isPrefixMatch;
       items.push(baseItem);
+
+      if (chosenMod !== canonicalMod) {
+        const canonicalItem = new vscode.CompletionItem(
+          `${ev.name} (${canonicalMod})`,
+          vscode.CompletionItemKind.Method,
+        );
+        canonicalItem.detail = `[UnityBrain] ${missing.apiType.fullName} 표준 시그니처(${canonicalMod})로 변환`;
+        canonicalItem.documentation = new vscode.MarkdownString(`[UnityBrain] ${ev.description}`);
+        canonicalItem.insertText = new vscode.SnippetString(
+          formatUnityEventMethod(ev, {
+            asCoroutine: false,
+            snippet: true,
+            ownerFullName: missing.apiType.fullName,
+            signatureOnly: hasExistingBody,
+          }),
+        );
+        if (replaceRange) {
+          canonicalItem.range = replaceRange;
+          canonicalItem.filterText = `${modifierPrefix}${ev.name}`;
+        }
+        canonicalItem.sortText = hasTypedAsyncOrAwaitable
+          ? isPrefixMatch
+            ? `0_unity_${ev.name}_2canon`
+            : `1_unity_${ev.name}_canon`
+          : isPrefixMatch
+            ? `0_unity_${ev.name}_canon`
+            : `1_unity_${ev.name}_canon`;
+        items.push(canonicalItem);
+      }
 
       if (ev.supportsCoroutine) {
         const coroItem = new vscode.CompletionItem(
@@ -429,6 +681,8 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
             asCoroutine: true,
             snippet: true,
             ownerFullName: missing.apiType.fullName,
+            explicitAccessModifier: effectiveExplicit,
+            signatureOnly: hasExistingBody,
           }),
         );
         if (replaceRange) {
@@ -436,6 +690,42 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
         }
         coroItem.sortText = `2_unity_${ev.name}_coro`;
         items.push(coroItem);
+      }
+
+      if (ev.supportsCoroutine || (hasTypedAsyncOrAwaitable && shortenCSharpType(ev.returnType) === 'void')) {
+        const paramsStr = ev.parameters
+          .map((p) => `${shortenCSharpType(p.type)} ${p.name}`)
+          .join(', ');
+        const awaitableItem = new vscode.CompletionItem(
+          `${ev.name} (Awaitable)`,
+          vscode.CompletionItemKind.Snippet,
+        );
+        awaitableItem.filterText = replaceRange ? `${modifierPrefix}${ev.name}` : ev.name;
+        awaitableItem.detail = `[UnityBrain] Unity 6 Awaitable 비동기 이벤트 함수 — async Awaitable ${ev.name}(${paramsStr})`;
+        awaitableItem.documentation = new vscode.MarkdownString(
+          `[UnityBrain] ${ev.description}\n\nUnity 6 비동기 실행을 위해 \`async Awaitable\`을 반환합니다.`,
+        );
+        awaitableItem.insertText = new vscode.SnippetString(
+          formatUnityEventMethod(ev, {
+            asAwaitable: true,
+            snippet: true,
+            ownerFullName: missing.apiType.fullName,
+            explicitAccessModifier: effectiveExplicit,
+            signatureOnly: hasExistingBody,
+          }),
+        );
+        if (replaceRange) {
+          awaitableItem.range = replaceRange;
+        }
+        const prioritizeAwaitable = hasTypedAsyncOrAwaitable && (isPrefixMatch || typedPartial.length === 0);
+        awaitableItem.sortText = prioritizeAwaitable
+          ? `0_unity_${ev.name}_0awaitable`
+          : hasTypedAsyncOrAwaitable
+            ? `1_unity_${ev.name}_0awaitable`
+            : `2_unity_${ev.name}_awaitable`;
+        (awaitableItem as vscode.CompletionItem & { preselect?: boolean }).preselect =
+          prioritizeAwaitable;
+        items.push(awaitableItem);
       }
     }
 
