@@ -18,12 +18,15 @@ namespace UnityBrain.Analyzers.CodeFixes;
 [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(CacheComponentInAwakeCodeFixProvider)), Shared]
 public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
 {
+    private const string ComponentLookupEquivalenceKey = nameof(CacheComponentInAwakeCodeFixProvider);
+    private const string CameraMainEquivalenceKey = nameof(CacheComponentInAwakeCodeFixProvider) + ".CameraMain";
+
     public override ImmutableArray<string> FixableDiagnosticIds =>
         ImmutableArray.Create(
             DiagnosticIds.UncachedComponentLookup,
             DiagnosticIds.IndirectPerformanceCriticalInvocation);
 
-    public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
+    public override FixAllProvider GetFixAllProvider() => SequentialFixAllProvider.Instance;
 
     public override async Task RegisterCodeFixesAsync(CodeFixContext context)
     {
@@ -58,13 +61,13 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
                 context.RegisterCodeFix(
                     CodeAction.Create(
                         title: $"[UnityBrain] Awake()에서 {capturedTypeArg} 컴포넌트 캐싱하기",
-                        createChangedDocument: ct => CacheExpressionInAwakeAsync(
+                        createChangedSolution: ct => CacheExpressionInAwakeSolutionAsync(
                             context.Document,
                             capturedInvocation,
                             capturedTypeArg,
                             baseName,
                             ct),
-                        equivalenceKey: nameof(CacheComponentInAwakeCodeFixProvider)),
+                        equivalenceKey: ComponentLookupEquivalenceKey),
                     diag);
             }
             else if (diag.Id == DiagnosticIds.IndirectPerformanceCriticalInvocation)
@@ -91,13 +94,13 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
                 context.RegisterCodeFix(
                     CodeAction.Create(
                         title: "[UnityBrain] Awake()에서 Camera.main 캐싱하기",
-                        createChangedDocument: ct => CacheExpressionInAwakeAsync(
+                        createChangedSolution: ct => CacheExpressionInAwakeSolutionAsync(
                             context.Document,
                             capturedMemberAccess,
                             fieldType,
                             "mainCamera",
                             ct),
-                        equivalenceKey: nameof(CacheComponentInAwakeCodeFixProvider) + ".CameraMain"),
+                        equivalenceKey: CameraMainEquivalenceKey),
                     diag);
             }
         }
@@ -143,7 +146,7 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
         return SyntaxFactory.IdentifierName("Camera");
     }
 
-    private static async Task<Document> CacheExpressionInAwakeAsync(
+    private static async Task<Solution> CacheExpressionInAwakeSolutionAsync(
         Document document,
         ExpressionSyntax targetExpr,
         TypeSyntax fieldType,
@@ -152,16 +155,33 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
     {
         var root = await document.GetSyntaxRootAsync(ct).ConfigureAwait(false);
         var semanticModel = await document.GetSemanticModelAsync(ct).ConfigureAwait(false);
-        if (root == null) return document;
+        if (root == null) return document.Project.Solution;
 
         var classDecl = targetExpr.FirstAncestorOrSelf<ClassDeclarationSyntax>();
-        if (classDecl == null) return document;
+        if (classDecl == null) return document.Project.Solution;
+
+        var classSymbol = semanticModel?.GetDeclaredSymbol(classDecl, ct);
 
         var existingAwake = classDecl.Members
             .OfType<MethodDeclarationSyntax>()
             .FirstOrDefault(m => m.Identifier.ValueText == "Awake" && m.ParameterList.Parameters.Count == 0);
 
-        var existingCachedField = FindExistingCachedFieldName(classDecl, existingAwake, targetExpr);
+        Document? partialAwakeDoc = null;
+        MethodDeclarationSyntax? partialAwakeMethod = null;
+        if (existingAwake == null || (existingAwake.Body == null && existingAwake.ExpressionBody == null))
+        {
+            (partialAwakeDoc, partialAwakeMethod) = await FindPartialAwakeAsync(
+                document.Project,
+                classSymbol,
+                classDecl,
+                ct).ConfigureAwait(false);
+        }
+
+        var effectiveAwake = (existingAwake != null && (existingAwake.Body != null || existingAwake.ExpressionBody != null))
+            ? existingAwake
+            : partialAwakeMethod ?? existingAwake;
+
+        var existingCachedField = FindExistingCachedFieldName(classDecl, classSymbol, effectiveAwake, targetExpr);
         if (existingCachedField != null)
         {
             var reusedIdentifier = SyntaxFactory.IdentifierName(existingCachedField);
@@ -170,10 +190,10 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
                 reusedIdentifier.WithTriviaFrom(targetExpr));
             var reusedRoot = root.ReplaceNode(classDecl, reusedClassDecl);
             var reusedDoc = document.WithSyntaxRoot(reusedRoot);
-            return await Formatter.FormatAsync(reusedDoc, Formatter.Annotation, cancellationToken: ct).ConfigureAwait(false);
+            var formattedReused = await Formatter.FormatAsync(reusedDoc, Formatter.Annotation, cancellationToken: ct).ConfigureAwait(false);
+            return formattedReused.Project.Solution;
         }
 
-        var classSymbol = semanticModel?.GetDeclaredSymbol(classDecl, ct);
         var enclosingMethod = targetExpr.FirstAncestorOrSelf<MethodDeclarationSyntax>();
         var fieldName = GenerateUniqueFieldName(classDecl, classSymbol, enclosingMethod, preferredBaseName);
         var fieldIdentifier = SyntaxFactory.IdentifierName(fieldName);
@@ -197,62 +217,185 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
             .OfType<MethodDeclarationSyntax>()
             .FirstOrDefault(m => m.Identifier.ValueText == "Awake" && m.ParameterList.Parameters.Count == 0);
 
+        if (awakeInNewClass != null && (awakeInNewClass.Body != null || awakeInNewClass.ExpressionBody != null))
+        {
+            var updatedAwake = AddAssignmentToAwakeMethod(awakeInNewClass, assignStmt);
+            if (updatedAwake != null)
+            {
+                newClassDecl = newClassDecl.ReplaceNode(awakeInNewClass, updatedAwake);
+            }
+            newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
+
+            var updatedRoot = root.ReplaceNode(classDecl, newClassDecl);
+            var formattedDoc = await Formatter.FormatAsync(
+                document.WithSyntaxRoot(updatedRoot),
+                Formatter.Annotation,
+                cancellationToken: ct).ConfigureAwait(false);
+            return formattedDoc.Project.Solution;
+        }
+
+        if (partialAwakeDoc != null && partialAwakeMethod != null)
+        {
+            var updatedPartialAwake = AddAssignmentToAwakeMethod(partialAwakeMethod, assignStmt);
+            if (updatedPartialAwake != null)
+            {
+                newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
+
+                if (partialAwakeDoc.Id == document.Id)
+                {
+                    var updatedRoot = root.ReplaceNodes(
+                        new SyntaxNode[] { classDecl, partialAwakeMethod },
+                        (orig, _) => orig == classDecl ? newClassDecl : updatedPartialAwake);
+                    var formattedDoc = await Formatter.FormatAsync(
+                        document.WithSyntaxRoot(updatedRoot),
+                        Formatter.Annotation,
+                        cancellationToken: ct).ConfigureAwait(false);
+                    return formattedDoc.Project.Solution;
+                }
+                else
+                {
+                    var updatedCallSiteRoot = root.ReplaceNode(classDecl, newClassDecl);
+                    var formattedCallSiteDoc = await Formatter.FormatAsync(
+                        document.WithSyntaxRoot(updatedCallSiteRoot),
+                        Formatter.Annotation,
+                        cancellationToken: ct).ConfigureAwait(false);
+
+                    var solution = formattedCallSiteDoc.Project.Solution;
+                    var awakeDoc = solution.GetDocument(partialAwakeDoc.Id);
+                    if (awakeDoc != null)
+                    {
+                        var awakeRoot = await awakeDoc.GetSyntaxRootAsync(ct).ConfigureAwait(false);
+                        if (awakeRoot != null)
+                        {
+                            var targetAwakeNode = awakeRoot.FindNode(partialAwakeMethod.Span)
+                                .FirstAncestorOrSelf<MethodDeclarationSyntax>() ?? partialAwakeMethod;
+                            var updatedAwakeRoot = awakeRoot.ReplaceNode(targetAwakeNode, updatedPartialAwake);
+                            var formattedAwakeDoc = await Formatter.FormatAsync(
+                                awakeDoc.WithSyntaxRoot(updatedAwakeRoot),
+                                Formatter.Annotation,
+                                cancellationToken: ct).ConfigureAwait(false);
+                            return formattedAwakeDoc.Project.Solution;
+                        }
+                    }
+
+                    return solution;
+                }
+            }
+        }
+
         if (awakeInNewClass != null)
         {
-            if (awakeInNewClass.Body != null)
+            var updatedPartialDecl = AddAssignmentToAwakeMethod(awakeInNewClass, assignStmt);
+            if (updatedPartialDecl != null)
             {
-                var updatedBody = awakeInNewClass.Body.WithStatements(
-                    awakeInNewClass.Body.Statements.Insert(0, assignStmt));
-                newClassDecl = newClassDecl.ReplaceNode(awakeInNewClass, awakeInNewClass.WithBody(updatedBody));
+                newClassDecl = newClassDecl.ReplaceNode(awakeInNewClass, updatedPartialDecl);
                 newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
-            }
-            else if (awakeInNewClass.ExpressionBody != null)
-            {
-                var exprStmt = SyntaxFactory.ExpressionStatement(awakeInNewClass.ExpressionBody.Expression)
-                    .WithAdditionalAnnotations(Formatter.Annotation);
-                var convertedAwake = awakeInNewClass
-                    .WithExpressionBody(null)
-                    .WithSemicolonToken(default)
-                    .WithBody(SyntaxFactory.Block(assignStmt, exprStmt))
-                    .WithAdditionalAnnotations(Formatter.Annotation);
-                newClassDecl = newClassDecl.ReplaceNode(awakeInNewClass, convertedAwake);
-                newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
-            }
-            else
-            {
-                newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
+                var updatedRoot = root.ReplaceNode(classDecl, newClassDecl);
+                var formattedDoc = await Formatter.FormatAsync(
+                    document.WithSyntaxRoot(updatedRoot),
+                    Formatter.Annotation,
+                    cancellationToken: ct).ConfigureAwait(false);
+                return formattedDoc.Project.Solution;
             }
         }
-        else
+
+        var awakeMethod = SyntaxFactory.MethodDeclaration(
+            SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.VoidKeyword)),
+            SyntaxFactory.Identifier("Awake"))
+            .WithModifiers(SyntaxFactory.TokenList(SyntaxFactory.Token(SyntaxKind.PrivateKeyword)))
+            .WithBody(SyntaxFactory.Block(assignStmt))
+            .WithAdditionalAnnotations(Formatter.Annotation);
+
+        newClassDecl = newClassDecl.WithMembers(
+            newClassDecl.Members.Insert(0, awakeMethod).Insert(0, fieldDecl));
+
+        var finalRoot = root.ReplaceNode(classDecl, newClassDecl);
+        var finalDoc = await Formatter.FormatAsync(
+            document.WithSyntaxRoot(finalRoot),
+            Formatter.Annotation,
+            cancellationToken: ct).ConfigureAwait(false);
+        return finalDoc.Project.Solution;
+    }
+
+    private static MethodDeclarationSyntax? AddAssignmentToAwakeMethod(
+        MethodDeclarationSyntax awakeMethod,
+        StatementSyntax assignStmt)
+    {
+        if (awakeMethod.Body != null)
         {
-            bool hasPartialAwake = classSymbol != null &&
-                classSymbol.GetMembers("Awake").OfType<IMethodSymbol>().Any(m => m.Parameters.Length == 0);
-
-            if (hasPartialAwake)
-            {
-                newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
-            }
-            else
-            {
-                var awakeMethod = SyntaxFactory.MethodDeclaration(
-                    SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.VoidKeyword)),
-                    SyntaxFactory.Identifier("Awake"))
-                    .WithModifiers(SyntaxFactory.TokenList(SyntaxFactory.Token(SyntaxKind.PrivateKeyword)))
-                    .WithBody(SyntaxFactory.Block(assignStmt))
-                    .WithAdditionalAnnotations(Formatter.Annotation);
-
-                newClassDecl = newClassDecl.WithMembers(
-                    newClassDecl.Members.Insert(0, awakeMethod).Insert(0, fieldDecl));
-            }
+            var updatedBody = awakeMethod.Body.WithStatements(
+                awakeMethod.Body.Statements.Insert(0, assignStmt));
+            return awakeMethod.WithBody(updatedBody);
         }
 
-        var updatedRoot = root.ReplaceNode(classDecl, newClassDecl);
-        var updatedDoc = document.WithSyntaxRoot(updatedRoot);
-        return await Formatter.FormatAsync(updatedDoc, Formatter.Annotation, cancellationToken: ct).ConfigureAwait(false);
+        if (awakeMethod.ExpressionBody != null)
+        {
+            var exprStmt = SyntaxFactory.ExpressionStatement(awakeMethod.ExpressionBody.Expression)
+                .WithAdditionalAnnotations(Formatter.Annotation);
+            return awakeMethod
+                .WithExpressionBody(null)
+                .WithSemicolonToken(default)
+                .WithBody(SyntaxFactory.Block(assignStmt, exprStmt))
+                .WithAdditionalAnnotations(Formatter.Annotation);
+        }
+
+        if (awakeMethod.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)))
+        {
+            return awakeMethod
+                .WithSemicolonToken(default)
+                .WithBody(SyntaxFactory.Block(assignStmt))
+                .WithAdditionalAnnotations(Formatter.Annotation);
+        }
+
+        return null;
+    }
+
+    private static async Task<(Document? AwakeDoc, MethodDeclarationSyntax? AwakeMethod)> FindPartialAwakeAsync(
+        Project project,
+        INamedTypeSymbol? classSymbol,
+        ClassDeclarationSyntax currentClassDecl,
+        CancellationToken ct)
+    {
+        if (classSymbol == null) return (null, null);
+
+        var awakeSymbol = classSymbol.GetMembers("Awake")
+            .OfType<IMethodSymbol>()
+            .FirstOrDefault(m => m.Parameters.Length == 0);
+
+        if (awakeSymbol == null) return (null, null);
+
+        var targetSymbol = awakeSymbol.PartialImplementationPart ?? awakeSymbol;
+        Document? fallbackDoc = null;
+        MethodDeclarationSyntax? fallbackMethod = null;
+
+        foreach (var syntaxRef in targetSymbol.DeclaringSyntaxReferences)
+        {
+            var doc = project.GetDocument(syntaxRef.SyntaxTree);
+            if (doc == null) continue;
+
+            var syntax = await syntaxRef.GetSyntaxAsync(ct).ConfigureAwait(false);
+            if (syntax is not MethodDeclarationSyntax methodDecl) continue;
+
+            if (methodDecl.FirstAncestorOrSelf<ClassDeclarationSyntax>() == currentClassDecl)
+            {
+                continue;
+            }
+
+            if (methodDecl.Body != null || methodDecl.ExpressionBody != null)
+            {
+                return (doc, methodDecl);
+            }
+
+            fallbackDoc ??= doc;
+            fallbackMethod ??= methodDecl;
+        }
+
+        return (fallbackDoc, fallbackMethod);
     }
 
     private static string? FindExistingCachedFieldName(
         ClassDeclarationSyntax classDecl,
+        INamedTypeSymbol? classSymbol,
         MethodDeclarationSyntax? existingAwake,
         ExpressionSyntax targetExpr)
     {
@@ -263,6 +406,26 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
                 .OfType<FieldDeclarationSyntax>()
                 .SelectMany(f => f.Declaration.Variables.Select(v => v.Identifier.ValueText)),
             StringComparer.Ordinal);
+
+        if (classSymbol != null)
+        {
+            foreach (var fieldSymbol in classSymbol.GetMembers().OfType<IFieldSymbol>())
+            {
+                declaredFields.Add(fieldSymbol.Name);
+            }
+        }
+
+        var awakeClassDecl = existingAwake.FirstAncestorOrSelf<ClassDeclarationSyntax>();
+        if (awakeClassDecl != null && awakeClassDecl != classDecl)
+        {
+            foreach (var field in awakeClassDecl.Members.OfType<FieldDeclarationSyntax>())
+            {
+                foreach (var variable in field.Declaration.Variables)
+                {
+                    declaredFields.Add(variable.Identifier.ValueText);
+                }
+            }
+        }
 
         if (declaredFields.Count == 0) return null;
 
@@ -383,5 +546,254 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
             if (!existing.Contains(cand)) return cand;
         }
         return cleanBase + "_cached";
+    }
+
+    private sealed class FixTarget
+    {
+        public FixTarget(SyntaxAnnotation tag, string diagnosticId, int spanStart)
+        {
+            Tag = tag;
+            DiagnosticId = diagnosticId;
+            SpanStart = spanStart;
+        }
+
+        public SyntaxAnnotation Tag { get; }
+        public string DiagnosticId { get; }
+        public int SpanStart { get; }
+    }
+
+    private sealed class SequentialFixAllProvider : FixAllProvider
+    {
+        public static readonly SequentialFixAllProvider Instance = new();
+
+        private static readonly ImmutableArray<FixAllScope> SupportedScopes =
+            ImmutableArray.Create(FixAllScope.Document, FixAllScope.Project, FixAllScope.Solution);
+
+        public override IEnumerable<FixAllScope> GetSupportedFixAllScopes() => SupportedScopes;
+
+        public override async Task<CodeAction?> GetFixAsync(FixAllContext fixAllContext)
+        {
+            var diagnostics = await CollectDiagnosticsAsync(fixAllContext).ConfigureAwait(false);
+            if (diagnostics.Count == 0)
+            {
+                return null;
+            }
+
+            var equiv = fixAllContext.CodeActionEquivalenceKey;
+            var title = equiv == CameraMainEquivalenceKey
+                ? "[UnityBrain] Awake()에서 모든 Camera.main 캐싱하기"
+                : "[UnityBrain] Awake()에서 모든 컴포넌트 조회 캐싱하기";
+
+            return CodeAction.Create(
+                title: title,
+                createChangedSolution: ct => ApplySequentialFixesAsync(fixAllContext.Solution, diagnostics, ct),
+                equivalenceKey: equiv);
+        }
+
+        private static async Task<List<Diagnostic>> CollectDiagnosticsAsync(FixAllContext fixAllContext)
+        {
+            var rawDiagnostics = new List<Diagnostic>();
+
+            switch (fixAllContext.Scope)
+            {
+                case FixAllScope.Document:
+                    if (fixAllContext.Document != null)
+                    {
+                        var docDiags = await fixAllContext.GetDocumentDiagnosticsAsync(fixAllContext.Document).ConfigureAwait(false);
+                        rawDiagnostics.AddRange(docDiags);
+                    }
+                    break;
+
+                case FixAllScope.Project:
+                    var projDiags = await fixAllContext.GetAllDiagnosticsAsync(fixAllContext.Project).ConfigureAwait(false);
+                    rawDiagnostics.AddRange(projDiags);
+                    break;
+
+                case FixAllScope.Solution:
+                    foreach (var project in fixAllContext.Solution.Projects)
+                    {
+                        var solProjDiags = await fixAllContext.GetAllDiagnosticsAsync(project).ConfigureAwait(false);
+                        rawDiagnostics.AddRange(solProjDiags);
+                    }
+                    break;
+            }
+
+            var equiv = fixAllContext.CodeActionEquivalenceKey;
+            var filtered = new List<Diagnostic>(rawDiagnostics.Count);
+            foreach (var diag in rawDiagnostics)
+            {
+                if (!diag.Location.IsInSource) continue;
+
+                if (equiv == CameraMainEquivalenceKey)
+                {
+                    if (diag.Id == DiagnosticIds.IndirectPerformanceCriticalInvocation)
+                    {
+                        filtered.Add(diag);
+                    }
+                }
+                else if (equiv == ComponentLookupEquivalenceKey)
+                {
+                    if (diag.Id == DiagnosticIds.UncachedComponentLookup)
+                    {
+                        filtered.Add(diag);
+                    }
+                }
+                else if (string.IsNullOrEmpty(equiv))
+                {
+                    if (diag.Id == DiagnosticIds.UncachedComponentLookup ||
+                        diag.Id == DiagnosticIds.IndirectPerformanceCriticalInvocation)
+                    {
+                        filtered.Add(diag);
+                    }
+                }
+            }
+
+            return filtered;
+        }
+
+        private static async Task<Solution> ApplySequentialFixesAsync(
+            Solution initialSolution,
+            List<Diagnostic> diagnostics,
+            CancellationToken ct)
+        {
+            var currentSolution = initialSolution;
+            var byDocId = new Dictionary<DocumentId, List<Diagnostic>>();
+
+            foreach (var diag in diagnostics)
+            {
+                var tree = diag.Location.SourceTree;
+                if (tree == null) continue;
+                var doc = initialSolution.GetDocument(tree);
+                if (doc == null) continue;
+
+                if (!byDocId.TryGetValue(doc.Id, out var list))
+                {
+                    list = new List<Diagnostic>();
+                    byDocId[doc.Id] = list;
+                }
+                list.Add(diag);
+            }
+
+            var orderedDocTargets = new List<(DocumentId DocId, List<FixTarget> Targets)>();
+
+            foreach (var kvp in byDocId)
+            {
+                var docId = kvp.Key;
+                var doc = currentSolution.GetDocument(docId);
+                if (doc == null) continue;
+
+                var root = await doc.GetSyntaxRootAsync(ct).ConfigureAwait(false);
+                if (root == null) continue;
+
+                SemanticModel? semanticModel = null;
+                var nodeToTag = new Dictionary<ExpressionSyntax, SyntaxAnnotation>();
+                var docTargets = new List<FixTarget>();
+
+                foreach (var diag in kvp.Value)
+                {
+                    var node = root.FindNode(diag.Location.SourceSpan, getInnermostNodeForTie: true);
+
+                    if (diag.Id == DiagnosticIds.UncachedComponentLookup)
+                    {
+                        var invocation = node.FirstAncestorOrSelf<InvocationExpressionSyntax>();
+                        if (invocation == null) continue;
+                        var typeArg = ExtractGenericTypeArgument(invocation);
+                        if (typeArg == null || string.IsNullOrWhiteSpace(typeArg.ToString())) continue;
+
+                        if (!nodeToTag.TryGetValue(invocation, out var tag))
+                        {
+                            tag = new SyntaxAnnotation("UnityBrainFixAll", Guid.NewGuid().ToString("N"));
+                            nodeToTag[invocation] = tag;
+                            docTargets.Add(new FixTarget(tag, diag.Id, diag.Location.SourceSpan.Start));
+                        }
+                    }
+                    else if (diag.Id == DiagnosticIds.IndirectPerformanceCriticalInvocation)
+                    {
+                        var memberAccess = node.FirstAncestorOrSelf<MemberAccessExpressionSyntax>();
+                        if (memberAccess == null || memberAccess.Name.Identifier.ValueText != "main")
+                        {
+                            continue;
+                        }
+
+                        semanticModel ??= await doc.GetSemanticModelAsync(ct).ConfigureAwait(false);
+                        if (semanticModel == null) continue;
+
+                        if (semanticModel.GetSymbolInfo(memberAccess, ct).Symbol is not IPropertySymbol prop ||
+                            prop.Name != "main" ||
+                            prop.ContainingType.ToDisplayString() != "UnityEngine.Camera")
+                        {
+                            continue;
+                        }
+
+                        if (!nodeToTag.TryGetValue(memberAccess, out var tag))
+                        {
+                            tag = new SyntaxAnnotation("UnityBrainFixAll", Guid.NewGuid().ToString("N"));
+                            nodeToTag[memberAccess] = tag;
+                            docTargets.Add(new FixTarget(tag, diag.Id, diag.Location.SourceSpan.Start));
+                        }
+                    }
+                }
+
+                if (nodeToTag.Count > 0)
+                {
+                    var annotatedRoot = root.ReplaceNodes(
+                        nodeToTag.Keys,
+                        (orig, _) => orig.WithAdditionalAnnotations(nodeToTag[orig]));
+                    currentSolution = currentSolution.WithDocumentSyntaxRoot(docId, annotatedRoot);
+                    docTargets.Sort((a, b) => b.SpanStart.CompareTo(a.SpanStart));
+                    orderedDocTargets.Add((docId, docTargets));
+                }
+            }
+
+            foreach (var (docId, targets) in orderedDocTargets)
+            {
+                foreach (var target in targets)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    var doc = currentSolution.GetDocument(docId);
+                    if (doc == null) continue;
+
+                    var root = await doc.GetSyntaxRootAsync(ct).ConfigureAwait(false);
+                    if (root == null) continue;
+
+                    var expr = root.GetAnnotatedNodes(target.Tag).OfType<ExpressionSyntax>().FirstOrDefault();
+                    if (expr == null) continue;
+
+                    if (target.DiagnosticId == DiagnosticIds.UncachedComponentLookup &&
+                        expr is InvocationExpressionSyntax invocation)
+                    {
+                        var typeArg = ExtractGenericTypeArgument(invocation);
+                        if (typeArg == null || string.IsNullOrWhiteSpace(typeArg.ToString())) continue;
+
+                        var baseName = ExtractCleanTypeIdentifier(typeArg);
+                        if (string.IsNullOrEmpty(baseName))
+                        {
+                            baseName = "Component";
+                        }
+
+                        currentSolution = await CacheExpressionInAwakeSolutionAsync(
+                            doc,
+                            invocation,
+                            typeArg,
+                            baseName,
+                            ct).ConfigureAwait(false);
+                    }
+                    else if (target.DiagnosticId == DiagnosticIds.IndirectPerformanceCriticalInvocation &&
+                             expr is MemberAccessExpressionSyntax memberAccess)
+                    {
+                        var fieldType = ResolveCameraFieldType(root, memberAccess);
+                        currentSolution = await CacheExpressionInAwakeSolutionAsync(
+                            doc,
+                            memberAccess,
+                            fieldType,
+                            "mainCamera",
+                            ct).ConfigureAwait(false);
+                    }
+                }
+            }
+
+            return currentSolution;
+        }
     }
 }

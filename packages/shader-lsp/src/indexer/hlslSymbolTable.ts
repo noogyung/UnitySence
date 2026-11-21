@@ -310,15 +310,73 @@ function parseParameterList(paramStr: string): Array<{ name: string; type: strin
   return params;
 }
 
+function isDeadZeroCondition(condText: string): boolean {
+  return /^\(*\s*(?:0|false)\s*\)*$/i.test(condText.trim());
+}
+
 function extractDefines(lines: string[], rawLines: string[], uri: string): HlslSymbolEntry[] {
   const out: HlslSymbolEntry[] = [];
+  const preprocStack: Array<{ parentDead: boolean; isDead: boolean; knownFalseOnly: boolean }> = [];
+
   for (let i = 0; i < lines.length; i++) {
     let joined = lines[i];
-    if (!/^\s*#\s*define\b/.test(joined)) continue;
+    if (!/^\s*#/.test(joined)) continue;
     const startLine = i;
     while (joined.trimEnd().endsWith('\\') && i + 1 < lines.length) {
       joined = joined.replace(/\\\s*$/, '').trimEnd() + ' ' + lines[++i].trim();
     }
+
+    const ifMatch = /^\s*#\s*if\s+(.+)$/.exec(joined);
+    if (ifMatch) {
+      const parentDead = preprocStack.length > 0 && preprocStack[preprocStack.length - 1].isDead;
+      if (isDeadZeroCondition(ifMatch[1])) {
+        preprocStack.push({ parentDead, isDead: true, knownFalseOnly: true });
+      } else {
+        preprocStack.push({ parentDead, isDead: parentDead, knownFalseOnly: false });
+      }
+      continue;
+    }
+
+    if (/^\s*#\s*(?:ifdef|ifndef)\b/.test(joined)) {
+      const parentDead = preprocStack.length > 0 && preprocStack[preprocStack.length - 1].isDead;
+      preprocStack.push({ parentDead, isDead: parentDead, knownFalseOnly: false });
+      continue;
+    }
+
+    const elifMatch = /^\s*#\s*elif\s+(.+)$/.exec(joined);
+    if (elifMatch) {
+      if (preprocStack.length > 0) {
+        const top = preprocStack[preprocStack.length - 1];
+        if (isDeadZeroCondition(elifMatch[1])) {
+          top.isDead = true;
+        } else {
+          top.isDead = top.parentDead;
+          top.knownFalseOnly = false;
+        }
+      }
+      continue;
+    }
+
+    if (/^\s*#\s*else\b/.test(joined)) {
+      if (preprocStack.length > 0) {
+        const top = preprocStack[preprocStack.length - 1];
+        top.isDead = top.parentDead;
+      }
+      continue;
+    }
+
+    if (/^\s*#\s*endif\b/.test(joined)) {
+      if (preprocStack.length > 0) {
+        preprocStack.pop();
+      }
+      continue;
+    }
+
+    if (preprocStack.length > 0 && preprocStack[preprocStack.length - 1].isDead) {
+      continue;
+    }
+
+    if (!/^\s*#\s*define\b/.test(joined)) continue;
     const m = /^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)(\([^)]*\))?(?:\s+(.*))?$/.exec(joined);
     if (!m) continue;
     const name = m[1];
@@ -512,13 +570,14 @@ export function parseHlslSymbols(
       }
     }
     if (!symbols.some((s) => s.name === cbName && s.kind === 'cbuffer')) {
+      const cbCol = findIdentifierColumn(cleanOrigLines[cPos.line] ?? rawLines[cPos.line] ?? '', cbName, cPos.column);
       symbols.push({
         name: cbName,
         kind: 'cbuffer',
         signature: `cbuffer ${cbName}`,
         uri,
         line: cPos.line,
-        column: 0,
+        column: cbCol >= 0 ? cbCol : cPos.column,
       });
     }
   }

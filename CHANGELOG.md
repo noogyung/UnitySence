@@ -2,6 +2,34 @@
 
 All notable changes to the **UnityBrain** extension will be documented in this file.
 
+## [1.1.6] - 2026-11-21
+
+### Fixed
+- **Shader Rename / `.hlsl` 형제 셰이더 / UTF-16 오프셋 / 전처리기 정확도 개선**:
+  - `ShaderRenameProvider`가 `.uv`/`.r`/`.x` 같은 구조체 필드 이름 변경을 벡터 스위즐로 오인해 차단하던 문제를 수정(`isVectorSwizzleToken` 체인 해석 기반 판별 및 `uv` 제외)했습니다.
+  - `stripCommentsAndStringsByLine`, `ShaderDocumentSymbolProvider`, `maskShaderLabTriviaAndBlocks`의 잔여 `Array.from()`을 UTF-16 코드유닛 기준(`split('')`)으로 통일해 이모지/비-BMP 문자 뒤 컬럼 밀림을 제거했습니다.
+  - `.shader`에서 `#include`된 `.hlsl` 심볼·필드를 References/Rename할 때 동일 헤더를 포함하는 형제 `.shader` 파일까지 함께 탐색·수정하며, 멀티패스 셰이더가 타 Pass struct 대신 `#include` 헤더의 struct를 우선 해석하도록 보완했습니다.
+  - `#if 0` 블록 및 `#define FOO 0` 값을 구분해 비활성 분기 Dimming 오작동을 제거했고, `cbuffer Foo {` 선언의 실제 식별자 컬럼을 기록합니다.
+- **C# 11 문자열 마스킹 및 `Awake()` 캐싱 Quick-Fix 엣지케이스 일괄 수정**:
+  - `maskCSharpCommentsAndStrings`가 C# 11 raw string(`"""..."""`), `@$"..."` / `$@"..."`, 중첩 `$"..."` 보간식 내부 문자열/문자리터럴까지 안전하게 마스킹하고, `UnityEventCompletionProvider` 스페이스 트리거 허용 키워드(`bool`, `float`, `int`, `internal`, `virtual`, `new`)를 보강했습니다.
+  - `UnityCSharpCodeActionProvider`가 식 본문 `Awake() => ...;`, 주석/문자열 내 `{}` 중괄호, `/* */` 및 문자열 안 `Camera.main` 오탐, 같은 줄 다중 `Camera.main`, `Awake()` 내부 자기참조 방지, `this.gameObject`/`this.transform.GetComponent<T>()`, 숫자 시작 해시 ID(`_2DArray` -> `_2DArrayId`), 이스케이프 따옴표(`\"`) 및 멀티라인 `static readonly`를 모두 처리합니다.
+- **Roslyn `FixAllProvider` 순차 적용 및 `partial class` 타 파일 `Awake()` 지원**:
+  - `CacheComponentInAwakeCodeFixProvider`와 `ExtractPropertyToIdCodeFixProvider`에 순차 `SequentialFixAllProvider`를 도입해 한 클래스 내 다중 `UB1001`/`UB1002`/`UB1003` **Fix All** 시 중복 `Awake()`·중복 필드 충돌을 제거했습니다.
+  - 다른 `partial class` 블록이나 파일에 `Awake()`가 있는 경우에도 해당 `Awake()`에 초기화 구문을 주입(`Solution` 단위 CodeAction)해 런타임 `NullReferenceException`을 방지합니다.
+
+## [1.1.5] - 2026-11-21
+
+### Fixed
+- **동일 이름 Shader Struct 필드 구별**: `Step8Attributes.texcoord` vs `Step8Varyings.texcoord`처럼 서로 다른 구조체가 같은 필드명을 가질 때 Hover, Definition, References, Rename, DocumentHighlight가 소유 구조체(`containerName`)와 표현식 체인을 기준으로 정확히 구별하고, 함수 파라미터(`Vert`의 `input` vs `Frag`의 `input`) 스코프를 분리했습니다.
+- **`Camera.main` (`UB1001`) `Awake()` 자동 캐싱 Quick-Fix / CodeFix 추가**: `Update()` 등의 `Camera.main` 접근에 대해 Extension Quick-Fix와 Roslyn `CacheComponentInAwakeCodeFixProvider`가 `Awake()` 캐싱 자동화를 제공합니다.
+
+## [1.1.4] - 2026-11-21
+
+### Fixed
+- **Shader & LSP 안정화**: Include-guard `#ifndef`/`#define` 자기 자신 Dimming(`P0-1`), `#pragma` 엔트리포인트 컬럼(`P1-S1`), 비-BMP 이모지 UTF-16 오프셋(`P1-S2`), 심볼 컬럼 단어 경계 매칭(`P1-S3`), 구조체 필드 선언부 References/Rename(`P1-S4`), 블록 주석 종료 줄 포매팅(`P1-S5`), 멀티라인 `#elif` 활성 줄 Dimming(`P1-S6`), `Properties` 타입 하이라이팅(`P2-S1`)을 수정했습니다.
+- **Extension 런타임 & 매니페스트 정비**: `AnimatorController` YAML 섹션 경계(`P1-E2`), `.meta` 비동기 `.catch()`(`P1-E3`), 해시 추출 주석 오탐 및 타 클래스 `Awake()` 경계(`P1-E4`), `index/rebuild` 60초 타임아웃(`P1-E5`), C# CodeLens 파싱 마스킹(`P1-E6`), `package.json` 중복 grammar/미선언 `shaderlab` 제거(`P1-M1`), 이벤트 자동완성 prefix 가드(`P2-E2`), `launch.json` BOM·기존 키 보존(`P2-E3`), `.asmdef` 자기참조 범위(`P2-E5`)를 수정했습니다.
+- **Roslyn & Daemon 호환성·프로토콜 수정**: `netstandard2.0` 비호환 `.Contains` 호출 3건 교체, 타 오브젝트 `GetComponent` `UB1002` 오탐 제거, `SimpleJson` UTF-8 BOM 처리 및 `UnityBrain.Daemon` 잘못된 JSON 입력 시 JSON-RPC `-32700 Parse error` 응답을 추가했습니다.
+
 ## [1.1.3] - 2026-11-21
 
 ### Fixed

@@ -8,6 +8,7 @@ import {
   parseShaderPragmas,
   parseShaderProperties,
 } from '../../src/parser/shaderLabVirtualDoc.ts';
+import { detectShaderLabContext } from '../../src/parser/shaderLabContext.ts';
 import { UnityHlslMacroPrepass } from '../../src/parser/unityHlslMacroPrepass.ts';
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -150,5 +151,25 @@ describe('shaderLabVirtualDoc & UnityHlslMacroPrepass', () => {
     expect(byName.get('S')?.column).toBe(8);
     expect(byName.get('C')?.column).toBe(14);
     expect(byName.get('f')?.column).toBe(39);
+  });
+
+  it('preserves UTF-16 column alignment in detectShaderLabContext across non-BMP emoji comments', () => {
+    const shader = [
+      'Shader "Test/EmojiContext" {',
+      '  Properties {',
+      '    /* 🔥 */ [HDR] _MainTex ("Main", 2D) = "white" {}',
+      '  }',
+      '  SubShader {',
+      '    /* 🔥 */ Tags { "RenderType" = "Opaque" }',
+      '  }',
+      '}',
+    ].join('\n');
+
+    const lines = shader.split('\n');
+    const propAttrCol = lines[2].indexOf('HDR');
+    expect(detectShaderLabContext(shader, 2, propAttrCol, 'EmojiContext.shader')).toBe('propertyAttribute');
+
+    const tagsCol = lines[5].indexOf('"Opaque"');
+    expect(detectShaderLabContext(shader, 5, tagsCol, 'EmojiContext.shader')).toBe('tags');
   });
 });

@@ -77,91 +77,242 @@ export function maskCSharpCommentsAndStrings(source: string): string {
   const out: string[] = [];
   let i = 0;
   const n = source.length;
-  while (i < n) {
+
+  const pushMasked = (count: number): void => {
+    for (let k = 0; k < count && i < n; k++) {
+      const c = source[i];
+      out.push(c === '\n' || c === '\r' ? c : ' ');
+      i++;
+    }
+  };
+
+  const maskCharLiteral = (): void => {
+    pushMasked(1);
+    while (i < n) {
+      if (source[i] === '\\' && i + 1 < n) {
+        pushMasked(2);
+        continue;
+      }
+      if (source[i] === "'") {
+        pushMasked(1);
+        break;
+      }
+      pushMasked(1);
+    }
+  };
+
+  const maskNormalString = (): void => {
+    pushMasked(1);
+    while (i < n) {
+      if (source[i] === '\\' && i + 1 < n) {
+        pushMasked(2);
+        continue;
+      }
+      if (source[i] === '"') {
+        pushMasked(1);
+        break;
+      }
+      pushMasked(1);
+    }
+  };
+
+  const maskVerbatimString = (): void => {
+    pushMasked(2);
+    while (i < n) {
+      if (source[i] === '"' && source[i + 1] === '"') {
+        pushMasked(2);
+        continue;
+      }
+      if (source[i] === '"') {
+        pushMasked(1);
+        break;
+      }
+      pushMasked(1);
+    }
+  };
+
+  const maskInterpolationHole = (closingBraceCount: number): void => {
+    let innerBraceDepth = 0;
+    while (i < n) {
+      if (innerBraceDepth === 0 && source[i] === '}') {
+        let closeRun = 0;
+        while (closeRun < closingBraceCount && source[i + closeRun] === '}') {
+          closeRun++;
+        }
+        if (closeRun === closingBraceCount) {
+          pushMasked(closingBraceCount);
+          return;
+        }
+      }
+      if (source[i] === '\\' && (source[i + 1] === '"' || source[i + 1] === "'")) {
+        pushMasked(2);
+        continue;
+      }
+      if (tryMaskCommentOrLiteral()) {
+        continue;
+      }
+      if (source[i] === '{') {
+        innerBraceDepth++;
+        pushMasked(1);
+        continue;
+      }
+      if (source[i] === '}' && innerBraceDepth > 0) {
+        innerBraceDepth--;
+        pushMasked(1);
+        continue;
+      }
+      pushMasked(1);
+    }
+  };
+
+  const maskInterpolatedString = (): void => {
+    pushMasked(2);
+    while (i < n) {
+      if (source[i] === '\\' && i + 1 < n) {
+        pushMasked(2);
+        continue;
+      }
+      if (source[i] === '"') {
+        pushMasked(1);
+        break;
+      }
+      if (source[i] === '{') {
+        if (source[i + 1] === '{') {
+          pushMasked(2);
+          continue;
+        }
+        pushMasked(1);
+        maskInterpolationHole(1);
+        continue;
+      }
+      pushMasked(1);
+    }
+  };
+
+  const maskVerbatimInterpolatedString = (): void => {
+    pushMasked(3);
+    while (i < n) {
+      if (source[i] === '"' && source[i + 1] === '"') {
+        pushMasked(2);
+        continue;
+      }
+      if (source[i] === '"') {
+        pushMasked(1);
+        break;
+      }
+      if (source[i] === '{') {
+        if (source[i + 1] === '{') {
+          pushMasked(2);
+          continue;
+        }
+        pushMasked(1);
+        maskInterpolationHole(1);
+        continue;
+      }
+      pushMasked(1);
+    }
+  };
+
+  const maskRawString = (dollarCount: number, quoteCount: number): void => {
+    pushMasked(dollarCount + quoteCount);
+    while (i < n) {
+      if (source[i] === '"') {
+        let runLen = 0;
+        while (source[i + runLen] === '"') {
+          runLen++;
+        }
+        pushMasked(runLen);
+        if (runLen >= quoteCount) {
+          break;
+        }
+        continue;
+      }
+      if (dollarCount > 0 && source[i] === '{') {
+        let openRun = 0;
+        while (source[i + openRun] === '{') {
+          openRun++;
+        }
+        if (openRun < dollarCount) {
+          pushMasked(openRun);
+          continue;
+        }
+        pushMasked(openRun);
+        maskInterpolationHole(dollarCount);
+        continue;
+      }
+      pushMasked(1);
+    }
+  };
+
+  const tryMaskCommentOrLiteral = (): boolean => {
     const ch = source[i];
     const next = source[i + 1];
     if (ch === '/' && next === '/') {
-      out.push(' ', ' ');
-      i += 2;
+      pushMasked(2);
       while (i < n && source[i] !== '\n') {
-        out.push(' ');
-        i++;
+        pushMasked(1);
       }
-      continue;
+      return true;
     }
     if (ch === '/' && next === '*') {
-      out.push(' ', ' ');
-      i += 2;
+      pushMasked(2);
       while (i < n) {
         if (source[i] === '*' && source[i + 1] === '/') {
-          out.push(' ', ' ');
-          i += 2;
+          pushMasked(2);
           break;
         }
-        out.push(source[i] === '\n' ? '\n' : ' ');
-        i++;
+        pushMasked(1);
       }
-      continue;
+      return true;
+    }
+
+    let dollarCount = 0;
+    while (i + dollarCount < n && source[i + dollarCount] === '$') {
+      dollarCount++;
+    }
+    if (source[i + dollarCount] === '"') {
+      let quoteCount = 0;
+      while (i + dollarCount + quoteCount < n && source[i + dollarCount + quoteCount] === '"') {
+        quoteCount++;
+      }
+      if (quoteCount >= 3) {
+        maskRawString(dollarCount, quoteCount);
+        return true;
+      }
+    }
+
+    if (
+      (ch === '@' && next === '$' && source[i + 2] === '"') ||
+      (ch === '$' && next === '@' && source[i + 2] === '"')
+    ) {
+      maskVerbatimInterpolatedString();
+      return true;
+    }
+
+    if (ch === '$' && next === '"') {
+      maskInterpolatedString();
+      return true;
     }
     if (ch === '@' && next === '"') {
-      out.push(' ', ' ');
-      i += 2;
-      while (i < n) {
-        if (source[i] === '"' && source[i + 1] === '"') {
-          out.push(' ', ' ');
-          i += 2;
-          continue;
-        }
-        if (source[i] === '"') {
-          out.push(' ');
-          i++;
-          break;
-        }
-        out.push(source[i] === '\n' ? '\n' : ' ');
-        i++;
-      }
-      continue;
+      maskVerbatimString();
+      return true;
     }
     if (ch === '"') {
-      out.push(' ');
-      i++;
-      while (i < n) {
-        if (source[i] === '\\' && i + 1 < n) {
-          out.push(' ', source[i + 1] === '\n' ? '\n' : ' ');
-          i += 2;
-          continue;
-        }
-        if (source[i] === '"') {
-          out.push(' ');
-          i++;
-          break;
-        }
-        out.push(source[i] === '\n' ? '\n' : ' ');
-        i++;
-      }
-      continue;
+      maskNormalString();
+      return true;
     }
     if (ch === "'") {
-      out.push(' ');
-      i++;
-      while (i < n) {
-        if (source[i] === '\\' && i + 1 < n) {
-          out.push(' ', ' ');
-          i += 2;
-          continue;
-        }
-        if (source[i] === "'") {
-          out.push(' ');
-          i++;
-          break;
-        }
-        out.push(source[i] === '\n' ? '\n' : ' ');
-        i++;
-      }
-      continue;
+      maskCharLiteral();
+      return true;
     }
-    out.push(ch);
-    i++;
+    return false;
+  };
+
+  while (i < n) {
+    if (!tryMaskCommentOrLiteral()) {
+      out.push(source[i]);
+      i++;
+    }
   }
   return out.join('');
 }
@@ -585,7 +736,7 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
     if (
       context?.triggerKind === triggerKindChar &&
       context.triggerCharacter === ' ' &&
-      !/^\s*(?:(?:public|private|protected|internal|static|virtual|override|async|new)\s+)*(?:override|void|IEnumerator|Awaitable|VisualElement|private|protected|public|static|async)\s+$/.test(
+      !/^\s*(?:(?:public|private|protected|internal|static|virtual|override|async|new)\s+)*(?:override|void|bool|float|int|IEnumerator|Awaitable|VisualElement|private|protected|public|internal|static|virtual|async|new)\s+$/.test(
         rawLineBeforeCursor,
       )
     ) {

@@ -468,7 +468,9 @@ public class CameraFlashCollision : MonoBehaviour
     {
         public static Camera main => null!;
         public Color backgroundColor { get; set; }
-    }");
+        public float orthographicSize { get; set; }
+    }
+    public class BoxCollider : Component { }");
     }
 
     private static async Task<string> ApplyCodeFixWithCustomStubsAsync(
@@ -546,5 +548,484 @@ public class CameraFlashCollision : MonoBehaviour
         var updatedDoc = workspace.CurrentSolution.GetDocument(userDocId)!;
         var text = await updatedDoc.GetTextAsync().ConfigureAwait(false);
         return text.ToString();
+    }
+
+    [Fact]
+    public async Task PartialClassWithAwakeInSecondDocumentInjectsIntoExistingAwakeAndCompilesCleanly()
+    {
+        const string doc1Source = @"
+using UnityEngine;
+
+public partial class PartialEnemy : MonoBehaviour
+{
+    private void Update()
+    {
+        var rb = GetComponent<Rigidbody>();
+        Camera.main.backgroundColor = Color.red;
+        _ = rb;
+    }
+}";
+
+        const string doc2Source = @"
+using UnityEngine;
+
+public partial class PartialEnemy : MonoBehaviour
+{
+    private int _ready;
+
+    private void Awake()
+    {
+        _ready = 1;
+    }
+}";
+
+        string stubs = BuildCameraExtendedStubs();
+        var refs = GetCoreMetadataReferences();
+        using var workspace = new AdhocWorkspace();
+        var projectId = ProjectId.CreateNewId();
+        var stubDocId = DocumentId.CreateNewId(projectId);
+        var doc1Id = DocumentId.CreateNewId(projectId);
+        var doc2Id = DocumentId.CreateNewId(projectId);
+
+        var solution = workspace.CurrentSolution
+            .AddProject(projectId, "TestProject", "TestProject", LanguageNames.CSharp)
+            .WithProjectCompilationOptions(projectId, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+            .WithProjectParseOptions(projectId, new CSharpParseOptions(LanguageVersion.Latest))
+            .AddMetadataReferences(projectId, refs)
+            .AddDocument(stubDocId, "UnityStubs.cs", SourceText.From(stubs))
+            .AddDocument(doc1Id, "PartialEnemy.Update.cs", SourceText.From(doc1Source))
+            .AddDocument(doc2Id, "PartialEnemy.Awake.cs", SourceText.From(doc2Source));
+        AssertEx.True(workspace.TryApplyChanges(solution));
+
+        var analyzer = new PerformanceCriticalContextAnalyzer();
+        var codeFix = new CacheComponentInAwakeCodeFixProvider();
+
+        // 1. Apply UB1002 fix for GetComponent<Rigidbody>() in Doc1
+        await ApplySingleFixOnDocumentAsync(workspace, projectId, doc1Id, analyzer, codeFix, DiagnosticIds.UncachedComponentLookup);
+        // 2. Apply UB1001 fix for Camera.main in Doc1
+        await ApplySingleFixOnDocumentAsync(workspace, projectId, doc1Id, analyzer, codeFix, DiagnosticIds.IndirectPerformanceCriticalInvocation);
+
+        var updatedDoc1Text = (await workspace.CurrentSolution.GetDocument(doc1Id)!.GetTextAsync()).ToString();
+        var updatedDoc2Text = (await workspace.CurrentSolution.GetDocument(doc2Id)!.GetTextAsync()).ToString();
+
+        AssertEx.Contains("private Rigidbody _rigidbody;", updatedDoc1Text);
+        AssertEx.Contains("private Camera _mainCamera;", updatedDoc1Text);
+        AssertEx.Contains("var rb = _rigidbody;", updatedDoc1Text);
+        AssertEx.Contains("_mainCamera.backgroundColor = Color.red;", updatedDoc1Text);
+        AssertEx.False(updatedDoc1Text.Contains("Awake()", StringComparison.Ordinal), "Doc1 must not generate a duplicate Awake()");
+
+        AssertEx.Contains("_rigidbody = GetComponent<Rigidbody>();", updatedDoc2Text);
+        AssertEx.Contains("_mainCamera = Camera.main;", updatedDoc2Text);
+        AssertEx.Contains("_ready = 1;", updatedDoc2Text);
+        AssertEx.Equal(1, updatedDoc2Text.Split("Awake()").Length - 1, "Doc2 should retain exactly one Awake()");
+
+        await AssertZeroCompilerErrorsAsync(workspace.CurrentSolution.GetProject(projectId)!);
+    }
+
+    [Fact]
+    public async Task PartialClassInSameFileWithTwoPartialDeclarationsReusesOtherBlockAwake()
+    {
+        const string source = @"
+using UnityEngine;
+
+public partial class SameFilePartial : MonoBehaviour
+{
+    private void Awake() => InitializeState();
+    private void InitializeState() { }
+}
+
+public partial class SameFilePartial : MonoBehaviour
+{
+    private void Update()
+    {
+        var rb = GetComponent<Rigidbody>();
+        _ = rb;
+    }
+}";
+
+        string stubs = BuildCameraExtendedStubs();
+        var refs = GetCoreMetadataReferences();
+        using var workspace = new AdhocWorkspace();
+        var projectId = ProjectId.CreateNewId();
+        var stubDocId = DocumentId.CreateNewId(projectId);
+        var docId = DocumentId.CreateNewId(projectId);
+
+        var solution = workspace.CurrentSolution
+            .AddProject(projectId, "TestProject", "TestProject", LanguageNames.CSharp)
+            .WithProjectCompilationOptions(projectId, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+            .WithProjectParseOptions(projectId, new CSharpParseOptions(LanguageVersion.Latest))
+            .AddMetadataReferences(projectId, refs)
+            .AddDocument(stubDocId, "UnityStubs.cs", SourceText.From(stubs))
+            .AddDocument(docId, "SameFilePartial.cs", SourceText.From(source));
+        AssertEx.True(workspace.TryApplyChanges(solution));
+
+        await ApplySingleFixOnDocumentAsync(
+            workspace,
+            projectId,
+            docId,
+            new PerformanceCriticalContextAnalyzer(),
+            new CacheComponentInAwakeCodeFixProvider(),
+            DiagnosticIds.UncachedComponentLookup);
+
+        var updatedText = (await workspace.CurrentSolution.GetDocument(docId)!.GetTextAsync()).ToString();
+        AssertEx.Contains("private Rigidbody _rigidbody;", updatedText);
+        AssertEx.Contains("_rigidbody = GetComponent<Rigidbody>();", updatedText);
+        AssertEx.Contains("InitializeState();", updatedText);
+        AssertEx.Contains("var rb = _rigidbody;", updatedText);
+        AssertEx.Equal(1, updatedText.Split("Awake()").Length - 1, "Same-file partial class must have exactly one Awake()");
+
+        await AssertZeroCompilerErrorsAsync(workspace.CurrentSolution.GetProject(projectId)!);
+    }
+
+    [Fact]
+    public async Task FixAllTwoCameraMainAccessesInUpdateProducesSingleFieldAndSingleAwake()
+    {
+        const string source = @"
+using UnityEngine;
+
+public class MultiCameraAccess : MonoBehaviour
+{
+    private void Update()
+    {
+        Camera.main.backgroundColor = Color.red;
+        Camera.main.orthographicSize = 5f;
+    }
+}";
+
+        string stubs = BuildCameraExtendedStubs();
+        var fixedText = await ApplyFixAllInDocumentAsync(
+            source,
+            stubs,
+            new PerformanceCriticalContextAnalyzer(),
+            new CacheComponentInAwakeCodeFixProvider(),
+            DiagnosticIds.IndirectPerformanceCriticalInvocation);
+
+        AssertEx.Equal(1, fixedText.Split("private Camera _mainCamera;").Length - 1, "FixAll must create only one _mainCamera field");
+        AssertEx.Equal(1, fixedText.Split("void Awake()").Length - 1, "FixAll must create only one Awake()");
+        AssertEx.Equal(1, fixedText.Split("_mainCamera = Camera.main;").Length - 1, "FixAll must create only one _mainCamera assignment");
+        AssertEx.Contains("_mainCamera.backgroundColor = Color.red;", fixedText);
+        AssertEx.Contains("_mainCamera.orthographicSize = 5f;", fixedText);
+        AssertEx.False(fixedText.Contains("Camera.main.backgroundColor", StringComparison.Ordinal));
+        AssertEx.False(fixedText.Contains("Camera.main.orthographicSize", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task FixAllTwoDistinctGetComponentCallsProducesBothFieldsAndSingleAwake()
+    {
+        const string source = @"
+using UnityEngine;
+
+public class MultiComponentLookup : MonoBehaviour
+{
+    private void Update()
+    {
+        var rb = GetComponent<Rigidbody>();
+        var col = GetComponent<BoxCollider>();
+        _ = rb;
+        _ = col;
+    }
+}";
+
+        string stubs = BuildCameraExtendedStubs();
+        var fixedText = await ApplyFixAllInDocumentAsync(
+            source,
+            stubs,
+            new PerformanceCriticalContextAnalyzer(),
+            new CacheComponentInAwakeCodeFixProvider(),
+            DiagnosticIds.UncachedComponentLookup);
+
+        AssertEx.Contains("private Rigidbody _rigidbody;", fixedText);
+        AssertEx.Contains("private BoxCollider _boxCollider;", fixedText);
+        AssertEx.Equal(1, fixedText.Split("void Awake()").Length - 1, "FixAll must create only one Awake()");
+        AssertEx.Contains("_rigidbody = GetComponent<Rigidbody>();", fixedText);
+        AssertEx.Contains("_boxCollider = GetComponent<BoxCollider>();", fixedText);
+        AssertEx.Contains("var rb = _rigidbody;", fixedText);
+        AssertEx.Contains("var col = _boxCollider;", fixedText);
+    }
+
+    [Fact]
+    public async Task FixAllProjectScopeAcrossTwoPartialClassDocumentsCreatesSingleAwakeAndCompilesCleanly()
+    {
+        const string doc1Source = @"
+using UnityEngine;
+
+public partial class ProjectPartialRunner : MonoBehaviour
+{
+    private void Update()
+    {
+        var rb = GetComponent<Rigidbody>();
+        _ = rb;
+    }
+}";
+
+        const string doc2Source = @"
+using UnityEngine;
+
+public partial class ProjectPartialRunner : MonoBehaviour
+{
+    private void FixedUpdate()
+    {
+        var col = GetComponent<BoxCollider>();
+        var rb2 = GetComponent<Rigidbody>();
+        _ = col;
+        _ = rb2;
+    }
+}";
+
+        string stubs = BuildCameraExtendedStubs();
+        var refs = GetCoreMetadataReferences();
+        using var workspace = new AdhocWorkspace();
+        var projectId = ProjectId.CreateNewId();
+        var stubDocId = DocumentId.CreateNewId(projectId);
+        var doc1Id = DocumentId.CreateNewId(projectId);
+        var doc2Id = DocumentId.CreateNewId(projectId);
+
+        var solution = workspace.CurrentSolution
+            .AddProject(projectId, "TestProject", "TestProject", LanguageNames.CSharp)
+            .WithProjectCompilationOptions(projectId, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+            .WithProjectParseOptions(projectId, new CSharpParseOptions(LanguageVersion.Latest))
+            .AddMetadataReferences(projectId, refs)
+            .AddDocument(stubDocId, "UnityStubs.cs", SourceText.From(stubs))
+            .AddDocument(doc1Id, "Runner.Update.cs", SourceText.From(doc1Source))
+            .AddDocument(doc2Id, "Runner.FixedUpdate.cs", SourceText.From(doc2Source));
+        AssertEx.True(workspace.TryApplyChanges(solution));
+
+        var analyzer = new PerformanceCriticalContextAnalyzer();
+        var codeFix = new CacheComponentInAwakeCodeFixProvider();
+        var doc1 = workspace.CurrentSolution.GetDocument(doc1Id)!;
+        var compilation = await doc1.Project.GetCompilationAsync().ConfigureAwait(false);
+        var diags = (await compilation!.WithAnalyzers(ImmutableArray.Create<DiagnosticAnalyzer>(analyzer))
+            .GetAnalyzerDiagnosticsAsync()
+            .ConfigureAwait(false))
+            .Where(d => d.Id == DiagnosticIds.UncachedComponentLookup)
+            .ToImmutableArray();
+        AssertEx.Equal(3, diags.Length, $"Expected 3 UB1002 diagnostics across partial files, got {diags.Length}");
+
+        var actions = new List<CodeAction>();
+        var doc1Diag = diags.First(d => d.Location.SourceTree?.FilePath == "Runner.Update.cs");
+        await codeFix.RegisterCodeFixesAsync(new CodeFixContext(
+            doc1,
+            doc1Diag,
+            (action, _) => actions.Add(action),
+            CancellationToken.None)).ConfigureAwait(false);
+        AssertEx.True(actions.Count > 0, "Expected CodeAction for UB1002");
+
+        var fixAllContext = new FixAllContext(
+            doc1,
+            codeFix,
+            FixAllScope.Project,
+            actions[0].EquivalenceKey,
+            codeFix.FixableDiagnosticIds,
+            new TestFixAllDiagnosticProvider(analyzer),
+            CancellationToken.None);
+
+        var fixAllAction = await codeFix.GetFixAllProvider()!.GetFixAsync(fixAllContext).ConfigureAwait(false);
+        AssertEx.True(fixAllAction != null, "Expected Project-scope FixAll CodeAction");
+
+        var ops = await fixAllAction!.GetOperationsAsync(CancellationToken.None).ConfigureAwait(false);
+        foreach (var op in ops.OfType<ApplyChangesOperation>())
+        {
+            op.Apply(workspace, CancellationToken.None);
+        }
+
+        var updatedProject = workspace.CurrentSolution.GetProject(projectId)!;
+        await AssertZeroCompilerErrorsAsync(updatedProject);
+
+        var updatedDoc1Text = (await workspace.CurrentSolution.GetDocument(doc1Id)!.GetTextAsync()).ToString();
+        var updatedDoc2Text = (await workspace.CurrentSolution.GetDocument(doc2Id)!.GetTextAsync()).ToString();
+        var totalAwakeCount = (updatedDoc1Text.Split("Awake()").Length - 1) + (updatedDoc2Text.Split("Awake()").Length - 1);
+        AssertEx.Equal(1, totalAwakeCount, "Project-scope FixAll across partial class files must produce exactly one Awake()");
+
+        var combined = updatedDoc1Text + "\n" + updatedDoc2Text;
+        AssertEx.Equal(1, combined.Split("_rigidbody = GetComponent<Rigidbody>();").Length - 1, "Must not duplicate _rigidbody initialization");
+        AssertEx.Equal(1, combined.Split("_boxCollider = GetComponent<BoxCollider>();").Length - 1, "Must initialize _boxCollider once");
+
+        var postComp = await updatedProject.GetCompilationAsync().ConfigureAwait(false);
+        var postDiags = await postComp!.WithAnalyzers(ImmutableArray.Create<DiagnosticAnalyzer>(analyzer))
+            .GetAnalyzerDiagnosticsAsync()
+            .ConfigureAwait(false);
+        AssertEx.Equal(0, postDiags.Count(d => d.Id == DiagnosticIds.UncachedComponentLookup), "Expected 0 remaining UB1002 diagnostics");
+    }
+
+    private static List<MetadataReference> GetCoreMetadataReferences()
+    {
+        var trusted = (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string ?? string.Empty)
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        var refs = new List<MetadataReference>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in trusted)
+        {
+            var fileName = Path.GetFileName(path);
+            if (!fileName.StartsWith("System.", StringComparison.OrdinalIgnoreCase) &&
+                !fileName.Equals("mscorlib.dll", StringComparison.OrdinalIgnoreCase) &&
+                !fileName.Equals("netstandard.dll", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (seen.Add(path))
+            {
+                refs.Add(MetadataReference.CreateFromFile(path));
+            }
+        }
+        return refs;
+    }
+
+    private static async Task ApplySingleFixOnDocumentAsync(
+        AdhocWorkspace workspace,
+        ProjectId projectId,
+        DocumentId docId,
+        DiagnosticAnalyzer analyzer,
+        CodeFixProvider codeFixProvider,
+        string diagnosticId)
+    {
+        var doc = workspace.CurrentSolution.GetDocument(docId)!;
+        var compilation = await doc.Project.GetCompilationAsync().ConfigureAwait(false);
+        var withAnalyzers = compilation!.WithAnalyzers(ImmutableArray.Create(analyzer));
+        var tree = await doc.GetSyntaxTreeAsync().ConfigureAwait(false);
+        var diags = (await withAnalyzers.GetAnalyzerDiagnosticsAsync().ConfigureAwait(false))
+            .Where(d => d.Location.SourceTree == tree && d.Id == diagnosticId)
+            .OrderBy(d => d.Location.SourceSpan.Start)
+            .ToImmutableArray();
+
+        AssertEx.True(diags.Length > 0, $"Expected diagnostic {diagnosticId} in {doc.Name}");
+
+        var actions = new List<CodeAction>();
+        await codeFixProvider.RegisterCodeFixesAsync(new CodeFixContext(
+            doc,
+            diags[0],
+            (action, _) => actions.Add(action),
+            CancellationToken.None)).ConfigureAwait(false);
+
+        AssertEx.True(actions.Count > 0, $"Expected CodeAction for {diagnosticId}");
+
+        var ops = await actions[0].GetOperationsAsync(CancellationToken.None).ConfigureAwait(false);
+        foreach (var op in ops.OfType<ApplyChangesOperation>())
+        {
+            op.Apply(workspace, CancellationToken.None);
+        }
+    }
+
+    private static async Task<string> ApplyFixAllInDocumentAsync(
+        string userSource,
+        string stubsSource,
+        DiagnosticAnalyzer analyzer,
+        CodeFixProvider codeFixProvider,
+        string diagnosticId)
+    {
+        var refs = GetCoreMetadataReferences();
+        using var workspace = new AdhocWorkspace();
+        var projectId = ProjectId.CreateNewId();
+        var stubDocId = DocumentId.CreateNewId(projectId);
+        var userDocId = DocumentId.CreateNewId(projectId);
+
+        var solution = workspace.CurrentSolution
+            .AddProject(projectId, "TestProject", "TestProject", LanguageNames.CSharp)
+            .WithProjectCompilationOptions(projectId, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+            .WithProjectParseOptions(projectId, new CSharpParseOptions(LanguageVersion.Latest))
+            .AddMetadataReferences(projectId, refs)
+            .AddDocument(stubDocId, "UnityStubs.cs", SourceText.From(stubsSource))
+            .AddDocument(userDocId, "TestScript.cs", SourceText.From(userSource));
+        AssertEx.True(workspace.TryApplyChanges(solution));
+
+        var doc = workspace.CurrentSolution.GetDocument(userDocId)!;
+        var compilation = await doc.Project.GetCompilationAsync().ConfigureAwait(false);
+        var withAnalyzers = compilation!.WithAnalyzers(ImmutableArray.Create(analyzer));
+        var diags = (await withAnalyzers.GetAnalyzerDiagnosticsAsync().ConfigureAwait(false))
+            .Where(d => d.Location.SourceTree?.FilePath == "TestScript.cs" && d.Id == diagnosticId)
+            .OrderBy(d => d.Location.SourceSpan.Start)
+            .ToImmutableArray();
+
+        AssertEx.True(diags.Length > 0, $"Expected at least one {diagnosticId} diagnostic");
+
+        var actions = new List<CodeAction>();
+        await codeFixProvider.RegisterCodeFixesAsync(new CodeFixContext(
+            doc,
+            diags[0],
+            (action, _) => actions.Add(action),
+            CancellationToken.None)).ConfigureAwait(false);
+
+        AssertEx.True(actions.Count > 0, $"Expected CodeAction for {diagnosticId}");
+
+        var fixAllProvider = codeFixProvider.GetFixAllProvider()!;
+        var fixAllContext = new FixAllContext(
+            doc,
+            codeFixProvider,
+            FixAllScope.Document,
+            actions[0].EquivalenceKey,
+            codeFixProvider.FixableDiagnosticIds,
+            new TestFixAllDiagnosticProvider(analyzer),
+            CancellationToken.None);
+
+        var fixAllAction = await fixAllProvider.GetFixAsync(fixAllContext).ConfigureAwait(false);
+        AssertEx.True(fixAllAction != null, "Expected FixAll CodeAction");
+
+        var ops = await fixAllAction!.GetOperationsAsync(CancellationToken.None).ConfigureAwait(false);
+        foreach (var op in ops.OfType<ApplyChangesOperation>())
+        {
+            op.Apply(workspace, CancellationToken.None);
+        }
+
+        await AssertZeroCompilerErrorsAsync(workspace.CurrentSolution.GetProject(projectId)!);
+
+        var updatedDoc = workspace.CurrentSolution.GetDocument(userDocId)!;
+        var postCompilation = await updatedDoc.Project.GetCompilationAsync().ConfigureAwait(false);
+        var postAnalyzers = postCompilation!.WithAnalyzers(ImmutableArray.Create(analyzer));
+        var postDiags = (await postAnalyzers.GetAnalyzerDiagnosticsAsync().ConfigureAwait(false))
+            .Where(d => d.Location.SourceTree?.FilePath == "TestScript.cs" && d.Id == diagnosticId)
+            .ToArray();
+        AssertEx.Equal(0, postDiags.Length, $"Expected 0 remaining {diagnosticId} diagnostics after FixAll");
+
+        return (await updatedDoc.GetTextAsync().ConfigureAwait(false)).ToString();
+    }
+
+    private static async Task AssertZeroCompilerErrorsAsync(Project project)
+    {
+        var compilation = await project.GetCompilationAsync().ConfigureAwait(false);
+        var errors = compilation!.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+        AssertEx.Equal(
+            0,
+            errors.Length,
+            $"Unexpected compiler errors after CodeFix: {string.Join("; ", errors.Select(e => e.GetMessage()))}");
+    }
+
+    private sealed class TestFixAllDiagnosticProvider : FixAllContext.DiagnosticProvider
+    {
+        private readonly DiagnosticAnalyzer _analyzer;
+
+        public TestFixAllDiagnosticProvider(DiagnosticAnalyzer analyzer)
+        {
+            _analyzer = analyzer;
+        }
+
+        public override async Task<IEnumerable<Diagnostic>> GetDocumentDiagnosticsAsync(
+            Document document,
+            CancellationToken cancellationToken)
+        {
+            var compilation = await document.Project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+            if (compilation == null) return Array.Empty<Diagnostic>();
+            var tree = await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false);
+            var withAnalyzers = compilation.WithAnalyzers(ImmutableArray.Create(_analyzer));
+            var diags = await withAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken).ConfigureAwait(false);
+            return diags.Where(d => d.Location.SourceTree == tree).ToArray();
+        }
+
+        public override async Task<IEnumerable<Diagnostic>> GetAllDiagnosticsAsync(
+            Project project,
+            CancellationToken cancellationToken)
+        {
+            var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+            if (compilation == null) return Array.Empty<Diagnostic>();
+            var withAnalyzers = compilation.WithAnalyzers(ImmutableArray.Create(_analyzer));
+            return await withAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        public override Task<IEnumerable<Diagnostic>> GetProjectDiagnosticsAsync(
+            Project project,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IEnumerable<Diagnostic>>(Array.Empty<Diagnostic>());
+        }
     }
 }

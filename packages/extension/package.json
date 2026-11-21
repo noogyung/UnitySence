@@ -2,7 +2,7 @@
   "name": "unitybrain",
   "displayName": "UnityBrain",
   "description": "JetBrains Rider 수준의 Unity 개발 지능형 지원 확장 (ShaderLab/HLSL LSP, Roslyn 분석기, YAML 에셋 인덱서, .meta 자동 동기화).",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "publisher": "unitybrain",
   "license": "MIT",
   "icon": "resources/icon.png",

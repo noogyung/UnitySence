@@ -459,6 +459,13 @@ export class IncludeDependencyGraph {
         }
         const unblocked = groups.find((g) => g.blockIndex < 0);
         if (unblocked) return unblocked.fields;
+
+        for (const file of files.slice(1)) {
+          const headerFields = file.structFieldsByStruct.get(structName);
+          if (headerFields && headerFields.length > 0) {
+            return headerFields;
+          }
+        }
         return groups[0].fields;
       }
     }

@@ -22,7 +22,7 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
     public override ImmutableArray<string> FixableDiagnosticIds =>
         ImmutableArray.Create(DiagnosticIds.UncachedShaderOrAnimatorPropertyId);
 
-    public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
+    public override FixAllProvider GetFixAllProvider() => SequentialFixAllProvider.Instance;
 
     public override async Task RegisterCodeFixesAsync(CodeFixContext context)
     {
@@ -331,5 +331,191 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
         }
 
         return candidate;
+    }
+
+    private sealed class FixTarget
+    {
+        public FixTarget(SyntaxAnnotation tag, string kind, string propertyName, int spanStart)
+        {
+            Tag = tag;
+            Kind = kind;
+            PropertyName = propertyName;
+            SpanStart = spanStart;
+        }
+
+        public SyntaxAnnotation Tag { get; }
+        public string Kind { get; }
+        public string PropertyName { get; }
+        public int SpanStart { get; }
+    }
+
+    private sealed class SequentialFixAllProvider : FixAllProvider
+    {
+        public static readonly SequentialFixAllProvider Instance = new();
+
+        private static readonly ImmutableArray<FixAllScope> SupportedScopes =
+            ImmutableArray.Create(FixAllScope.Document, FixAllScope.Project, FixAllScope.Solution);
+
+        public override IEnumerable<FixAllScope> GetSupportedFixAllScopes() => SupportedScopes;
+
+        public override async Task<CodeAction?> GetFixAsync(FixAllContext fixAllContext)
+        {
+            var equiv = fixAllContext.CodeActionEquivalenceKey;
+            if (!string.IsNullOrEmpty(equiv) && equiv != nameof(ExtractPropertyToIdCodeFixProvider))
+            {
+                return null;
+            }
+
+            var diagnostics = await CollectDiagnosticsAsync(fixAllContext).ConfigureAwait(false);
+            if (diagnostics.Count == 0)
+            {
+                return null;
+            }
+
+            return CodeAction.Create(
+                title: "[UnityBrain] 모든 셰이더/애니메이터 문자열을 static readonly int 필드로 캐싱",
+                createChangedSolution: ct => ApplySequentialFixesAsync(fixAllContext.Solution, diagnostics, ct),
+                equivalenceKey: equiv);
+        }
+
+        private static async Task<List<Diagnostic>> CollectDiagnosticsAsync(FixAllContext fixAllContext)
+        {
+            var rawDiagnostics = new List<Diagnostic>();
+
+            switch (fixAllContext.Scope)
+            {
+                case FixAllScope.Document:
+                    if (fixAllContext.Document != null)
+                    {
+                        var docDiags = await fixAllContext.GetDocumentDiagnosticsAsync(fixAllContext.Document).ConfigureAwait(false);
+                        rawDiagnostics.AddRange(docDiags);
+                    }
+                    break;
+
+                case FixAllScope.Project:
+                    var projDiags = await fixAllContext.GetAllDiagnosticsAsync(fixAllContext.Project).ConfigureAwait(false);
+                    rawDiagnostics.AddRange(projDiags);
+                    break;
+
+                case FixAllScope.Solution:
+                    foreach (var project in fixAllContext.Solution.Projects)
+                    {
+                        var solProjDiags = await fixAllContext.GetAllDiagnosticsAsync(project).ConfigureAwait(false);
+                        rawDiagnostics.AddRange(solProjDiags);
+                    }
+                    break;
+            }
+
+            var filtered = new List<Diagnostic>(rawDiagnostics.Count);
+            foreach (var diag in rawDiagnostics)
+            {
+                if (diag.Location.IsInSource &&
+                    diag.Id == DiagnosticIds.UncachedShaderOrAnimatorPropertyId)
+                {
+                    filtered.Add(diag);
+                }
+            }
+
+            return filtered;
+        }
+
+        private static async Task<Solution> ApplySequentialFixesAsync(
+            Solution initialSolution,
+            List<Diagnostic> diagnostics,
+            CancellationToken ct)
+        {
+            var currentSolution = initialSolution;
+            var byDocId = new Dictionary<DocumentId, List<Diagnostic>>();
+
+            foreach (var diag in diagnostics)
+            {
+                var tree = diag.Location.SourceTree;
+                if (tree == null) continue;
+                var doc = initialSolution.GetDocument(tree);
+                if (doc == null) continue;
+
+                if (!byDocId.TryGetValue(doc.Id, out var list))
+                {
+                    list = new List<Diagnostic>();
+                    byDocId[doc.Id] = list;
+                }
+                list.Add(diag);
+            }
+
+            var orderedDocTargets = new List<(DocumentId DocId, List<FixTarget> Targets)>();
+
+            foreach (var kvp in byDocId)
+            {
+                var docId = kvp.Key;
+                var doc = currentSolution.GetDocument(docId);
+                if (doc == null) continue;
+
+                var root = await doc.GetSyntaxRootAsync(ct).ConfigureAwait(false);
+                if (root == null) continue;
+
+                var nodeToTag = new Dictionary<LiteralExpressionSyntax, SyntaxAnnotation>();
+                var docTargets = new List<FixTarget>();
+
+                foreach (var diag in kvp.Value)
+                {
+                    var node = root.FindNode(diag.Location.SourceSpan, getInnermostNodeForTie: true);
+                    if (node is not LiteralExpressionSyntax literal ||
+                        !literal.IsKind(SyntaxKind.StringLiteralExpression))
+                    {
+                        continue;
+                    }
+
+                    diag.Properties.TryGetValue(UncachedShaderOrAnimatorIdAnalyzer.PropertyKindKey, out var kind);
+                    kind ??= "Shader";
+                    var propertyName = literal.Token.ValueText;
+
+                    if (!nodeToTag.TryGetValue(literal, out var tag))
+                    {
+                        tag = new SyntaxAnnotation("UnityBrainFixAll", Guid.NewGuid().ToString("N"));
+                        nodeToTag[literal] = tag;
+                        docTargets.Add(new FixTarget(tag, kind, propertyName, diag.Location.SourceSpan.Start));
+                    }
+                }
+
+                if (nodeToTag.Count > 0)
+                {
+                    var annotatedRoot = root.ReplaceNodes(
+                        nodeToTag.Keys,
+                        (orig, _) => orig.WithAdditionalAnnotations(nodeToTag[orig]));
+                    currentSolution = currentSolution.WithDocumentSyntaxRoot(docId, annotatedRoot);
+                    docTargets.Sort((a, b) => a.SpanStart.CompareTo(b.SpanStart));
+                    orderedDocTargets.Add((docId, docTargets));
+                }
+            }
+
+            foreach (var (docId, targets) in orderedDocTargets)
+            {
+                foreach (var target in targets)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    var doc = currentSolution.GetDocument(docId);
+                    if (doc == null) continue;
+
+                    var root = await doc.GetSyntaxRootAsync(ct).ConfigureAwait(false);
+                    if (root == null) continue;
+
+                    var targetLiteral = root.GetAnnotatedNodes(target.Tag)
+                        .OfType<LiteralExpressionSyntax>()
+                        .FirstOrDefault();
+                    if (targetLiteral == null) continue;
+
+                    var updatedDoc = await ExtractToStaticFieldAsync(
+                        doc,
+                        targetLiteral,
+                        target.Kind,
+                        target.PropertyName,
+                        ct).ConfigureAwait(false);
+                    currentSolution = updatedDoc.Project.Solution;
+                }
+            }
+
+            return currentSolution;
+        }
     }
 }

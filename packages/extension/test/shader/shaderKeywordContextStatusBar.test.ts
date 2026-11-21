@@ -846,4 +846,75 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
     expect(jsRe.exec('float4 Color = 1;')).toBeNull();
     expect(jsRe.exec('c.Color')).toBeNull();
   });
+
+  it('treats #define MY_FEATURE 0 and #define inside #if 0 in included headers as inactive', async () => {
+    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
+    const baseOut = path.join(repoRoot, 'test-output');
+    fs.mkdirSync(baseOut, { recursive: true });
+    const projectRoot = fs.mkdtempSync(path.join(baseOut, 'ub-zero-define-'));
+    tempDirs.push(projectRoot);
+    fs.mkdirSync(path.join(projectRoot, 'Assets', 'Shaders'), { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, 'ProjectSettings'), { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, 'Packages'), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'ProjectSettings', 'ProjectVersion.txt'), 'm_EditorVersion: 6000.0.23f1\n', 'utf8');
+    fs.writeFileSync(path.join(projectRoot, 'Packages', 'manifest.json'), '{"dependencies":{}}', 'utf8');
+
+    const headerPath = path.join(projectRoot, 'Assets', 'Shaders', 'FeatureFlags.hlsl');
+    fs.writeFileSync(
+      headerPath,
+      [
+        '#define MY_FEATURE 0',
+        '#define ACTIVE_FEATURE 1',
+        '#if 0',
+        '#define DEAD_MACRO 1',
+        '#endif',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const targetPath = path.join(projectRoot, 'Assets', 'Shaders', 'CheckZeroDefines.hlsl');
+    const targetText = [
+      '#include "./FeatureFlags.hlsl"',
+      '#if MY_FEATURE',
+      'half4 DisabledByZero() { return 0; }',
+      '#endif',
+      '#ifdef DEAD_MACRO',
+      'half4 DisabledByIfZero() { return 0; }',
+      '#endif',
+      '#if ACTIVE_FEATURE',
+      'half4 EnabledFeature() { return 1; }',
+      '#endif',
+    ].join('\n');
+    fs.writeFileSync(targetPath, targetText, 'utf8');
+
+    const extensionPath = path.join(repoRoot, 'packages', 'extension');
+    const storageDir = path.join(projectRoot, '.storage');
+    const mockCtx: vscode.ExtensionContext = {
+      subscriptions: [],
+      extensionPath,
+      extensionUri: vscode.Uri.file(extensionPath),
+      globalStorageUri: vscode.Uri.file(storageDir),
+      storageUri: vscode.Uri.file(storageDir),
+      extensionMode: vscode.ExtensionMode.Test,
+      asAbsolutePath: (rel: string) => path.resolve(extensionPath, rel),
+    } as unknown as vscode.ExtensionContext;
+
+    const api = await activate(mockCtx, { workspaceRoot: projectRoot, enableWatchers: false });
+    const doc = vscode.__mock.createTextDocument(vscode.Uri.file(targetPath), targetText, 'hlsl');
+    let decoratedRanges: vscode.Range[] = [];
+    const mockEditor = {
+      document: doc,
+      selection: new vscode.Selection(0, 0, 0, 0),
+      setDecorations: (_type: vscode.TextEditorDecorationType, ranges: vscode.Range[]) => {
+        decoratedRanges = ranges;
+      },
+    } as unknown as vscode.TextEditor;
+
+    api.shaderKeywordStatusBar.applyInactiveDecorations(mockEditor);
+    // Line 2 (#if MY_FEATURE body) and line 5 (#ifdef DEAD_MACRO body) must be dimmed; line 8 (#if ACTIVE_FEATURE body) must stay active.
+    expect(decoratedRanges.map((r) => ({ start: r.start.line, end: r.end.line }))).toEqual([
+      { start: 2, end: 2 },
+      { start: 5, end: 5 },
+    ]);
+  });
 });

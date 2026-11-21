@@ -15,6 +15,7 @@ import {
   ShaderSignatureHelpProvider,
   SHADER_SEMANTIC_TOKEN_MODIFIERS,
   SHADER_SEMANTIC_TOKEN_TYPES,
+  stripCommentsAndStringsByLine,
 } from '../../src/shader/shaderEditorProviders.ts';
 import { formatShaderText, ShaderFormattingProvider } from '../../src/shader/shaderFormatter.ts';
 import { analyzeShaderPerformance, runShaderLiveTest } from '../../src/shader/shaderLiveTester.ts';
@@ -522,5 +523,185 @@ describe('Omni Shader Integrated Capabilities', () => {
     const includeUri = vscode.Uri.file(includePath);
     expect(renameEdit?.get(includeUri)?.map((e) => e.range.start.line)).toEqual([2]);
     expect(renameEdit?.get(shaderDoc.uri)?.map((e) => e.range.start.character)).toEqual([aTexCol]);
+  });
+
+  it('allows renaming .uv, .r, .x struct fields while still rejecting vector swizzles like v.xy', () => {
+    const ctx = createTempProject();
+    const graph = new IncludeDependencyGraph(ctx);
+    const renameProvider = new ShaderRenameProvider(graph);
+    const hlslPath = path.join(ctx.projectRoot, 'Assets', 'Shaders', 'SwizzleVsField.hlsl');
+    const content = [
+      'struct MyData',
+      '{',
+      '    float2 uv;',
+      '    float r;',
+      '    float x;',
+      '};',
+      'float4 UseData(MyData d, float4 v)',
+      '{',
+      '    float2 a = d.uv + v.xy;',
+      '    float b = d.r + d.x + v.x;',
+      '    return float4(a, b, 1.0);',
+      '}',
+    ].join('\n');
+    const doc = makeDoc(hlslPath, content, 'hlsl');
+
+    const uvLine = 8;
+    const uvCol = content.split('\n')[uvLine].indexOf('d.uv') + 2;
+    const vxyCol = content.split('\n')[uvLine].indexOf('v.xy') + 2;
+    const rxLine = 9;
+    const rCol = content.split('\n')[rxLine].indexOf('d.r') + 2;
+    const xCol = content.split('\n')[rxLine].indexOf('d.x') + 2;
+    const vxCol = content.split('\n')[rxLine].indexOf('v.x') + 2;
+
+    expect(renameProvider.prepareRename(doc, new vscode.Position(uvLine, uvCol))).toEqual(
+      new vscode.Range(uvLine, uvCol, uvLine, uvCol + 2),
+    );
+    const uvEdit = renameProvider.provideRenameEdits(doc, new vscode.Position(uvLine, uvCol), 'uv0');
+    expect(uvEdit?.get(doc.uri)?.map((e) => e.range.start.line)).toEqual([2, uvLine]);
+
+    expect(renameProvider.prepareRename(doc, new vscode.Position(rxLine, rCol))).toEqual(
+      new vscode.Range(rxLine, rCol, rxLine, rCol + 1),
+    );
+    const rEdit = renameProvider.provideRenameEdits(doc, new vscode.Position(rxLine, rCol), 'redChannel');
+    expect(rEdit?.get(doc.uri)?.map((e) => e.range.start.line)).toEqual([3, rxLine]);
+
+    expect(renameProvider.prepareRename(doc, new vscode.Position(rxLine, xCol))).toEqual(
+      new vscode.Range(rxLine, xCol, rxLine, xCol + 1),
+    );
+    const xEdit = renameProvider.provideRenameEdits(doc, new vscode.Position(rxLine, xCol), 'coordX');
+    expect(xEdit?.get(doc.uri)?.map((e) => ({ line: e.range.start.line, col: e.range.start.character }))).toEqual([
+      { line: 4, col: 10 },
+      { line: rxLine, col: xCol },
+    ]);
+
+    expect(() => renameProvider.prepareRename(doc, new vscode.Position(uvLine, vxyCol))).toThrow(/스위즐/);
+    expect(renameProvider.provideRenameEdits(doc, new vscode.Position(uvLine, vxyCol), 'ab')).toBeUndefined();
+    expect(() => renameProvider.prepareRename(doc, new vscode.Position(rxLine, vxCol))).toThrow(/스위즐/);
+    expect(renameProvider.provideRenameEdits(doc, new vscode.Position(rxLine, vxCol), 'y')).toBeUndefined();
+  });
+
+  it('preserves UTF-16 columns across non-BMP emoji comments in stripCommentsAndStringsByLine, Rename, and DocumentSymbolProvider', () => {
+    const line = '/* 🔥 */float targetVar = 1.0;';
+    const stripped = stripCommentsAndStringsByLine([line]);
+    expect(stripped[0].length).toBe(line.length);
+    expect(stripped[0].indexOf('float')).toBe(line.indexOf('float'));
+    expect(stripped[0].indexOf('targetVar')).toBe(line.indexOf('targetVar'));
+
+    const ctx = createTempProject();
+    const graph = new IncludeDependencyGraph(ctx);
+    const renameProvider = new ShaderRenameProvider(graph);
+    const symProvider = new ShaderDocumentSymbolProvider(graph);
+    const shaderPath = path.join(ctx.projectRoot, 'Assets', 'Shaders', 'EmojiOffsets.shader');
+    const shaderText = [
+      'Shader "Custom/EmojiOffsets"',
+      '{',
+      '    SubShader',
+      '    {',
+      '        /* 🔥 */ Pass',
+      '        {',
+      '            HLSLPROGRAM',
+      '            /* 🔥 */float targetVar(float x) { return x; }',
+      '            /* 🔥 */float callSite() { return targetVar(1.0); }',
+      '            ENDHLSL',
+      '        }',
+      '    }',
+      '}',
+    ].join('\n');
+    const doc = makeDoc(shaderPath, shaderText);
+    const lines = shaderText.split('\n');
+    const declLine = 7;
+    const declCol = lines[declLine].indexOf('targetVar');
+    const callLine = 8;
+    const callCol = lines[callLine].indexOf('targetVar');
+
+    const prep = renameProvider.prepareRename(doc, new vscode.Position(declLine, declCol + 2));
+    expect(prep).toEqual(new vscode.Range(declLine, declCol, declLine, declCol + 'targetVar'.length));
+
+    const edit = renameProvider.provideRenameEdits(doc, new vscode.Position(declLine, declCol + 2), 'renamedVar');
+    expect(edit?.get(doc.uri)?.map((e) => ({ line: e.range.start.line, col: e.range.start.character }))).toEqual([
+      { line: declLine, col: declCol },
+      { line: callLine, col: callCol },
+    ]);
+
+    const symbols = symProvider.provideDocumentSymbols(doc);
+    const subShader = symbols[0]?.children.find((c) => c.name.startsWith('SubShader'));
+    const passNode = subShader?.children.find((c) => c.name.startsWith('Pass'));
+    expect(passNode).toBeDefined();
+    const fnSym = passNode?.children.find((c) => c.name === 'targetVar');
+    expect(fnSym?.selectionRange.start.line).toBe(declLine);
+    expect(fnSym?.selectionRange.start.character).toBe(declCol);
+  });
+
+  it('includes sibling .shader files when finding References and Renaming symbols declared in an included .hlsl', () => {
+    const ctx = createTempProject();
+    const commonPath = path.join(ctx.projectRoot, 'Assets', 'Shaders', 'Common.hlsl');
+    const commonContent = [
+      'struct SharedData',
+      '{',
+      '    float2 sharedUv;',
+      '};',
+      'float SharedHelper(SharedData d)',
+      '{',
+      '    return d.sharedUv.x;',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(commonPath, commonContent, 'utf8');
+
+    const shaderAPath = path.join(ctx.projectRoot, 'Assets', 'Shaders', 'ShaderA.shader');
+    const shaderAContent = [
+      'Shader "Custom/ShaderA"',
+      '{',
+      '    SubShader { Pass { HLSLPROGRAM',
+      '    #include "Common.hlsl"',
+      '    float RunA(SharedData a) { return SharedHelper(a) + a.sharedUv.y; }',
+      '    ENDHLSL } }',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(shaderAPath, shaderAContent, 'utf8');
+
+    const shaderBPath = path.join(ctx.projectRoot, 'Assets', 'Shaders', 'ShaderB.shader');
+    const shaderBContent = [
+      'Shader "Custom/ShaderB"',
+      '{',
+      '    SubShader { Pass { HLSLPROGRAM',
+      '    #include "Common.hlsl"',
+      '    float RunB(SharedData b) { return SharedHelper(b) + b.sharedUv.x; }',
+      '    ENDHLSL } }',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(shaderBPath, shaderBContent, 'utf8');
+
+    const graph = new IncludeDependencyGraph(ctx);
+    const refProvider = new ShaderReferenceProvider(graph);
+    const renameProvider = new ShaderRenameProvider(graph);
+    const docA = makeDoc(shaderAPath, shaderAContent);
+
+    const fnColA = shaderAContent.split('\n')[4].indexOf('SharedHelper');
+    const fnRefs = refProvider.provideReferences(docA, new vscode.Position(4, fnColA + 2));
+    expect(fnRefs.map((r) => path.basename(r.uri.fsPath)).sort()).toEqual([
+      'Common.hlsl',
+      'ShaderA.shader',
+      'ShaderB.shader',
+    ]);
+
+    const fnRename = renameProvider.provideRenameEdits(docA, new vscode.Position(4, fnColA + 2), 'SharedHelperV2');
+    expect(fnRename?.get(vscode.Uri.file(commonPath))?.length).toBe(1);
+    expect(fnRename?.get(vscode.Uri.file(shaderAPath))?.length).toBe(1);
+    expect(fnRename?.get(vscode.Uri.file(shaderBPath))?.length).toBe(1);
+
+    const fieldColA = shaderAContent.split('\n')[4].indexOf('sharedUv');
+    const fieldRefs = refProvider.provideReferences(docA, new vscode.Position(4, fieldColA + 2));
+    expect(fieldRefs.map((r) => path.basename(r.uri.fsPath)).sort()).toEqual([
+      'Common.hlsl',
+      'Common.hlsl',
+      'ShaderA.shader',
+      'ShaderB.shader',
+    ]);
+
+    const fieldRename = renameProvider.provideRenameEdits(docA, new vscode.Position(4, fieldColA + 2), 'uvMain');
+    expect(fieldRename?.get(vscode.Uri.file(commonPath))?.length).toBe(2);
+    expect(fieldRename?.get(vscode.Uri.file(shaderAPath))?.length).toBe(1);
+    expect(fieldRename?.get(vscode.Uri.file(shaderBPath))?.length).toBe(1);
   });
 });

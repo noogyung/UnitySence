@@ -1,6 +1,6 @@
 # UnityBrain
 
-**JetBrains Rider 수준의 Unity 개발 지능형 지원 VS Code 확장** (`v1.1.3`)
+**JetBrains Rider 수준의 Unity 개발 지능형 지원 VS Code 확장** (`v1.1.6`)
 
 UnityBrain은 VS Code에서 Unity(Unity 2022 / Unity 6 포함) 프로젝트를 개발할 때 필요한 **ShaderLab/HLSL/Compute/Raytrace LSP & Shader Explorer**, **Roslyn 성능·정합성 분석기 & Quick-Fix**, **Unity YAML 에셋 인덱서 & CodeLens**, **`.meta` 생명주기 자동 동기화**, **`.asmdef` / UI Toolkit(`.uxml`, `.uss`) / Unity Editor 연동**을 제공합니다.
 

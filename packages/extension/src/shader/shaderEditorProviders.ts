@@ -15,7 +15,7 @@ import {
   blankShaderCommentsPreservingLayout,
   extractVirtualHlslDocument,
 } from '../../../shader-lsp/src/parser/shaderLabVirtualDoc.ts';
-import { normalizePathKey } from '../../../shader-lsp/src/vfs/virtualPathResolver.ts';
+import { isShaderFilePath, normalizePathKey } from '../../../shader-lsp/src/vfs/virtualPathResolver.ts';
 
 export const SHADER_SEMANTIC_TOKEN_TYPES = [
   'struct',
@@ -47,7 +47,8 @@ export const SHADER_KEYWORDS_SKIP = new Set([
   'Range', 'Float', 'Int', 'Integer', 'Color', 'Vector', 'Cube', 'Any', 'Off', 'On',
 ]);
 
-const SWIZZLE_RE = /^(?:[xyzw]{1,4}|[rgba]{1,4}|[uv]{1,2})$/;
+const SWIZZLE_RE = /^(?:[xyzw]{1,4}|[rgba]{1,4})$/;
+const SCALAR_OR_VECTOR_TYPE_RE = /^(?:float|half|real|min16float|fixed|int|uint|bool)[1234]?$/;
 
 const BUILTIN_HLSL_SIGNATURES: Record<string, Array<{ label: string; doc: string }>> = {
   lerp: [{ label: 'T lerp(T x, T y, T s)', doc: '[UnityBrain] x와 y 사이를 s 비율로 선형 보간합니다.' }],
@@ -134,7 +135,7 @@ export function stripCommentsAndStringsByLine(lines: readonly string[]): string[
   let inBlockComment = false;
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const rawLine = lines[lineIdx];
-    const chars = Array.from(rawLine);
+    const chars = rawLine.split('');
     let inString = false;
     for (let c = 0; c < chars.length; c++) {
       const ch = rawLine[c];
@@ -388,7 +389,7 @@ export class ShaderDocumentSymbolProvider {
       parentSubShaderIdx?: number;
     }> = [];
     {
-      const shaderLabChars = Array.from(text);
+      const shaderLabChars = text.split('');
       for (const blk of parsed.blocks ?? []) {
         for (let k = blk.codeStartOffset; k < blk.codeEndOffset && k < shaderLabChars.length; k++) {
           if (shaderLabChars[k] !== '\n' && shaderLabChars[k] !== '\r') {
@@ -918,10 +919,33 @@ function isTokenInCommentOrString(doc: vscode.TextDocument, wordRange: vscode.Ra
   return strippedSlice !== word;
 }
 
-function isVectorSwizzleToken(doc: vscode.TextDocument, wordRange: vscode.Range, word: string): boolean {
+function isVectorSwizzleToken(
+  doc: vscode.TextDocument,
+  wordRange: vscode.Range,
+  word: string,
+  shaderGraph?: IncludeDependencyGraph,
+): boolean {
   if (!SWIZZLE_RE.test(word)) return false;
   const lineText = doc.lineAt(wordRange.start.line).text;
-  return wordRange.start.character > 0 && lineText[wordRange.start.character - 1] === '.';
+  if (wordRange.start.character <= 0 || lineText[wordRange.start.character - 1] !== '.') {
+    return false;
+  }
+  if (!shaderGraph) return true;
+
+  const uriStr = doc.uri.toString();
+  shaderGraph.setOpenDocumentContent(uriStr, doc.getText());
+  const chainExpr = extractMemberChainExpression(lineText.slice(0, wordRange.end.character));
+  if (!chainExpr) return true;
+
+  const entryNorm = shaderGraph.normalizeFilePath(uriStr);
+  const resolved = shaderGraph.resolveExpressionChain(entryNorm, chainExpr, wordRange.start.line);
+  if (resolved.field !== null) {
+    return false;
+  }
+  if (!resolved.ownerType || resolved.type !== null) {
+    return true;
+  }
+  return SCALAR_OR_VECTOR_TYPE_RE.test(resolved.ownerType.trim());
 }
 
 function collectCrossFileOccurrences(
@@ -966,6 +990,21 @@ function collectCrossFileOccurrences(
     }
   }
 
+  const openBuffersByKey = new Map<string, string>();
+  for (const openDoc of vscode.workspace.textDocuments ?? []) {
+    const openUriStr = openDoc.uri.toString();
+    const openKey = normalizePathKey(openUriStr);
+    const openText = openDoc.getText();
+    openBuffersByKey.set(openKey, openText);
+    if (
+      openKey !== entryKey &&
+      openUriStr.startsWith('file://') &&
+      isShaderFilePath(openDoc.fileName || openUriStr)
+    ) {
+      shaderGraph.setOpenDocumentContent(openUriStr, openText);
+    }
+  }
+
   const walk = shaderGraph.collectReachableFiles(uriStr);
   const isShaderFile = /\.(shader|urtshader)$/i.test(entryNorm);
   const isShaderLabProp = parsed.properties.some((p) => p.name === word);
@@ -975,15 +1014,20 @@ function collectCrossFileOccurrences(
   const restrictToCurrentShaderFile =
     isShaderFile && !isShaderLabProp && !declaredInReachableHeader && !isFieldCursor;
 
-  const parents = restrictToCurrentShaderFile ? [] : shaderGraph.findParentIncludeFiles(uriStr);
+  const parents = restrictToCurrentShaderFile ? [] : [...shaderGraph.findParentIncludeFiles(uriStr)];
+  if (!restrictToCurrentShaderFile) {
+    for (const h of walk.files.slice(1)) {
+      const declaresWord = isFieldCursor
+        ? h.symbols.some((s) => s.kind === 'field' && s.name === word)
+        : h.symbols.some((s) => s.name === word);
+      if (declaresWord) {
+        parents.push(...shaderGraph.findParentIncludeFiles(h.uri));
+      }
+    }
+  }
   const candidates = restrictToCurrentShaderFile
     ? [parsed]
     : [...walk.files, ...parents];
-
-  const openBuffersByKey = new Map<string, string>();
-  for (const openDoc of vscode.workspace.textDocuments ?? []) {
-    openBuffersByKey.set(normalizePathKey(openDoc.uri.toString()), openDoc.getText());
-  }
 
   const symDeclInCurrent = parsed.symbols.find(
     (s) => s.name === word && s.kind !== 'property' && isLineVisibleInPass(parsed.blocks, s.line, cursorLine),
@@ -1095,7 +1139,7 @@ export class ShaderRenameProvider {
     if (isTokenInCommentOrString(doc, wordRange, word)) {
       throw new Error('[UnityBrain] 주석 또는 문자열 리터럴 내부에서는 이름을 변경할 수 없습니다.');
     }
-    if (isVectorSwizzleToken(doc, wordRange, word)) {
+    if (isVectorSwizzleToken(doc, wordRange, word, this.shaderGraph)) {
       throw new Error('[UnityBrain] 벡터 스위즐 컴포넌트(.xyz, .rgba)는 이름을 변경할 수 없습니다.');
     }
     return wordRange;
@@ -1120,7 +1164,7 @@ export class ShaderRenameProvider {
     if (!wordRange) return undefined;
     const word = doc.getText(wordRange);
     if (!word || SHADER_KEYWORDS_SKIP.has(word)) return undefined;
-    if (isTokenInCommentOrString(doc, wordRange, word) || isVectorSwizzleToken(doc, wordRange, word)) {
+    if (isTokenInCommentOrString(doc, wordRange, word) || isVectorSwizzleToken(doc, wordRange, word, this.shaderGraph)) {
       return undefined;
     }
 

@@ -352,9 +352,12 @@ export async function activate(
     getDefinedMacros: (uri) => {
       const macros = new Set<string>();
       const walk = shaderGraph.collectReachableFiles(uri.toString());
+      const zeroDefineRe = /^#define\s+[A-Za-z_][A-Za-z0-9_]*\s+\(?\s*0\s*\)?$/;
       for (const file of walk.files.slice(1)) {
         for (const sym of file.symbols) {
-          if (sym.kind === 'macro') macros.add(sym.name);
+          if (sym.kind !== 'macro') continue;
+          if (sym.signature && zeroDefineRe.test(sym.signature.trim())) continue;
+          macros.add(sym.name);
         }
       }
       return macros;

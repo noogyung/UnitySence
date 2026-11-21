@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import * as vscode from 'vscode';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  findEnclosingClassContext,
+  maskCSharpCommentsAndStrings,
   registerGenerateEventFunctionsCommand,
   UnityEventCompletionProvider,
 } from '../../src/completion/unityEventGenerator.ts';
@@ -360,5 +362,83 @@ public class FieldTyping : MonoBehaviour
 
     const items = provider.provideCompletionItems(doc, doc.positionAt(cursorOffset));
     expect(items).toBeUndefined();
+  });
+
+  it('masks C# 11 raw strings, @$ / $@ verbatim interpolated strings, and nested string/char holes in $"" cleanly', () => {
+    const sample = [
+      'public class MaskEdgeCases : MonoBehaviour',
+      '{',
+      '    private string raw1 = """',
+      '        "quoted" and { unbalanced }',
+      '        """;',
+      '    private string raw4 = """"contains """ triple"""";',
+      '    private string rawInterp1 = $"""hello {\'"\'} and {new { a = "}" }}""";',
+      '    private string rawInterp2 = $$"""literal {brace} and {{new { a = "}}" }}}""";',
+      '    private string verb1 = @$"path\\dir ""quoted"" {{escaped}} {\'"\'}";',
+      '    private string verb2 = $@"path\\dir ""quoted"" {{escaped}} {"}"}";',
+      '    private string interpChar = $"{' + "'\"'" + '}";',
+      '    private string interpEsc = $"{\\"a\\"}";',
+      '    private string interpBraces = $"{{literal {new { x = "}" }} }}";',
+      '    private void Start() {}',
+      '    /*CURSOR*/',
+      '}',
+    ].join('\n');
+
+    const masked = maskCSharpCommentsAndStrings(sample);
+    expect(masked.length).toBe(sample.length);
+    expect(masked.split('\n').length).toBe(sample.split('\n').length);
+    expect(masked).not.toContain('unbalanced');
+    expect(masked).not.toContain('triple');
+    expect(masked).not.toContain('literal');
+    expect(masked).toContain('private void Start() {}');
+
+    const cursorOffset = sample.indexOf('/*CURSOR*/');
+    const clean = sample.replace('/*CURSOR*/', '');
+    const ctx = findEnclosingClassContext(clean, cursorOffset);
+    expect(ctx).not.toBeNull();
+    expect(ctx?.className).toBe('MaskEdgeCases');
+    expect(ctx?.isAtMemberDeclarationLevel).toBe(true);
+    expect(ctx?.existingMethods.has('Start')).toBe(true);
+  });
+
+  it('triggers Unity event completions on space after bool, float, int, internal, virtual, and new modifiers', () => {
+    const provider = new UnityEventCompletionProvider({
+      getEditorVersion: () => '6000.0.23f1',
+    });
+    const triggerContext = {
+      triggerKind:
+        (vscode as unknown as { CompletionTriggerKind?: { TriggerCharacter: number } })
+          .CompletionTriggerKind?.TriggerCharacter ?? 1,
+      triggerCharacter: ' ',
+    } as vscode.CompletionContext;
+
+    for (const prefix of ['bool ', 'float ', 'int ', 'internal ', 'virtual ', 'new ', 'public virtual bool ']) {
+      const csCode = `using UnityEngine;\npublic class TriggerTest : MonoBehaviour\n{\n    ${prefix}/*CURSOR*/\n}`;
+      const cursorOffset = csCode.indexOf('/*CURSOR*/');
+      const doc = vscode.__mock.createTextDocument(
+        vscode.Uri.file('Assets/TriggerTest.cs'),
+        csCode.replace('/*CURSOR*/', ''),
+        'csharp',
+      );
+      const items = provider.provideCompletionItems(
+        doc,
+        doc.positionAt(cursorOffset),
+        undefined,
+        triggerContext,
+      );
+      expect(items, `Expected completions for space-trigger prefix '${prefix}'`).toBeDefined();
+      expect(items!.length).toBeGreaterThan(0);
+    }
+
+    const badCode = `using UnityEngine;\npublic class TriggerTest : MonoBehaviour\n{\n    private int x = /*CURSOR*/\n}`;
+    const badOffset = badCode.indexOf('/*CURSOR*/');
+    const badDoc = vscode.__mock.createTextDocument(
+      vscode.Uri.file('Assets/TriggerTestBad.cs'),
+      badCode.replace('/*CURSOR*/', ''),
+      'csharp',
+    );
+    expect(
+      provider.provideCompletionItems(badDoc, badDoc.positionAt(badOffset), undefined, triggerContext),
+    ).toBeUndefined();
   });
 });

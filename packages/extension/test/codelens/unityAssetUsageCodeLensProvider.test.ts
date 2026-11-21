@@ -436,6 +436,33 @@ describe('UnityAssetUsageCodeLensProvider', () => {
     ]);
   });
 
+  it('masks C# 11 raw strings, @$"..."/$@"..." verbatim interpolated strings, and $"{...}" holes without hiding subsequent members', () => {
+    const src = [
+      'public class ModernStringTrap : MonoBehaviour',
+      '{',
+      '    private string raw = """',
+      '        "unclosed quote and { fake } brace',
+      '        """;',
+      '    private string rawInterp = $$"""{{new { x = "}" }}}""";',
+      '    private string verb1 = @$"a ""b"" {new { c = "}" }}";',
+      '    private string verb2 = $@"c ""d"" {"}"}";',
+      '    private string interpChar = $"{' + "'\"'" + '}";',
+      '    private string interpStr = $"{\\"}\\"}";',
+      '    [SerializeField] private float visibleAfterStrings;',
+      '    public void VisibleMethod() {}',
+      '}',
+    ].join('\n');
+
+    const decls = parseCSharpDeclarations(src);
+    expect(decls.classes.map((c) => c.className)).toEqual(['ModernStringTrap']);
+    expect(decls.serializedFields).toEqual([
+      { fieldName: 'visibleAfterStrings', line: 10, className: 'ModernStringTrap' },
+    ]);
+    expect(decls.methods).toEqual([
+      { methodName: 'VisibleMethod', line: 11, className: 'ModernStringTrap' },
+    ]);
+  });
+
   it('uses 60000ms timeout for index/rebuild and 15000ms timeout for standard query RPCs', async () => {
     const root = createTempProject();
     const origSetTimeout = globalThis.setTimeout;

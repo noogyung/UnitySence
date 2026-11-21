@@ -218,4 +218,75 @@ describe('IncludeDependencyGraph & HlslSymbolTable', () => {
     expect(fnF?.line).toBe(2);
     expect(fnF?.column).toBe(6);
   });
+
+  it('ignores #define directives inside #if 0 blocks and records exact column for indented raw cbuffer', () => {
+    const hlsl = [
+      '#if 0',
+      '#define DEAD_MACRO 1',
+      '#else',
+      '#define LIVE_ELSE_MACRO 1',
+      '#endif',
+      '    cbuffer MyCB {',
+      '        float _Val;',
+      '    };',
+    ].join('\n');
+
+    const parsed = parseHlslSymbols(hlsl, 'CbufAndIfZero.hlsl', 'file:///CbufAndIfZero.hlsl');
+    const macroNames = parsed.symbols.filter((s) => s.kind === 'macro').map((s) => s.name);
+    expect(macroNames).not.toContain('DEAD_MACRO');
+    expect(macroNames).toContain('LIVE_ELSE_MACRO');
+
+    const cb = parsed.symbols.find((s) => s.kind === 'cbuffer' && s.name === 'MyCB');
+    expect(cb?.line).toBe(5);
+    expect(cb?.column).toBe(12);
+  });
+
+  it('resolves Pass 2 struct fields from #include Common.hlsl when Pass 1 defines a local struct with the same name', () => {
+    const projectRoot = createIsolatedGraphProject();
+    const commonPath = path.join(projectRoot, 'Assets', 'Shaders', 'CommonPassData.hlsl');
+    fs.writeFileSync(
+      commonPath,
+      ['struct Data', '{', '    float fromCommon;', '};'].join('\n'),
+      'utf8',
+    );
+
+    const multiPassPath = path.join(projectRoot, 'Assets', 'Shaders', 'MultiPassStruct.shader');
+    const shaderText = [
+      'Shader "Test/MultiPassStruct"',
+      '{',
+      '    SubShader',
+      '    {',
+      '        Pass',
+      '        {',
+      '            HLSLPROGRAM',
+      '            struct Data',
+      '            {',
+      '                float fromPass1;',
+      '            };',
+      '            float Use1(Data d1) { return d1.fromPass1; }',
+      '            ENDHLSL',
+      '        }',
+      '        Pass',
+      '        {',
+      '            HLSLPROGRAM',
+      '            #include "./CommonPassData.hlsl"',
+      '            float Use2(Data d2) { return d2.fromCommon; }',
+      '            ENDHLSL',
+      '        }',
+      '    }',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(multiPassPath, shaderText, 'utf8');
+
+    const graph = new IncludeDependencyGraph(createGraphContext(projectRoot));
+    const lines = shaderText.split('\n');
+    const pass1Line = lines.findIndex((l) => l.includes('d1.fromPass1'));
+    const pass2Line = lines.findIndex((l) => l.includes('d2.fromCommon'));
+
+    const pass1Fields = graph.findStructFields(multiPassPath, 'Data', pass1Line);
+    expect(pass1Fields.map((f) => f.name)).toEqual(['fromPass1']);
+
+    const pass2Fields = graph.findStructFields(multiPassPath, 'Data', pass2Line);
+    expect(pass2Fields.map((f) => f.name)).toEqual(['fromCommon']);
+  });
 });

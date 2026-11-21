@@ -120,7 +120,7 @@ function maskShaderLabTriviaAndBlocks(
   documentText: string,
   blocks: readonly { codeStartOffset: number; codeEndOffset: number }[],
 ): string {
-  const chars = Array.from(documentText);
+  const chars = documentText.split('');
   for (const blk of blocks) {
     for (let k = blk.codeStartOffset; k < blk.codeEndOffset && k < chars.length; k++) {
       if (chars[k] !== '\n' && chars[k] !== '\r') {
