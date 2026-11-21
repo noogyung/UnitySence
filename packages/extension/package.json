@@ -10,15 +10,21 @@
     "type": "git",
     "url": "https://github.com/unitybrain/unitybrain.git"
   },
+  "homepage": "https://github.com/unitybrain/unitybrain#readme",
+  "bugs": {
+    "url": "https://github.com/unitybrain/unitybrain/issues"
+  },
+  "qna": "marketplace",
+  "galleryBanner": {
+    "color": "#1e293b",
+    "theme": "dark"
+  },
   "keywords": [
     "unity",
-    "unity3d",
     "shaderlab",
     "hlsl",
     "csharp",
-    "roslyn",
-    "uitoolkit",
-    "gamedev"
+    "roslyn"
   ],
   "engines": {
     "vscode": "^1.90.0"
@@ -38,7 +44,9 @@
   "scripts": {
     "build": "node ../../tools/cli.mjs build:extension",
     "typecheck": "node ../../tools/cli.mjs typecheck",
-    "test": "node ../../tools/cli.mjs test extension"
+    "test": "node ../../tools/cli.mjs test extension",
+    "vscode:prepublish": "node ../../tools/cli.mjs build",
+    "package:vsce": "npx --yes @vscode/vsce package --no-dependencies"
   },
   "dependencies": {
     "vscode-jsonrpc": "^8.2.0",

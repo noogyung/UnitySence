@@ -1,8 +1,25 @@
 <Project>
   <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
 
-  <PropertyGroup>
+  <PropertyGroup Condition="'$(UseNet8Release)' == 'true'">
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(UseNet8Release)' != 'true'">
     <TargetFramework Condition="'$(TargetFramework)' == ''">net$(NETCoreAppMaximumVersion)</TargetFramework>
+    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
+    <NoStdLib>true</NoStdLib>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <RestoreSources></RestoreSources>
+    <NetCoreRefDir Condition="'$(NetCoreRefDir)' == ''">$([System.IO.Path]::Combine('$(NetCoreRoot)', 'packs', 'Microsoft.NETCore.App.Ref', '$(BundledNETCoreAppPackageVersion)', 'ref', 'net$(NETCoreAppMaximumVersion)'))</NetCoreRefDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
     <OutputType>Exe</OutputType>
     <StartupObject>UnityBrain.Daemon.DaemonEntry</StartupObject>
     <UseAppHost>false</UseAppHost>
@@ -10,18 +27,13 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <UseSharedCompilation>false</UseSharedCompilation>
-    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
-    <NoStdLib>true</NoStdLib>
-    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
-    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
-    <GenerateDependencyFile>false</GenerateDependencyFile>
     <Deterministic>true</Deterministic>
-    <RestoreSources></RestoreSources>
     <DefaultItemExcludes>$(DefaultItemExcludes);UnityBrain.Daemon.Tests/**</DefaultItemExcludes>
-    <NetCoreRefDir Condition="'$(NetCoreRefDir)' == ''">$([System.IO.Path]::Combine('$(NetCoreRoot)', 'packs', 'Microsoft.NETCore.App.Ref', '$(BundledNETCoreAppPackageVersion)', 'ref', 'net$(NETCoreAppMaximumVersion)'))</NetCoreRefDir>
   </PropertyGroup>
 
-  <ItemGroup>
+  <Target Name="Restore" Condition="'$(UseNet8Release)' != 'true'" />
+
+  <ItemGroup Condition="'$(UseNet8Release)' != 'true'">
     <Reference Include="$(NetCoreRefDir)/*.dll">
       <Private>false</Private>
     </Reference>
@@ -29,7 +41,7 @@
 
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 
-  <Target Name="WriteOfflineRuntimeConfig" AfterTargets="Build">
+  <Target Name="WriteOfflineRuntimeConfig" AfterTargets="Build" Condition="'$(UseNet8Release)' != 'true'">
     <PropertyGroup>
       <OfflineRuntimeConfig>{"runtimeOptions":{"tfm":"$(TargetFramework)","rollForward":"Major","framework":{"name":"Microsoft.NETCore.App","version":"$(NETCoreAppMaximumVersion).0"}}}</OfflineRuntimeConfig>
     </PropertyGroup>

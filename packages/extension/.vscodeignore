@@ -1,0 +1,8 @@
+.vscode/**
+src/**
+test/**
+tsconfig.json
+**/*.map
+node_modules/**
+!node_modules/vscode-jsonrpc/**
+!node_modules/vscode-languageserver/**

@@ -558,13 +558,19 @@ function compileTsDirectory(srcRoot, distRoot, preserveDirs = []) {
 function cmdBuildAnalyzers() {
   const csproj = path.join(ROOT, 'analyzers', 'UnityBrain.Analyzers', 'UnityBrain.Analyzers.csproj');
   const buildArgs = ['build', csproj, '-c', 'Release', '-nodeReuse:false', '-p:UseSharedCompilation=false'];
-  if (process.env.UseNuGetNetStandard !== 'true') {
+  if (process.env.UseNuGetNetStandard === 'true') {
+    buildArgs.push('-p:UseNuGetNetStandard=true');
+  } else {
     buildArgs.push('--no-restore');
   }
   const res = spawnSync('dotnet', buildArgs, { cwd: ROOT, stdio: 'inherit' });
   if (res.status !== 0) process.exit(res.status ?? 1);
 
   const releaseRoot = path.join(ROOT, 'analyzers', 'UnityBrain.Analyzers', 'bin', 'Release');
+  const preferred =
+    process.env.UseNuGetNetStandard === 'true'
+      ? path.join(releaseRoot, 'netstandard2.0', 'UnityBrain.Analyzers.dll')
+      : null;
   const tfmDirs = fs.existsSync(releaseRoot)
     ? fs
         .readdirSync(releaseRoot, { withFileTypes: true })
@@ -573,7 +579,7 @@ function cmdBuildAnalyzers() {
         .filter((p) => fs.existsSync(p))
     : [];
   tfmDirs.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-  const dll = tfmDirs[0];
+  const dll = preferred && fs.existsSync(preferred) ? preferred : tfmDirs[0];
   if (!dll) {
     console.error('Analyzer DLL not found after build in:', releaseRoot);
     process.exit(1);
@@ -587,14 +593,17 @@ function cmdBuildAnalyzers() {
 function cmdBuildDaemon() {
   const csproj = path.join(ROOT, 'packages', 'unity-daemon', 'UnityBrain.Daemon.csproj');
   const buildArgs = ['build', csproj, '-c', 'Release', '-nodeReuse:false', '-p:UseSharedCompilation=false'];
-  if (process.env.UseNuGetNetStandard !== 'true') {
+  if (process.env.UseNet8Release === 'true') {
+    buildArgs.push('-p:UseNet8Release=true');
+  } else if (process.env.UseNuGetNetStandard !== 'true') {
     buildArgs.push('--no-restore');
   }
   const res = spawnSync('dotnet', buildArgs, { cwd: ROOT, stdio: 'inherit' });
   if (res.status !== 0) process.exit(res.status ?? 1);
 
   const releaseRoot = path.join(ROOT, 'packages', 'unity-daemon', 'bin', 'Release');
-  const preferredTfms = ['net8.0', 'net10.0'];
+  const preferredTfms =
+    process.env.UseNet8Release === 'true' ? ['net8.0', 'net10.0'] : ['net10.0', 'net8.0'];
   const chosenTfm =
     preferredTfms.find((t) => fs.existsSync(path.join(releaseRoot, t, 'UnityBrain.Daemon.dll'))) ??
     fs.readdirSync(releaseRoot).find((t) => fs.existsSync(path.join(releaseRoot, t, 'UnityBrain.Daemon.dll')));
