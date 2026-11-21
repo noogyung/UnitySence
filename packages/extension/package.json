@@ -11,11 +11,11 @@
   "icon": "resources/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/noogyung/unitysence.git"
+    "url": "https://github.com/noogyung/UnitySense.git"
   },
-  "homepage": "https://github.com/noogyung/unitysence#readme",
+  "homepage": "https://github.com/noogyung/UnitySense#readme",
   "bugs": {
-    "url": "https://github.com/noogyung/unitysence/issues"
+    "url": "https://github.com/noogyung/UnitySense/issues"
   },
   "qna": "marketplace",
   "galleryBanner": {

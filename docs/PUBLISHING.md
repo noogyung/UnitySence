@@ -34,7 +34,7 @@ node tools/cli.mjs package:vsix
 팀원들은 VS Code에서 `Ctrl+Shift+P` → `Extensions: Install from VSIX...` 또는 `code --install-extension dist/unitysense-1.0.0.vsix`로 즉시 설치할 수 있습니다. (단, 팀원 PC에 `.NET 8.0` 이상의 .NET Runtime과 Microsoft `C#` / `Unity` 확장이 설치되어 있어야 합니다.)
 
 ### 2) GitHub Repository + Tag Release 자동화 (추천)
-1. [https://github.com/noogyung/unitysence](https://github.com/noogyung/unitysence) 저장소에 현재 코드를 Push합니다.
+1. [https://github.com/noogyung/UnitySense](https://github.com/noogyung/UnitySense) 저장소에 현재 코드를 Push합니다.
 2. 버전을 태그로 Push하면 GitHub Actions가 자동으로 범용 VSIX를 빌드해 **GitHub Releases**에 첨부합니다:
    ```powershell
    git tag v1.0.0
@@ -59,7 +59,7 @@ node tools/cli.mjs package:vsix
 ### 3단계: `packages/extension/package.json` 확인
 [packages/extension/package.json](../packages/extension/package.json)에 아래와 같이 설정되어 있습니다:
 * `"publisher"`: `"NoogKim"` (실제 Marketplace에서 등록한 Publisher ID와 정확히 일치해야 함)
-* `"repository"`, `"homepage"`, `"bugs"`: `https://github.com/noogyung/unitysence`
+* `"repository"`, `"homepage"`, `"bugs"`: `https://github.com/noogyung/UnitySense`
 *(참고: VS Code Marketplace는 `keywords` 최대 5개 제한이 있으며, 현재 5개로 정렬 완료되어 있습니다.)*
 
 ### 4단계: CI 자동 배포 또는 수동 배포
