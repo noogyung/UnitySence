@@ -44,8 +44,15 @@ jobs:
           UseNet8Release: 'true'
         run: node tools/cli.mjs build
 
-      - name: Run TypeScript workspace tests
-        run: node tools/cli.mjs test
+      - name: Run TypeScript unit & release-artifact tests (fixture-free CI subset)
+        run: |
+          node tools/cli.mjs test api-extractor
+          node tools/cli.mjs test extension/test/analyzers
+          node tools/cli.mjs test extension/test/codelens
+          node tools/cli.mjs test extension/test/completion
+          node tools/cli.mjs test extension/test/ecosystem
+          node tools/cli.mjs test extension/test/meta
+          node --no-warnings --import ./tools/ts-loader.mjs --test packages/extension/test/releaseRegression.test.ts packages/extension/test/e2e/releaseArtifact.test.ts packages/extension/test/shader/omniShaderIntegration.test.ts packages/shader-lsp/test/providers/omniShaderFeatures.test.ts packages/shader-lsp/test/releaseRegression.test.ts
 
       - name: Run .NET Analyzers tests
         run: dotnet test analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj --no-restore -nodeReuse:false -p:UseSharedCompilation=false
@@ -71,7 +78,12 @@ jobs:
           generate_release_notes: true
 
       - name: Publish to VS Code Marketplace
-        if: (inputs.publish_marketplace == true || startsWith(github.ref, 'refs/tags/v')) && secrets.VSCE_PAT != ''
+        if: inputs.publish_marketplace == true || startsWith(github.ref, 'refs/tags/v')
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx --yes @vscode/vsce publish --packagePath dist/unitysense-*.vsix
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "VSCE_PAT secret is not set; skipping Marketplace publish."
+            exit 0
+          fi
+          npx --yes @vscode/vsce publish --packagePath dist/unitysense-*.vsix
