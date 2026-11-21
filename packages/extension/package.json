@@ -2,17 +2,20 @@
   "name": "unitysense",
   "displayName": "UnitySense",
   "description": "JetBrains Rider 수준의 Unity 개발 지능형 지원 확장 (ShaderLab/HLSL LSP, Roslyn 분석기, YAML 에셋 인덱서, .meta 자동 동기화).",
-  "version": "1.1.6",
-  "publisher": "unitysense",
+  "version": "1.0.0",
+  "publisher": "NoogKim",
+  "author": {
+    "name": "NoogKim"
+  },
   "license": "MIT",
   "icon": "resources/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/unitysense/unitysense.git"
+    "url": "https://github.com/noogyung/unitysence.git"
   },
-  "homepage": "https://github.com/unitysense/unitysense#readme",
+  "homepage": "https://github.com/noogyung/unitysence#readme",
   "bugs": {
-    "url": "https://github.com/unitysense/unitysense/issues"
+    "url": "https://github.com/noogyung/unitysence/issues"
   },
   "qna": "marketplace",
   "galleryBanner": {

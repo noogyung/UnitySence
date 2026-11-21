@@ -31,36 +31,35 @@ node tools/cli.mjs test
 node tools/cli.mjs package:vsix
 ```
 
-팀원들은 VS Code에서 `Ctrl+Shift+P` → `Extensions: Install from VSIX...` 또는 `code --install-extension dist/unitysense-1.1.6.vsix`로 즉시 설치할 수 있습니다. (단, 팀원 PC에 `.NET 8.0` 이상의 .NET Runtime과 Microsoft `C#` / `Unity` 확장이 설치되어 있어야 합니다.)
+팀원들은 VS Code에서 `Ctrl+Shift+P` → `Extensions: Install from VSIX...` 또는 `code --install-extension dist/unitysense-1.0.0.vsix`로 즉시 설치할 수 있습니다. (단, 팀원 PC에 `.NET 8.0` 이상의 .NET Runtime과 Microsoft `C#` / `Unity` 확장이 설치되어 있어야 합니다.)
 
-### 2) 사내 GitHub Repository + Tag Release 자동화 (추천)
-1. 사내/개인 GitHub 저장소에 현재 코드를 Push합니다.
-2. `packages/extension/package.json`의 `"repository"`, `"homepage"`, `"bugs"` URL을 실제 저장소 주소로 변경합니다.
-3. 버전을 태그로 Push하면 GitHub Actions가 자동으로 범용 VSIX를 빌드해 **GitHub Releases**에 첨부합니다:
+### 2) GitHub Repository + Tag Release 자동화 (추천)
+1. [https://github.com/noogyung/unitysence](https://github.com/noogyung/unitysence) 저장소에 현재 코드를 Push합니다.
+2. 버전을 태그로 Push하면 GitHub Actions가 자동으로 범용 VSIX를 빌드해 **GitHub Releases**에 첨부합니다:
    ```powershell
-   git tag v1.1.6
-   git push origin v1.1.6
+   git tag v1.0.0
+   git push origin v1.0.0
    ```
 
 ---
 
 ## 방법 B — VS Code Marketplace 정식 출시
 
-공식 VS Code 마켓플레이스에 등록해 팀원들이 VS Code 확장 검색창(`UnitySense`)에서 바로 설치·자동 업데이트받게 하려면 다음 순서를 진행합니다.
+공식 VS Code 마켓플레이스에 등록해 VS Code 확장 검색창(`UnitySense`)에서 바로 설치·자동 업데이트받게 하려면 다음 순서를 진행합니다.
 
-### 1단계: Azure DevOps PAT (Personal Access Token) 발급
+### 1단계: Azure DevOps PAT (Personal Access Token) 발급 (CI 자동 배포 시에만 필요)
 1. https://dev.azure.com 로그인 후 우측 상단 프로필 메뉴 → **Personal Access Tokens** → **New Token** 클릭.
 2. **Organization**: 반드시 **All accessible organizations** 선택.
 3. **Scopes**: **Custom defined** → **Show all scopes** → **Marketplace > Manage** 체크 후 생성(토큰 값 복사).
 
 ### 2단계: VS Code Marketplace Publisher 생성
-1. https://marketplace.visualstudio.com/manage 접속.
-2. **Create publisher** 클릭 후 고유한 Publisher ID(예: `mycompany-unity` 또는 개인 ID) 등록.
+1. https://marketplace.visualstudio.com/manage 접속 (개인 Microsoft 계정만으로 무료 가능).
+2. **Create publisher** 클릭 후 `NoogKim` Publisher 등록 (웹 UI 직접 업로드 시 1단계 PAT 없이도 `+ New extension > Visual Studio Code`로 `.vsix` 업로드 가능).
 
-### 3단계: `packages/extension/package.json` 퍼블리셔·저장소 정보 교체
-[packages/extension/package.json](../packages/extension/package.json) 상단의 아래 항목을 실제 값으로 수정합니다:
-* `"publisher"`: 2단계에서 만든 Publisher ID로 변경 (현재 플레이스홀더 `"unitysense"`)
-* `"repository"`, `"homepage"`, `"bugs"`: 실제 Git 저장소 URL로 변경
+### 3단계: `packages/extension/package.json` 확인
+[packages/extension/package.json](../packages/extension/package.json)에 아래와 같이 설정되어 있습니다:
+* `"publisher"`: `"NoogKim"` (실제 Marketplace에서 등록한 Publisher ID와 정확히 일치해야 함)
+* `"repository"`, `"homepage"`, `"bugs"`: `https://github.com/noogyung/unitysence`
 *(참고: VS Code Marketplace는 `keywords` 최대 5개 제한이 있으며, 현재 5개로 정렬 완료되어 있습니다.)*
 
 ### 4단계: CI 자동 배포 또는 수동 배포
@@ -69,14 +68,14 @@ node tools/cli.mjs package:vsix
 1. GitHub 저장소 → **Settings > Secrets and variables > Actions** → **New repository secret**:
    * Name: `VSCE_PAT`
    * Value: 1단계에서 발급한 Azure DevOps PAT
-2. 태그 Push (`git tag v1.1.6 && git push origin v1.1.6`) 또는 GitHub Actions 탭에서 `Build & Publish UnitySense VSIX` 워크플로를 `publish_marketplace: true`로 수동 실행합니다.
+2. 태그 Push (`git tag v1.0.0 && git push origin v1.0.0`) 또는 GitHub Actions 탭에서 `Build & Publish UnitySense VSIX` 워크플로를 `publish_marketplace: true`로 수동 실행합니다.
 
 #### 수동 배포 (`vsce`)
 온라인 SDK 환경에서 빌드된 `.vsix` 파일로 직접 게시하려면:
 
 ```powershell
-npx @vscode/vsce login <YOUR_PUBLISHER_ID>
-npx @vscode/vsce publish --packagePath dist/unitysense-1.1.6.vsix
+npx @vscode/vsce login NoogKim
+npx @vscode/vsce publish --packagePath dist/unitysense-1.0.0.vsix
 ```
 
 > **참고**: 사내 코드를 공개 마켓에 올리지 않고 사내 전용으로만 쓰고 싶다면, Private GitHub Releases 배포(방법 A) 또는 사내 Private Extension Gallery(사내 공유 폴더 / VSIX URL) 방식을 권장합니다.
