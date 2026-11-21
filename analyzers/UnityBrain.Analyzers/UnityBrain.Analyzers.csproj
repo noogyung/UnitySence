@@ -13,6 +13,7 @@
     <NoStdLib>true</NoStdLib>
     <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
     <EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
+    <RestoreSources></RestoreSources>
     <RoslynToolsDir Condition="'$(RoslynToolsDir)' == ''">$([System.IO.Path]::Combine('$(MSBuildToolsPath)', 'DotnetTools', 'dotnet-format'))</RoslynToolsDir>
     <NetCoreRefDir Condition="'$(NetCoreRefDir)' == ''">$([System.IO.Path]::Combine('$(NetCoreRoot)', 'packs', 'Microsoft.NETCore.App.Ref', '$(BundledNETCoreAppPackageVersion)', 'ref', 'net$(NETCoreAppMaximumVersion)'))</NetCoreRefDir>
   </PropertyGroup>
@@ -27,8 +28,6 @@
     <UseSharedCompilation>false</UseSharedCompilation>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
-
-  <Target Name="Restore" Condition="'$(UseNuGetNetStandard)' != 'true'" />
 
   <ItemGroup Condition="'$(UseNuGetNetStandard)' == 'true'">
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.3.1" PrivateAssets="all" />

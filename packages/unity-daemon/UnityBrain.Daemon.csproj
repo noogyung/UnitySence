@@ -31,8 +31,6 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);UnityBrain.Daemon.Tests/**</DefaultItemExcludes>
   </PropertyGroup>
 
-  <Target Name="Restore" Condition="'$(UseNet8Release)' != 'true'" />
-
   <ItemGroup Condition="'$(UseNet8Release)' != 'true'">
     <Reference Include="$(NetCoreRefDir)/*.dll">
       <Private>false</Private>

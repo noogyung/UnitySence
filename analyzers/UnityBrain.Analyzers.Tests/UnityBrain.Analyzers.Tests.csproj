@@ -16,6 +16,7 @@
     <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <Deterministic>true</Deterministic>
+    <RestoreSources></RestoreSources>
     <RoslynToolsDir Condition="'$(RoslynToolsDir)' == ''">$([System.IO.Path]::Combine('$(MSBuildToolsPath)', 'DotnetTools', 'dotnet-format'))</RoslynToolsDir>
     <NetCoreRefDir Condition="'$(NetCoreRefDir)' == ''">$([System.IO.Path]::Combine('$(NetCoreRoot)', 'packs', 'Microsoft.NETCore.App.Ref', '$(BundledNETCoreAppPackageVersion)', 'ref', 'net$(NETCoreAppMaximumVersion)'))</NetCoreRefDir>
   </PropertyGroup>
@@ -73,8 +74,6 @@
   </ItemGroup>
 
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
-
-  <Target Name="Restore" />
 
   <Target Name="WriteOfflineRuntimeConfig" AfterTargets="Build">
     <PropertyGroup>

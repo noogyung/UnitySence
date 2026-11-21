@@ -55,10 +55,10 @@ jobs:
           node --no-warnings --import ./tools/ts-loader.mjs --test packages/extension/test/releaseRegression.test.ts packages/extension/test/e2e/releaseArtifact.test.ts packages/extension/test/shader/omniShaderIntegration.test.ts packages/shader-lsp/test/providers/omniShaderFeatures.test.ts packages/shader-lsp/test/releaseRegression.test.ts
 
       - name: Run .NET Analyzers tests
-        run: dotnet test analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj --no-restore -nodeReuse:false -p:UseSharedCompilation=false
+        run: dotnet test analyzers/UnityBrain.Analyzers.Tests/UnityBrain.Analyzers.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false
 
       - name: Run .NET Daemon tests
-        run: dotnet test packages/unity-daemon/UnityBrain.Daemon.Tests/UnityBrain.Daemon.Tests.csproj --no-restore -nodeReuse:false -p:UseSharedCompilation=false
+        run: dotnet test packages/unity-daemon/UnityBrain.Daemon.Tests/UnityBrain.Daemon.Tests.csproj -nodeReuse:false -p:UseSharedCompilation=false
 
       - name: Package VSIX
         run: node tools/cli.mjs package:vsix
