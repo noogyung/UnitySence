@@ -18,15 +18,22 @@ import { IncludeDependencyGraph } from './indexer/hlslIncludeGraph.ts';
 import { ShaderDefinitionProvider } from './providers/definitionProvider.ts';
 import { ShaderCompletionProvider } from './providers/completionProvider.ts';
 import { ShaderHoverProvider } from './providers/hoverProvider.ts';
+import { isShaderFilePath, normalizePathKey } from './vfs/virtualPathResolver.ts';
 
 function walkShaderFiles(dir: string, out: string[] = []): string[] {
   if (!fs.existsSync(dir)) return out;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
     if (entry.name.startsWith('.')) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       walkShaderFiles(full, out);
-    } else if (entry.isFile() && /\.(shader|hlsl|hlsli|cginc|compute|urtshader|hlslinc)$/i.test(entry.name)) {
+    } else if (entry.isFile() && isShaderFilePath(entry.name)) {
       out.push(full);
     }
   }
@@ -79,8 +86,9 @@ export function createShaderLanguageServer(
     if (!graph) return;
     graph.setOpenDocumentContent(doc.uri, doc.getText());
     const walk = graph.collectReachableFiles(doc.uri);
+    const docKey = normalizePathKey(doc.uri);
     const diagnostics: Diagnostic[] = walk.unresolvedIncludes
-      .filter((u) => u.fromUri === doc.uri || graph?.normalizeFilePath(doc.uri) === u.fromFile)
+      .filter((u) => u.fromUri === doc.uri || normalizePathKey(u.fromFile) === docKey)
       .map((u) => ({
         severity: DiagnosticSeverity.Error,
         range: {
@@ -112,7 +120,7 @@ export function createShaderLanguageServer(
         definitionProvider: true,
         completionProvider: {
           resolveProvider: false,
-          triggerCharacters: ['"', '/', '.'],
+          triggerCharacters: ['"', '/', '.', '#', '_', ' ', '['],
         },
         hoverProvider: true,
         documentSymbolProvider: true,

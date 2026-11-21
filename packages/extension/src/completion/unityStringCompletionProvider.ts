@@ -48,6 +48,7 @@ function analyzeCursorLexicalState(snippet: string): {
   inLineComment: boolean;
   inBlockComment: boolean;
   inString: boolean;
+  isVerbatimString: boolean;
   stringStart: number;
   codeWithoutComments: string;
 } {
@@ -55,6 +56,7 @@ function analyzeCursorLexicalState(snippet: string): {
   let inLineComment = false;
   let inBlockComment = false;
   let inString = false;
+  let isVerbatimString = false;
   let stringStart = -1;
   const codeChars: string[] = [];
 
@@ -82,6 +84,20 @@ function analyzeCursorLexicalState(snippet: string): {
     }
     if (inString) {
       codeChars.push(ch);
+      if (isVerbatimString) {
+        if (ch === '"' && next === '"') {
+          codeChars.push(next);
+          i += 2;
+          continue;
+        }
+        if (ch === '"') {
+          inString = false;
+          isVerbatimString = false;
+          stringStart = -1;
+        }
+        i++;
+        continue;
+      }
       if (ch === '\\') {
         if (i + 1 < snippet.length) codeChars.push(snippet[i + 1]);
         i += 2;
@@ -105,8 +121,34 @@ function analyzeCursorLexicalState(snippet: string): {
       i += 2;
       continue;
     }
+    // Skip C# char literals such as '"' or '\'' so quotes inside char literals don't open strings
+    if (ch === "'") {
+      codeChars.push(ch);
+      let j = i + 1;
+      if (j < snippet.length && snippet[j] === '\\') {
+        j += 2;
+      } else if (j < snippet.length) {
+        j += 1;
+      }
+      if (j < snippet.length && snippet[j] === "'") {
+        codeChars.push(snippet.slice(i + 1, j + 1));
+        i = j + 1;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (ch === '@' && next === '"') {
+      inString = true;
+      isVerbatimString = true;
+      stringStart = i;
+      codeChars.push('@', '"');
+      i += 2;
+      continue;
+    }
     if (ch === '"') {
       inString = true;
+      isVerbatimString = false;
       stringStart = i;
       codeChars.push(ch);
       i++;
@@ -120,6 +162,7 @@ function analyzeCursorLexicalState(snippet: string): {
     inLineComment,
     inBlockComment,
     inString,
+    isVerbatimString,
     stringStart,
     codeWithoutComments: codeChars.join(''),
   };
@@ -166,7 +209,7 @@ function matchUnityStringApiBeforeArg(
   if (/LayerMask\.NameToLayer\s*\(\s*$/.test(windowLines)) {
     return { kind: 'layer' };
   }
-  if (/LayerMask\.GetMask\s*\([^;()]*$/.test(windowLines)) {
+  if (/LayerMask\.GetMask\s*\(\s*(?:(?:[^;()"']|"(?:\\.|[^"\\])*")*,\s*)?$/.test(windowLines)) {
     return { kind: 'layer' };
   }
 
@@ -574,28 +617,40 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
     let hasClosingQuote = true;
     const fullLineText = document.lineAt(position.line).text;
     if (detected.insideQuotes) {
-      const curBeforeCursor = fullLineText.slice(0, position.character);
-      const lastQuoteCol = curBeforeCursor.lastIndexOf('"');
-      if (lastQuoteCol >= 0) {
-        let closingOffset = -1;
-        const afterCursor = fullLineText.slice(position.character);
-        for (let k = 0; k < afterCursor.length; k++) {
-          if (afterCursor[k] === '\\') {
+      const lastNewline = textBeforeCursor.lastIndexOf('\n');
+      const lineStartOffset = lastNewline >= 0 ? lastNewline + 1 : 0;
+      const isVerbatim = textBeforeCursor[detected.quoteStartIdx] === '@';
+      const openQuoteOffsetInSnippet = isVerbatim
+        ? detected.quoteStartIdx + 1
+        : detected.quoteStartIdx;
+      const openQuoteCol =
+        openQuoteOffsetInSnippet >= lineStartOffset
+          ? openQuoteOffsetInSnippet - lineStartOffset
+          : -1;
+      let closingOffset = -1;
+      const afterCursor = fullLineText.slice(position.character);
+      for (let k = 0; k < afterCursor.length; k++) {
+        if (isVerbatim) {
+          if (afterCursor[k] === '"' && afterCursor[k + 1] === '"') {
             k++;
             continue;
           }
-          if (afterCursor[k] === '"') {
-            closingOffset = k;
-            break;
-          }
+        } else if (afterCursor[k] === '\\') {
+          k++;
+          continue;
         }
-        hasClosingQuote = closingOffset >= 0;
-        const endCol = hasClosingQuote ? position.character + closingOffset : position.character;
-        replaceRange = new vscode.Range(
-          new vscode.Position(position.line, lastQuoteCol + 1),
-          new vscode.Position(position.line, endCol),
-        );
+        if (afterCursor[k] === '"') {
+          closingOffset = k;
+          break;
+        }
       }
+      hasClosingQuote = closingOffset >= 0;
+      const startCol = openQuoteCol >= 0 ? openQuoteCol + 1 : 0;
+      const endCol = hasClosingQuote ? position.character + closingOffset : position.character;
+      replaceRange = new vscode.Range(
+        new vscode.Position(position.line, startCol),
+        new vscode.Position(position.line, endCol),
+      );
     } else if (detected.partialIdent) {
       replaceRange = new vscode.Range(
         new vscode.Position(position.line, position.character - detected.partialIdent.length),
@@ -603,24 +658,35 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
       );
     }
 
+    const partialLower = detected.partialIdent.toLowerCase();
+    const firstMatchingIdx =
+      partialLower.length > 0
+        ? items.findIndex((candidate) => String(candidate.label).toLowerCase().includes(partialLower))
+        : 0;
+
     for (let idx = 0; idx < items.length; idx++) {
       const item = items[idx];
+      const labelStr = String(item.label);
+      const matchesPartial =
+        partialLower.length === 0 || labelStr.toLowerCase().includes(partialLower);
       if (!detected.insideQuotes) {
-        item.insertText = `"${item.label}"`;
-        item.filterText = detected.partialIdent
-          ? `${detected.partialIdent} "${item.label}" ${item.label}`
-          : `"${item.label}" ${item.label}`;
+        item.insertText = `"${labelStr}"`;
+        item.filterText =
+          detected.partialIdent && matchesPartial
+            ? `${detected.partialIdent} "${labelStr}" ${labelStr}`
+            : `"${labelStr}" ${labelStr}`;
       } else if (!hasClosingQuote) {
-        item.insertText = `${item.label}"`;
-        item.filterText = String(item.label);
+        item.insertText = `${labelStr}"`;
+        item.filterText = labelStr;
       }
       if (replaceRange) {
         item.range = replaceRange;
       }
       item.sortText = item.sortText
         ? `\u0000_${item.sortText}`
-        : `\u0000_${String(idx).padStart(3, '0')}_${item.label}`;
-      (item as vscode.CompletionItem & { preselect?: boolean }).preselect = idx === 0;
+        : `\u0000_${String(idx).padStart(3, '0')}_${labelStr}`;
+      (item as vscode.CompletionItem & { preselect?: boolean }).preselect =
+        idx === firstMatchingIdx;
     }
 
     return items;

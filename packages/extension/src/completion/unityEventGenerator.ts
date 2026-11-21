@@ -253,6 +253,39 @@ function extractMethodNamesAtTopLevel(classBody: string): Set<string> {
   return names;
 }
 
+const INHERITS_MONOBEHAVIOUR_EVENTS = new Set([
+  'Unity.Netcode.NetworkBehaviour',
+  'UnityEngine.EventSystems.UIBehaviour',
+]);
+
+const IMPLICIT_PARENT_FALLBACKS: Readonly<Record<string, string[]>> = {
+  NetworkBehaviour: ['UnityEngine.MonoBehaviour'],
+  'Unity.Netcode.NetworkBehaviour': ['UnityEngine.MonoBehaviour'],
+  UIBehaviour: ['UnityEngine.MonoBehaviour'],
+  'UnityEngine.EventSystems.UIBehaviour': ['UnityEngine.MonoBehaviour'],
+};
+
+function mergeMonoBehaviourEvents(
+  direct: UnityApiTypeEntry,
+  monoBehaviour: UnityApiTypeEntry | undefined,
+): UnityApiTypeEntry {
+  if (!monoBehaviour || !INHERITS_MONOBEHAVIOUR_EVENTS.has(direct.fullName)) {
+    return direct;
+  }
+  const seen = new Set(direct.events.map((e) => e.name));
+  const mergedEvents = [...direct.events];
+  for (const ev of monoBehaviour.events) {
+    if (!seen.has(ev.name)) {
+      seen.add(ev.name);
+      mergedEvents.push(ev);
+    }
+  }
+  return {
+    ...direct,
+    events: mergedEvents,
+  };
+}
+
 export function resolveUnityApiType(
   baseTypes: string[],
   db: UnityApiDatabase,
@@ -264,6 +297,7 @@ export function resolveUnityApiType(
     const shortName = shortenCSharpType(t.fullName);
     typeByShortOrFull.set(shortName, t);
   }
+  const monoEntry = typeByShortOrFull.get('UnityEngine.MonoBehaviour');
 
   const queue = [...baseTypes];
   const visited = new Set<string>();
@@ -274,11 +308,18 @@ export function resolveUnityApiType(
     visited.add(clean);
 
     const direct = typeByShortOrFull.get(clean);
-    if (direct) return direct;
+    if (direct) {
+      return mergeMonoBehaviourEvents(direct, monoEntry);
+    }
 
     const parents = inheritanceMap.get(clean) ?? inheritanceMap.get(shortenCSharpType(clean));
     if (parents) {
       for (const p of parents) queue.push(p);
+    }
+    const implicitParents =
+      IMPLICIT_PARENT_FALLBACKS[clean] ?? IMPLICIT_PARENT_FALLBACKS[shortenCSharpType(clean)];
+    if (implicitParents) {
+      for (const p of implicitParents) queue.push(p);
     }
   }
   return null;
@@ -397,9 +438,10 @@ export function extractClassInheritanceFromSource(
   sourceText: string,
   targetMap: Map<string, string[]>,
 ): void {
+  const masked = maskCSharpCommentsAndStrings(sourceText);
   const classRegex = /\bclass\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?\s*:\s*([^{]+)/g;
   let m: RegExpExecArray | null;
-  while ((m = classRegex.exec(sourceText)) !== null) {
+  while ((m = classRegex.exec(masked)) !== null) {
     const cls = m[1];
     const bases = m[2]
       .replace(/\bwhere\b[\s\S]*$/, '')
@@ -423,7 +465,6 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
   private readonly db: UnityApiDatabase;
   private readonly options: EventGeneratorOptions;
   private cachedProjectInheritance: Map<string, string[]> | null = null;
-  private lastScanMs = 0;
 
   constructor(options: EventGeneratorOptions = {}) {
     this.options = options;
@@ -441,8 +482,7 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
 
     const projectRoot = this.options.projectRoot;
     if (projectRoot) {
-      const now = Date.now();
-      if (!this.cachedProjectInheritance || now - this.lastScanMs > 5000) {
+      if (!this.cachedProjectInheritance) {
         const scanned = new Map<string, string[]>();
         const scanRoots = [path.join(projectRoot, 'Assets'), path.join(projectRoot, 'Packages')];
         for (const rootDir of scanRoots) {
@@ -472,7 +512,6 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
           }
         }
         this.cachedProjectInheritance = scanned;
-        this.lastScanMs = now;
       }
       for (const [k, v] of this.cachedProjectInheritance.entries()) {
         if (!combined.has(k)) combined.set(k, v);
@@ -487,7 +526,6 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
 
   public invalidateInheritanceCache(): void {
     this.cachedProjectInheritance = null;
-    this.lastScanMs = 0;
   }
 
   public findUnityEventInfo(
@@ -761,9 +799,10 @@ export function registerGenerateEventFunctionsCommand(
       > = [];
       for (const ev of missing.events) {
         const params = ev.parameters.map((p) => `${shortenCSharpType(p.type)} ${p.name}`).join(', ');
+        const retType = shortenCSharpType(ev.returnType);
         choices.push({
           label: ev.name,
-          description: `void ${ev.name}(${params})`,
+          description: `${retType} ${ev.name}(${params})`,
           detail: `[UnityBrain] ${ev.description}`,
           event: ev,
           asCoroutine: false,
@@ -779,7 +818,7 @@ export function registerGenerateEventFunctionsCommand(
             asAwaitable: false,
           });
         }
-        if (ev.supportsCoroutine || shortenCSharpType(ev.returnType) === 'void') {
+        if (ev.supportsCoroutine || retType === 'void') {
           choices.push({
             label: `${ev.name} (Awaitable)`,
             description: `async Awaitable ${ev.name}(${params})`,
@@ -802,6 +841,22 @@ export function registerGenerateEventFunctionsCommand(
       if (!Array.isArray(selected)) selected = [selected];
       if (selected.length === 0) return 0;
 
+      const closeBracePos = doc.positionAt(missing.classCtx.classCloseBraceOffset);
+      const docText = doc.getText();
+      const openLine = doc.positionAt(missing.classCtx.classOpenBraceOffset).line;
+      let classIndent = '';
+      const classKwPos = docText.lastIndexOf('class ', missing.classCtx.classOpenBraceOffset);
+      if (classKwPos >= 0) {
+        const classLineText = doc.lineAt(doc.positionAt(classKwPos).line).text;
+        const m = /^(\s*)/.exec(classLineText);
+        if (m) classIndent = m[1];
+      } else if (openLine < doc.lineCount) {
+        const m = /^(\s*)/.exec(doc.lineAt(openLine).text);
+        if (m) classIndent = m[1];
+      }
+      const indentUnit = classIndent.includes('\t') ? '\t' : '    ';
+      const memberIndent = `${classIndent}${indentUnit}`;
+
       const generatedText =
         '\n' +
         selected
@@ -810,13 +865,21 @@ export function registerGenerateEventFunctionsCommand(
               asCoroutine: s.asCoroutine,
               asAwaitable: s.asAwaitable,
               snippet: false,
+              indent: memberIndent,
               ownerFullName: missing.apiType.fullName,
             }),
           )
           .join('\n\n') +
         '\n';
 
-      const insertPos = doc.positionAt(missing.classCtx.classCloseBraceOffset);
+      const beforeCloseText =
+        closeBracePos.character > 0
+          ? doc.lineAt(closeBracePos.line).text.slice(0, closeBracePos.character).trim()
+          : '';
+      const insertPos =
+        closeBracePos.character === 0 || beforeCloseText.length === 0
+          ? new vscode.Position(closeBracePos.line, 0)
+          : closeBracePos;
       const edit = new vscode.WorkspaceEdit();
       edit.insert(doc.uri, insertPos, generatedText);
       await vscode.workspace.applyEdit(edit);

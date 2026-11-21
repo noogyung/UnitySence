@@ -101,13 +101,18 @@ export class MsbuildAnalyzerInjector {
     );
     const unityApiJson = path.join(this.extensionPath, 'resources', 'unity-api.json');
 
+    const escapedAnalyzer = this.escapeMsbuildAndXml(analyzerDll);
+    const escapedTagManager = this.escapeMsbuildAndXml(tagManagerAsset);
+    const escapedBuildSettings = this.escapeMsbuildAndXml(buildSettingsAsset);
+    const escapedUnityApi = this.escapeMsbuildAndXml(unityApiJson);
+
     return [
       `  ${BEGIN_MARKER}`,
       `  <ItemGroup>`,
-      `    <Analyzer Include="${this.escapeXml(analyzerDll)}" Condition="Exists('${this.escapeXml(analyzerDll)}')" />`,
-      `    <AdditionalFiles Include="${this.escapeXml(tagManagerAsset)}" Condition="Exists('${this.escapeXml(tagManagerAsset)}')" />`,
-      `    <AdditionalFiles Include="${this.escapeXml(buildSettingsAsset)}" Condition="Exists('${this.escapeXml(buildSettingsAsset)}')" />`,
-      `    <AdditionalFiles Include="${this.escapeXml(unityApiJson)}" Condition="Exists('${this.escapeXml(unityApiJson)}')" />`,
+      `    <Analyzer Include="${escapedAnalyzer}" Condition="Exists('${escapedAnalyzer}')" />`,
+      `    <AdditionalFiles Include="${escapedTagManager}" Condition="Exists('${escapedTagManager}')" />`,
+      `    <AdditionalFiles Include="${escapedBuildSettings}" Condition="Exists('${escapedBuildSettings}')" />`,
+      `    <AdditionalFiles Include="${escapedUnityApi}" Condition="Exists('${escapedUnityApi}')" />`,
       `  </ItemGroup>`,
       `  ${END_MARKER}`,
     ].join('\n');
@@ -188,8 +193,14 @@ export class MsbuildAnalyzerInjector {
     return `${existing.trimEnd()}\n<Project>\n${block}\n</Project>\n`;
   }
 
-  private escapeXml(value: string): string {
-    return value
+  private escapeMsbuildAndXml(value: string): string {
+    // MSBuild special characters MUST be percent-escaped BEFORE XML entities so `&amp;` semicolons stay intact.
+    const msbuildEscaped = value
+      .replace(/%/g, '%25')
+      .replace(/'/g, '%27')
+      .replace(/;/g, '%3B')
+      .replace(/\$/g, '%24');
+    return msbuildEscaped
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')

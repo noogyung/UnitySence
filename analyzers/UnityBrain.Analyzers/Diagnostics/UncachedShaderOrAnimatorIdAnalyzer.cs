@@ -43,6 +43,9 @@ public sealed class UncachedShaderOrAnimatorIdAnalyzer : DiagnosticAnalyzer
         "GetBool",
         "GetInteger",
         "IsParameterControlledByCurve",
+        "Play",
+        "CrossFade",
+        "CrossFadeInFixedTime",
     };
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
@@ -56,7 +59,8 @@ public sealed class UncachedShaderOrAnimatorIdAnalyzer : DiagnosticAnalyzer
         context.RegisterCompilationStartAction(startCtx =>
         {
             var roots = UnityCallGraphHelper.LoadPerformanceCriticalRootNames(
-                startCtx.Options.AdditionalFiles);
+                startCtx.Options.AdditionalFiles,
+                startCtx.CancellationToken);
 
             startCtx.RegisterSymbolAction(symbolCtx =>
             {
@@ -72,7 +76,8 @@ public sealed class UncachedShaderOrAnimatorIdAnalyzer : DiagnosticAnalyzer
                     criticalMap = UnityCallGraphHelper.BuildCriticalMethodMap(
                         typeSymbol,
                         symbolCtx.Compilation,
-                        roots);
+                        roots,
+                        symbolCtx.CancellationToken);
                 }
 
                 var candidates = new List<CandidateCall>();
@@ -86,9 +91,10 @@ public sealed class UncachedShaderOrAnimatorIdAnalyzer : DiagnosticAnalyzer
                     foreach (var syntaxRef in method.DeclaringSyntaxReferences)
                     {
                         var methodSyntax = syntaxRef.GetSyntax(symbolCtx.CancellationToken);
+                        if (methodSyntax is TypeDeclarationSyntax) continue;
                         var model = symbolCtx.Compilation.GetSemanticModel(methodSyntax.SyntaxTree);
 
-                        foreach (var inv in methodSyntax.DescendantNodes().OfType<InvocationExpressionSyntax>())
+                        foreach (var inv in UnityCallGraphHelper.EnumerateDirectBodyNodes(methodSyntax).OfType<InvocationExpressionSyntax>())
                         {
                             if (model.GetSymbolInfo(inv, symbolCtx.CancellationToken).Symbol is not IMethodSymbol called)
                             {
@@ -161,7 +167,7 @@ public sealed class UncachedShaderOrAnimatorIdAnalyzer : DiagnosticAnalyzer
 
         if (containingType == "UnityEngine.Animator")
         {
-            if (AnimatorPropertyMethods.Contains(methodName))
+            if (AnimatorPropertyMethods.Contains(methodName) && HasMatchingIntOverload(called))
             {
                 kind = "Animator";
                 hashMethod = "Animator.StringToHash";
@@ -179,9 +185,10 @@ public sealed class UncachedShaderOrAnimatorIdAnalyzer : DiagnosticAnalyzer
                 return false;
             }
 
-            if (methodName == "HasProperty" ||
-                methodName.StartsWith("Set", StringComparison.Ordinal) ||
-                methodName.StartsWith("Get", StringComparison.Ordinal))
+            if ((methodName.StartsWith("Has", StringComparison.Ordinal) ||
+                 methodName.StartsWith("Set", StringComparison.Ordinal) ||
+                 methodName.StartsWith("Get", StringComparison.Ordinal)) &&
+                HasMatchingIntOverload(called))
             {
                 kind = "Shader";
                 hashMethod = "Shader.PropertyToID";
@@ -190,6 +197,36 @@ public sealed class UncachedShaderOrAnimatorIdAnalyzer : DiagnosticAnalyzer
         }
 
         return false;
+    }
+
+    internal static bool HasMatchingIntOverload(IMethodSymbol called)
+    {
+        return FindMatchingIntOverload(called) != null;
+    }
+
+    internal static IMethodSymbol? FindMatchingIntOverload(IMethodSymbol called)
+    {
+        foreach (var candidate in called.ContainingType.GetMembers(called.Name).OfType<IMethodSymbol>())
+        {
+            if (candidate.IsStatic != called.IsStatic) continue;
+            if (candidate.Parameters.Length != called.Parameters.Length) continue;
+            if (candidate.Parameters[0].Type.SpecialType != SpecialType.System_Int32) continue;
+
+            bool restMatch = true;
+            for (int i = 1; i < candidate.Parameters.Length; i++)
+            {
+                if (!SymbolEqualityComparer.Default.Equals(candidate.Parameters[i].Type, called.Parameters[i].Type))
+                {
+                    restMatch = false;
+                    break;
+                }
+            }
+            if (restMatch)
+            {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     internal static LiteralExpressionSyntax? TryGetStringLiteralArgument(

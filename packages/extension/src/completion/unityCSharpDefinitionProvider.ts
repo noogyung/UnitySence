@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as vscode from 'vscode';
+import { normalizePathKey } from '../../../shader-lsp/src/vfs/virtualPathResolver.ts';
 import type { ProjectSettingsCache } from '../contracts/index.ts';
 import { isUnityEditorRunning, openAssetInUnityEditor } from '../editor/unityEditorIntegration.ts';
 import {
@@ -12,31 +13,32 @@ export interface UnityCSharpDefinitionOptions {
   projectRoot: string;
   getCache: () => ProjectSettingsCache;
   getUiToolkitElements?: () => readonly UiToolkitElementRef[];
+  openInUnityEditor?: (projectRoot: string, assetPath: string) => Promise<boolean>;
 }
 
 export type UnityStringNavigationResult =
   | { kind: 'unity'; targetPath: string; label: string }
   | { kind: 'location'; location: vscode.Location };
 
-let activeStringGuardDispose: (() => void) | undefined;
-
-function isDecompiledStringDocument(doc: vscode.TextDocument, projectRoot: string): boolean {
-  const fileName = doc.fileName || doc.uri.path || '';
-  const base = path.basename(fileName).toLowerCase();
-  const isStringCs =
-    base === 'string.cs' ||
-    base === 'system.string.cs' ||
-    base.endsWith(' string.cs') ||
-    /(?:^|[\]\s])(?:system\.)?string\.cs$/i.test(base);
-  if (!isStringCs) {
-    return false;
-  }
-  if (doc.uri.scheme !== 'file') {
-    return true;
-  }
-  const resolvedRoot = path.resolve(projectRoot).toLowerCase();
-  const resolvedFile = path.resolve(fileName).toLowerCase();
-  return !resolvedFile.startsWith(resolvedRoot + path.sep);
+function unescapeCSharpRegularString(raw: string): string {
+  return raw.replace(/\\(.)/g, (_, ch: string) => {
+    switch (ch) {
+      case '\\':
+        return '\\';
+      case '"':
+        return '"';
+      case 'n':
+        return '\n';
+      case 'r':
+        return '\r';
+      case 't':
+        return '\t';
+      case '0':
+        return '\0';
+      default:
+        return ch;
+    }
+  });
 }
 
 function escapeRegex(value: string): string {
@@ -82,6 +84,47 @@ function findStringLiteralAtPosition(
     if (ch === '/' && lineText[i + 1] === '/') {
       break;
     }
+    // Skip C# char literals such as '"' or '\'' cleanly
+    if (ch === "'") {
+      let j = i + 1;
+      if (j < lineText.length && lineText[j] === '\\') {
+        j += 2;
+      } else if (j < lineText.length) {
+        j += 1;
+      }
+      if (j < lineText.length && lineText[j] === "'") {
+        i = j + 1;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    // Verbatim C# string literal: @"..." (doubled quotes "" escape a quote)
+    if (ch === '@' && lineText[i + 1] === '"') {
+      const tokenStartCol = i;
+      const openQuoteCol = i + 1;
+      i += 2;
+      while (i < lineText.length) {
+        if (lineText[i] === '"') {
+          if (lineText[i + 1] === '"') {
+            i += 2;
+            continue;
+          }
+          const closeCol = i;
+          if (character >= openQuoteCol && character <= closeCol + 1) {
+            return {
+              value: lineText.slice(openQuoteCol + 1, closeCol).replace(/""/g, '"'),
+              openQuoteCol: tokenStartCol,
+              closeQuoteCol: closeCol,
+            };
+          }
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
     if (ch === '"') {
       const openCol = i;
       i++;
@@ -94,7 +137,7 @@ function findStringLiteralAtPosition(
           const closeCol = i;
           if (character >= openCol && character <= closeCol + 1) {
             return {
-              value: lineText.slice(openCol + 1, closeCol),
+              value: unescapeCSharpRegularString(lineText.slice(openCol + 1, closeCol)),
               openQuoteCol: openCol,
               closeQuoteCol: closeCol,
             };
@@ -137,20 +180,24 @@ function findMethodLocationInSource(
   return null;
 }
 
-export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider {
+export class UnityCSharpDefinitionProvider
+  implements vscode.DefinitionProvider, vscode.Disposable
+{
   private readonly options: UnityCSharpDefinitionOptions;
+  private disposed = false;
 
   constructor(options: UnityCSharpDefinitionOptions) {
     this.options = options;
   }
 
   public dispose(): void {
-    activeStringGuardDispose?.();
-    activeStringGuardDispose = undefined;
+    this.disposed = true;
   }
 
-  public async openUnityNavigationTarget(targetPath: string, label: string): Promise<void> {
-    const ok = await openAssetInUnityEditor(this.options.projectRoot, targetPath);
+  public async openUnityNavigationTarget(targetPath: string, label: string): Promise<boolean> {
+    if (this.disposed) return false;
+    const opener = this.options.openInUnityEditor ?? openAssetInUnityEditor;
+    const ok = await opener(this.options.projectRoot, targetPath);
     if (ok) {
       const lowerPath = targetPath.toLowerCase();
       const message = lowerPath.endsWith('.unity')
@@ -160,62 +207,15 @@ export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider 
           : `[UnityBrain] Unity Editor에서 에셋 '${label}'을(를) 열도록 요청했습니다.`;
       void vscode.window.showInformationMessage(message);
     }
-  }
-
-  private armDecompiledStringCloseGuard(): void {
-    activeStringGuardDispose?.();
-    activeStringGuardDispose = undefined;
-
-    if (typeof vscode.window.onDidChangeActiveTextEditor !== 'function') {
-      return;
-    }
-
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let subscription: vscode.Disposable | undefined;
-
-    const cleanup = () => {
-      if (timer !== undefined) {
-        clearTimeout(timer);
-        timer = undefined;
-      }
-      subscription?.dispose();
-      subscription = undefined;
-      if (activeStringGuardDispose === cleanup) {
-        activeStringGuardDispose = undefined;
-      }
-    };
-
-    activeStringGuardDispose = cleanup;
-    timer = setTimeout(cleanup, 1500);
-    if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
-      (timer as { unref?: () => void }).unref?.();
-    }
-    subscription = vscode.window.onDidChangeActiveTextEditor((editor) => {
-      if (!editor) {
-        return;
-      }
-      if (isDecompiledStringDocument(editor.document, this.options.projectRoot)) {
-        cleanup();
-        void vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-      }
-    });
+    return ok;
   }
 
   public provideDefinition(
     document: vscode.TextDocument,
     position: vscode.Position,
   ): vscode.Location | undefined {
-    const nav = this.resolveUnityStringNavigation(document, position);
-    if (!nav) {
-      return undefined;
-    }
-    // Ctrl+Click still runs Roslyn DefinitionProvider in parallel; suppress String.cs if Roslyn opens it.
-    this.armDecompiledStringCloseGuard();
-    if (nav.kind === 'unity') {
-      void this.openUnityNavigationTarget(nav.targetPath, nav.label);
-      return undefined;
-    }
-    return nav.location;
+    const nav = this.resolveUnityStringNavigationInternal(document, position, false);
+    return nav?.kind === 'location' ? nav.location : undefined;
   }
 
   private collectAssetAndPackageFiles(extLower: string): string[] {
@@ -296,6 +296,7 @@ export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider 
   private findAnimatorControllerLocation(
     target: string,
     includeStates = false,
+    preferUnityEditor = true,
   ): UnityStringNavigationResult | undefined {
     const cache = this.options.getCache();
     const paramRe = new RegExp(`m_Name:\\s*["']?${escapeRegex(target)}["']?\\s*$`, 'm');
@@ -307,7 +308,7 @@ export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider 
       const absController = path.resolve(this.options.projectRoot, ctrl.assetPath);
       if (!fs.existsSync(absController)) continue;
 
-      if (isUnityEditorRunning(this.options.projectRoot)) {
+      if (preferUnityEditor && isUnityEditorRunning(this.options.projectRoot)) {
         return {
           kind: 'unity',
           targetPath: absController,
@@ -353,6 +354,14 @@ export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider 
     document: vscode.TextDocument,
     position: vscode.Position,
   ): UnityStringNavigationResult | undefined {
+    return this.resolveUnityStringNavigationInternal(document, position, true);
+  }
+
+  private resolveUnityStringNavigationInternal(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    preferUnityEditor: boolean,
+  ): UnityStringNavigationResult | undefined {
     const lineText = document.lineAt(position.line).text;
     const lit = findStringLiteralAtPosition(lineText, position.character);
     if (!lit || !lit.value) {
@@ -375,12 +384,13 @@ export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider 
       const localHit = findMethodLocationInSource(document.getText(), document.uri, target);
       if (localHit) return { kind: 'location', location: localHit };
 
+      const currentDocKey = normalizePathKey(document.uri.fsPath);
       const csFiles = [
         ...walkFilesFiltered(path.join(this.options.projectRoot, 'Assets'), (_, n) => n.endsWith('.cs')),
         ...walkFilesFiltered(path.join(this.options.projectRoot, 'Packages'), (_, n) => n.endsWith('.cs')),
       ];
       for (const csFile of csFiles) {
-        if (path.resolve(csFile) === path.resolve(document.uri.fsPath)) continue;
+        if (normalizePathKey(csFile) === currentDocKey) continue;
         try {
           const text = fs.readFileSync(csFile, 'utf8');
           if (!text.includes(target)) continue;
@@ -436,7 +446,7 @@ export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider 
       }
 
       if (resolvedScenePath) {
-        if (isUnityEditorRunning(this.options.projectRoot)) {
+        if (preferUnityEditor && isUnityEditorRunning(this.options.projectRoot)) {
           return {
             kind: 'unity',
             targetPath: resolvedScenePath,
@@ -453,7 +463,7 @@ export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider 
 
     // 3. Shader.Find
     if (/Shader\.Find\s*\(\s*$/.test(windowLines)) {
-      const shaderFiles = this.collectAssetAndPackageFiles('.shader');
+      const shaderFiles = this.collectShaderFilesWithPackageCache();
       const escapedShader = escapeRegex(target);
       const shaderDeclRe = new RegExp(`^\\s*Shader\\s+"(${escapedShader})"`, 'm');
       for (const sf of shaderFiles) {
@@ -495,6 +505,7 @@ export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider 
           const withoutExt = ext ? afterRes.slice(0, -ext.length) : afterRes;
           if (withoutExt === normalizedRes || afterRes === normalizedRes) {
             if (
+              preferUnityEditor &&
               /\.(?:prefab|unity|controller|asset|mat|anim|overridecontroller)$/i.test(f) &&
               isUnityEditorRunning(this.options.projectRoot)
             ) {
@@ -552,11 +563,15 @@ export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider 
       /Animator\.StringToHash\s*\(\s*$/.test(windowLines) ||
       /\.(?:SetBool|GetBool|SetTrigger|ResetTrigger)\s*\(\s*$/.test(windowLines)
     ) {
-      return this.findAnimatorControllerLocation(target, /Animator\.StringToHash\s*\(\s*$/.test(windowLines));
+      return this.findAnimatorControllerLocation(
+        target,
+        /Animator\.StringToHash\s*\(\s*$/.test(windowLines),
+        preferUnityEditor,
+      );
     }
 
     if (/\.(?:Play|CrossFade|CrossFadeInFixedTime|IsName)\s*\(\s*$/.test(windowLines)) {
-      return this.findAnimatorControllerLocation(target, true);
+      return this.findAnimatorControllerLocation(target, true, preferUnityEditor);
     }
 
     const sharedNumericMethod =
@@ -574,13 +589,13 @@ export class UnityCSharpDefinitionProvider implements vscode.DefinitionProvider 
         /(?:^_?(?:anim|animator|Animator)[A-Za-z0-9_]*$|Animator\s*>\s*\(\s*\)$)/.test(receiver);
       if (looksLikeAnimator) {
         return (
-          this.findAnimatorControllerLocation(target, false) ??
+          this.findAnimatorControllerLocation(target, false, preferUnityEditor) ??
           this.findShaderPropertyLocation(target)
         );
       }
       return (
         this.findShaderPropertyLocation(target) ??
-        this.findAnimatorControllerLocation(target, false)
+        this.findAnimatorControllerLocation(target, false, preferUnityEditor)
       );
     }
 
@@ -606,7 +621,17 @@ export function registerCSharpGoToDefinitionCommand(
     }
 
     if (nav.kind === 'unity') {
-      await provider.openUnityNavigationTarget(nav.targetPath, nav.label);
+      const openedInUnity = await provider.openUnityNavigationTarget(nav.targetPath, nav.label);
+      if (openedInUnity) {
+        return;
+      }
+      const fallbackLoc =
+        provider.provideDefinition(editor.document, position) ??
+        new vscode.Location(vscode.Uri.file(nav.targetPath), new vscode.Position(0, 0));
+      const fallbackDoc = await vscode.workspace.openTextDocument(fallbackLoc.uri);
+      await vscode.window.showTextDocument(fallbackDoc, {
+        selection: fallbackLoc.range,
+      });
       return;
     }
 

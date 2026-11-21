@@ -149,10 +149,109 @@ export function resolveUnityEditorLogPath(
   return path.join(os.homedir(), '.config', 'unity3d', 'Editor.log');
 }
 
+export function stripJsoncCommentsAndTrailingCommas(raw: string): string {
+  const withoutComments: string[] = [];
+  let inString = false;
+  let i = 0;
+  const n = raw.length;
+
+  while (i < n) {
+    const ch = raw[i];
+    const next = raw[i + 1];
+
+    if (inString) {
+      withoutComments.push(ch);
+      if (ch === '\\' && i + 1 < n) {
+        withoutComments.push(raw[i + 1]);
+        i += 2;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      withoutComments.push(ch);
+      i++;
+      continue;
+    }
+
+    if (ch === '/' && next === '/') {
+      i += 2;
+      while (i < n && raw[i] !== '\n') {
+        i++;
+      }
+      continue;
+    }
+
+    if (ch === '/' && next === '*') {
+      i += 2;
+      while (i < n) {
+        if (raw[i] === '*' && raw[i + 1] === '/') {
+          i += 2;
+          break;
+        }
+        if (raw[i] === '\n') {
+          withoutComments.push('\n');
+        }
+        i++;
+      }
+      continue;
+    }
+
+    withoutComments.push(ch);
+    i++;
+  }
+
+  const noCommentsStr = withoutComments.join('');
+  const out: string[] = [];
+  inString = false;
+  for (let j = 0; j < noCommentsStr.length; j++) {
+    const ch = noCommentsStr[j];
+    if (inString) {
+      out.push(ch);
+      if (ch === '\\' && j + 1 < noCommentsStr.length) {
+        out.push(noCommentsStr[j + 1]);
+        j++;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      out.push(ch);
+      continue;
+    }
+
+    if (ch === ',') {
+      let look = j + 1;
+      while (look < noCommentsStr.length && /\s/.test(noCommentsStr[look])) {
+        look++;
+      }
+      if (noCommentsStr[look] === '}' || noCommentsStr[look] === ']') {
+        continue;
+      }
+    }
+
+    out.push(ch);
+  }
+
+  return out.join('');
+}
+
 export function generateUnityLaunchConfig(projectRoot: string): {
   filePath: string;
   created: boolean;
   editorInfo: EditorInstanceInfo | null;
+  aborted?: boolean;
 } {
   const vscodeDir = path.join(projectRoot, '.vscode');
   const launchPath = path.join(vscodeDir, 'launch.json');
@@ -165,9 +264,6 @@ export function generateUnityLaunchConfig(projectRoot: string): {
     type: 'vstuc',
     request: 'attach',
   };
-  if (editorInfo) {
-    unityConfig.processId = String(editorInfo.process_id);
-  }
 
   let parsed: { version?: string; configurations?: Array<Record<string, unknown>> } = {
     version: '0.2.0',
@@ -176,10 +272,8 @@ export function generateUnityLaunchConfig(projectRoot: string): {
   const existed = fs.existsSync(launchPath);
   if (existed) {
     try {
-      const stripped = fs
-        .readFileSync(launchPath, 'utf8')
-        .replace(/^\s*\/\/.*$/gm, '');
-      const raw = JSON.parse(stripped) as {
+      const cleaned = stripJsoncCommentsAndTrailingCommas(fs.readFileSync(launchPath, 'utf8'));
+      const raw = JSON.parse(cleaned) as {
         version?: string;
         configurations?: Array<Record<string, unknown>>;
       };
@@ -188,7 +282,10 @@ export function generateUnityLaunchConfig(projectRoot: string): {
         configurations: Array.isArray(raw.configurations) ? [...raw.configurations] : [],
       };
     } catch {
-      parsed = { version: '0.2.0', configurations: [] };
+      void vscode.window.showErrorMessage(
+        `[UnityBrain] 기존 '.vscode/launch.json' 파싱에 실패하여 사용자 설정 보호를 위해 덮어쓰지 않고 중단했습니다.`,
+      );
+      return { filePath: launchPath, created: false, editorInfo, aborted: true };
     }
   }
 
@@ -209,6 +306,9 @@ export function registerUnityEditorCommands(projectRoot: string): vscode.Disposa
   return [
     vscode.commands.registerCommand('unityBrain.generateDebugConfig', async () => {
       const res = generateUnityLaunchConfig(projectRoot);
+      if (res.aborted) {
+        return res;
+      }
       const status = res.editorInfo
         ? `실행 중인 Unity ${res.editorInfo.version} (PID ${res.editorInfo.process_id})`
         : '현재 실행 중인 EditorInstance.json 미감지 (실행 시 자동 연결)';

@@ -21,6 +21,30 @@ export const UNITY_BUILTIN_MACROS: readonly UnityMacroSpec[] = [
     pipeline: 'CoreRP',
   },
   {
+    name: 'TEXTURE2D_X_HALF',
+    signature: 'TEXTURE2D_X_HALF(textureName)',
+    description: 'Declares a half-precision XR/Stereo-aware Texture2D or Texture2DArray.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'TEXTURE2D_X_FLOAT',
+    signature: 'TEXTURE2D_X_FLOAT(textureName)',
+    description: 'Declares a full-precision float XR/Stereo-aware Texture2D or Texture2DArray.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'RW_TEXTURE2D',
+    signature: 'RW_TEXTURE2D(type, textureName)',
+    description: 'Declares a read-write UAV 2D texture resource in HLSL/CoreRP.',
+    pipeline: 'CoreRP',
+  },
+  {
+    name: 'RW_TEXTURE2D_X',
+    signature: 'RW_TEXTURE2D_X(type, textureName)',
+    description: 'Declares a single-pass XR/Stereo-aware read-write UAV 2D texture resource.',
+    pipeline: 'CoreRP',
+  },
+  {
     name: 'TEXTURE2D_ARRAY',
     signature: 'TEXTURE2D_ARRAY(textureName)',
     description: 'Declares a 2D texture array resource.',
@@ -270,11 +294,13 @@ export class UnityHlslMacroPrepass {
       let normalized = line;
 
       const texMatch =
-        /^(\s*)(TEXTURE2D(?:_X|_ARRAY|_SHADOW|_FLOAT|_HALF)?|TEXTURE3D|TEXTURECUBE(?:_ARRAY)?|UNITY_DECLARE_TEX2D(?:_NOSAMPLER|_ARRAY|ARRAY)?|UNITY_DECLARE_TEXCUBE|UNITY_DECLARE_SCREENSPACE_TEXTURE)\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;(.*)$/.exec(
+        /^(\s*)(TEXTURE2D(?:_X(?:_HALF|_FLOAT)?|_ARRAY|_SHADOW|_FLOAT|_HALF)?|TEXTURE3D|TEXTURECUBE(?:_ARRAY)?|RW_TEXTURE2D(?:_X)?|UNITY_DECLARE_TEX2D(?:_NOSAMPLER|_ARRAY|ARRAY)?|UNITY_DECLARE_TEXCUBE|UNITY_DECLARE_SCREENSPACE_TEXTURE)\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*([A-Za-z_][A-Za-z0-9_]*)\s*)?\)\s*;(.*)$/.exec(
           line,
         );
       if (texMatch) {
-        const [, indent, macroName, texName, trailing] = texMatch;
+        const [, indent, macroName, arg1, arg2, trailing] = texMatch;
+        const isRwTwoArg = macroName.startsWith('RW_TEXTURE2D') && Boolean(arg2);
+        const texName = isRwTwoArg ? arg2! : arg1;
         const typeMap: Record<string, string> = {
           TEXTURE3D: 'Texture3D',
           TEXTURECUBE: 'TextureCube',
@@ -283,6 +309,8 @@ export class UnityHlslMacroPrepass {
           TEXTURE2D_ARRAY: 'Texture2DArray',
           UNITY_DECLARE_TEX2DARRAY: 'Texture2DArray',
           UNITY_DECLARE_TEX2D_ARRAY: 'Texture2DArray',
+          RW_TEXTURE2D: isRwTwoArg ? `RWTexture2D<${arg1}>` : 'RWTexture2D',
+          RW_TEXTURE2D_X: isRwTwoArg ? `RWTexture2D<${arg1}>` : 'RWTexture2D',
         };
         const hlslType = typeMap[macroName] ?? 'Texture2D';
         const needsLegacySampler =
@@ -293,7 +321,7 @@ export class UnityHlslMacroPrepass {
           kind: 'variable',
           returnType: hlslType,
           signature: `${hlslType} ${texName}`,
-          documentation: `Expanded from ${macroName}(${texName})`,
+          documentation: `Expanded from ${macroName}(${isRwTwoArg ? `${arg1}, ${texName}` : texName})`,
           uri: fileUri,
           line: i,
           column: col >= 0 ? col : 0,

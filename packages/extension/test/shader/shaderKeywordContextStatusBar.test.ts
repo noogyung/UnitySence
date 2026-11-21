@@ -208,7 +208,15 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
     const symbols = symProvider.provideDocumentSymbols(doc);
     expect(symbols.length).toBe(1);
     expect(symbols[0].name).toBe('Shader "Test/OutlineAndSig"');
-    const varyingsSym = symbols[0].children.find((c) => c.name === 'Varyings');
+    const findSymbol = (nodes: vscode.DocumentSymbol[], targetName: string): vscode.DocumentSymbol | undefined => {
+      for (const n of nodes) {
+        if (n.name === targetName) return n;
+        const nested = findSymbol(n.children, targetName);
+        if (nested) return nested;
+      }
+      return undefined;
+    };
+    const varyingsSym = findSymbol(symbols[0].children, 'Varyings');
     expect(varyingsSym?.children.map((c) => c.name)).toContain('uv');
 
     const sigProvider = new ShaderSignatureHelpProvider(graph);

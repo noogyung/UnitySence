@@ -20,6 +20,7 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
   public static readonly providedCodeActionKinds = [
     vscode.CodeActionKind.QuickFix,
     vscode.CodeActionKind.Refactor,
+    vscode.CodeActionKind.Source,
   ];
 
   public provideCodeActions(
@@ -101,21 +102,31 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
       );
     }
 
-    const awakeLine = this.findMethodBodyStartLine(lines, classStartLine, 'Awake');
-    if (awakeLine !== null) {
-      edit.insert(
-        document.uri,
-        new vscode.Position(awakeLine + 1, 0),
-        `${indent}${indent}${fieldName} = ${callMethod}<${typeName}>();\n`,
-      );
+    const awakeBody = this.findMethodBodyStart(lines, classStartLine, 'Awake');
+    if (awakeBody !== null) {
+      if (awakeBody.sameLineCloseCol !== undefined) {
+        const lineStr = lines[awakeBody.openLine] ?? '';
+        const inner = lineStr.slice(awakeBody.openCol + 1, awakeBody.sameLineCloseCol).trim();
+        const methodIndent = /^(\s*)/.exec(lineStr)?.[1] ?? indent;
+        const innerLines = inner
+          ? `\n${methodIndent}${indent}${fieldName} = ${callMethod}<${typeName}>();\n${methodIndent}${indent}${inner}\n${methodIndent}`
+          : `\n${methodIndent}${indent}${fieldName} = ${callMethod}<${typeName}>();\n${methodIndent}`;
+        edit.replace(
+          document.uri,
+          new vscode.Range(awakeBody.openLine, awakeBody.openCol + 1, awakeBody.openLine, awakeBody.sameLineCloseCol),
+          innerLines,
+        );
+      } else {
+        edit.insert(
+          document.uri,
+          new vscode.Position(awakeBody.openLine + 1, 0),
+          `${indent}${indent}${fieldName} = ${callMethod}<${typeName}>();\n`,
+        );
+      }
     } else {
-      const insertPos =
-        fieldRegex.test(classBody)
-          ? new vscode.Position(classStartLine + 1, 0)
-          : new vscode.Position(classStartLine + 1, 0);
       edit.insert(
         document.uri,
-        insertPos,
+        new vscode.Position(classStartLine + 1, 0),
         `\n${indent}private void Awake()\n${indent}{\n${indent}${indent}${fieldName} = ${callMethod}<${typeName}>();\n${indent}}\n`,
       );
     }
@@ -143,6 +154,15 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
     lineText: string,
     classCtx: NonNullable<ReturnType<typeof findEnclosingClassContext>>,
   ): vscode.CodeAction | null {
+    const codeBeforeComment = lineText.replace(/\/\/.*$/, '');
+    if (
+      /\bstatic\s+readonly\b/.test(codeBeforeComment) ||
+      /\breadonly\s+static\b/.test(codeBeforeComment) ||
+      /\bconst\b/.test(codeBeforeComment)
+    ) {
+      return null;
+    }
+
     const directHash = /\b(Shader\.PropertyToID|Animator\.StringToHash)\s*\(\s*"([^"]+)"\s*\)/.exec(
       lineText,
     );
@@ -216,6 +236,42 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
     return action;
   }
 
+  private stripLeadingAttributes(trimmedLine: string): string {
+    let i = 0;
+    while (i < trimmedLine.length && trimmedLine[i] === '[') {
+      let depth = 0;
+      let inStr: string | null = null;
+      const start = i;
+      while (i < trimmedLine.length) {
+        const ch = trimmedLine[i];
+        if (inStr) {
+          if (ch === '\\') {
+            i += 2;
+            continue;
+          }
+          if (ch === inStr) inStr = null;
+        } else {
+          if (ch === '"' || ch === "'") inStr = ch;
+          else if (ch === '[') depth++;
+          else if (ch === ']') {
+            depth--;
+            if (depth === 0) {
+              i++;
+              break;
+            }
+          }
+        }
+        i++;
+      }
+      if (depth !== 0) {
+        i = start;
+        break;
+      }
+      while (i < trimmedLine.length && /\s/.test(trimmedLine[i])) i++;
+    }
+    return trimmedLine.slice(i).trim();
+  }
+
   private tryBuildFormerlySerializedAsAction(
     document: vscode.TextDocument,
     lines: string[],
@@ -223,26 +279,32 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
     lineText: string,
   ): vscode.CodeAction | null {
     const trimmed = lineText.trim();
-    if (!trimmed || trimmed.includes('(') || trimmed.includes('FormerlySerializedAs')) {
+    if (!trimmed || trimmed.includes('FormerlySerializedAs')) {
+      return null;
+    }
+
+    const withoutLeadingAttrs = this.stripLeadingAttributes(trimmed);
+    const declHead = withoutLeadingAttrs.split('=')[0];
+    if (!declHead || declHead.includes('(') || /\b(?:static|const|readonly)\b/.test(declHead)) {
       return null;
     }
 
     const fieldMatch =
-      /^(?:\[[^\]]+\]\s*)*(?:public|private|protected|internal|\s)+[A-Za-z0-9_<>\[\].,\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)/.exec(
-        trimmed,
+      /^(?:(?:public|private|protected|internal|new)\s+)*([A-Za-z_][A-Za-z0-9_<>\[\].,?]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)/.exec(
+        withoutLeadingAttrs,
       );
     if (!fieldMatch) return null;
 
     const prevLine = lines[lineIdx - 1] ?? '';
     const isSerialized =
-      (/\bpublic\b/.test(trimmed) && !/\b(?:static|const|readonly)\b/.test(trimmed)) ||
+      /\bpublic\b/.test(withoutLeadingAttrs) ||
       /SerializeField/.test(trimmed) ||
       /SerializeField/.test(prevLine);
     if (!isSerialized) return null;
     if (/FormerlySerializedAs/.test(prevLine)) return null;
 
     const indent = /^(\s*)/.exec(lineText)?.[1] ?? '    ';
-    const fieldName = fieldMatch[1];
+    const fieldName = fieldMatch[2];
     const hasUsing = lines.some((l) => /^\s*using\s+UnityEngine\.Serialization\s*;/.test(l));
     const attrName = hasUsing ? 'FormerlySerializedAs' : 'UnityEngine.Serialization.FormerlySerializedAs';
 
@@ -262,35 +324,83 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
   }
 
   private findEnclosingMethodName(lines: string[], lineIdx: number): string | null {
+    const controlFlowKeywords = new Set([
+      'if',
+      'else',
+      'for',
+      'foreach',
+      'while',
+      'do',
+      'switch',
+      'catch',
+      'finally',
+      'try',
+      'using',
+      'lock',
+      'fixed',
+      'checked',
+      'unchecked',
+      'unsafe',
+      'return',
+      'new',
+      'get',
+      'set',
+      'init',
+      'add',
+      'remove',
+    ]);
     let braceBalance = 0;
     for (let i = lineIdx; i >= 0; i--) {
-      const clean = lines[i].replace(/\/\/.*$/, '');
+      const clean = lines[i].replace(/"(?:\\.|[^"\\])*"/g, '""').replace(/\/\/.*$/, '');
       for (let k = clean.length - 1; k >= 0; k--) {
         if (clean[k] === '}') braceBalance++;
-        else if (clean[k] === '{') braceBalance--;
-      }
-      if (braceBalance < 0) {
-        const header = `${clean} ${lines[i - 1] ?? ''}`;
-        const m = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)/.exec(lines[i] ?? '');
-        const fallbackM = m ?? /\b([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)/.exec(lines[i - 1] ?? '');
-        void header;
-        if (fallbackM) return fallbackM[1];
-        return null;
+        else if (clean[k] === '{') {
+          braceBalance--;
+          if (braceBalance < 0) {
+            const beforeBrace = clean.slice(0, k).trim();
+            const headerCandidate = beforeBrace.length > 0 ? beforeBrace : (lines[i - 1] ?? '').trim();
+            if (/\b(?:class|struct|interface|enum|namespace)\b/.test(headerCandidate)) {
+              return null;
+            }
+            const methodSig =
+              /(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*(?:=>|$)/.exec(headerCandidate);
+            if (methodSig && !controlFlowKeywords.has(methodSig[1])) {
+              return methodSig[1];
+            }
+            // Control-flow block (if/for/foreach/while/switch/catch/using/lock/etc.): keep climbing to method
+            braceBalance++;
+          }
+        }
       }
     }
     return null;
   }
 
-  private findMethodBodyStartLine(
+  private findMethodBodyStart(
     lines: string[],
     startLine: number,
     methodName: string,
-  ): number | null {
+  ): { openLine: number; openCol: number; sameLineCloseCol?: number } | null {
     const re = new RegExp(`\\bvoid\\s+${methodName}\\s*\\(`);
     for (let i = startLine; i < lines.length; i++) {
-      if (re.test(lines[i])) {
-        for (let j = i; j < Math.min(i + 4, lines.length); j++) {
-          if (lines[j].includes('{')) return j;
+      if (!re.test(lines[i])) continue;
+      for (let j = i; j < Math.min(i + 4, lines.length); j++) {
+        const lineStr = lines[j];
+        const openCol = lineStr.indexOf('{');
+        if (openCol >= 0) {
+          let depth = 1;
+          let sameLineCloseCol: number | undefined;
+          for (let c = openCol + 1; c < lineStr.length; c++) {
+            if (lineStr[c] === '{') depth++;
+            else if (lineStr[c] === '}') {
+              depth--;
+              if (depth === 0) {
+                sameLineCloseCol = c;
+                break;
+              }
+            }
+          }
+          return { openLine: j, openCol, sameLineCloseCol };
         }
       }
     }

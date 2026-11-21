@@ -78,9 +78,13 @@ namespace UnityEngine
     public class Object { }
     public class Component : Object
     {
+        public GameObject gameObject => null!;
+        public Transform transform => null!;
         public T GetComponent<T>() => default!;
+        public T[] GetComponents<T>() => Array.Empty<T>();
         public bool TryGetComponent<T>(out T component) { component = default!; return false; }
     }
+    public class Transform : Component { }
     public class Behaviour : Component { }
     public class MonoBehaviour : Behaviour
     {
@@ -95,9 +99,11 @@ namespace UnityEngine
     public sealed class GameObject : Object
     {
         public string tag { get; set; } = string.Empty;
+        public Transform transform => null!;
         public bool CompareTag(string tag) => false;
         public static GameObject Find(string name) => null!;
         public static GameObject FindWithTag(string tag) => null!;
+        public static GameObject FindGameObjectWithTag(string tag) => null!;
         public static T FindObjectOfType<T>() where T : Object => default!;
         public static T FindAnyObjectByType<T>() where T : Object => default!;
         public T GetComponent<T>() => default!;
@@ -106,10 +112,15 @@ namespace UnityEngine
     public class Animator : Component
     {
         public void SetFloat(string name, float value) {}
+        public void SetFloat(int id, float value) {}
         public void SetBool(string name, bool value) {}
+        public void SetBool(int id, bool value) {}
         public void SetTrigger(string name) {}
         public void SetTrigger(int id) {}
+        public void ResetTrigger(string name) {}
+        public void ResetTrigger(int id) {}
         public void SetInteger(string name, int value) {}
+        public void SetInteger(int id, int value) {}
         public static int StringToHash(string name) => name.GetHashCode();
     }
     public class Material : Object
@@ -117,12 +128,15 @@ namespace UnityEngine
         public void SetFloat(string name, float value) {}
         public void SetFloat(int nameID, float value) {}
         public void SetColor(string name, int value) {}
+        public void SetColor(int nameID, int value) {}
         public bool HasProperty(string name) => false;
+        public bool HasProperty(int nameID) => false;
     }
     public static class Shader
     {
         public static int PropertyToID(string name) => name.GetHashCode();
         public static void SetGlobalFloat(string name, float value) {}
+        public static void SetGlobalFloat(int nameID, float value) {}
     }
     public static class Camera
     {
@@ -131,6 +145,7 @@ namespace UnityEngine
     public static class Resources
     {
         public static T Load<T>(string path) where T : Object => default!;
+        public static Object[] FindObjectsOfTypeAll(Type type) => Array.Empty<Object>();
     }
     public sealed class WaitForSeconds
     {
@@ -369,7 +384,12 @@ public static class Program
 {
     public static async Task<int> Main(string[] args)
     {
-        var filter = args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]) ? args[0] : null;
+        var rawFilter = args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]) ? args[0].Trim() : null;
+        string? filter = rawFilter;
+        if (filter != null && filter.StartsWith("FullyQualifiedName~", StringComparison.OrdinalIgnoreCase))
+        {
+            filter = filter.Substring("FullyQualifiedName~".Length).Trim();
+        }
         var asm = Assembly.GetExecutingAssembly();
         int passed = 0;
         int failed = 0;
@@ -384,7 +404,7 @@ public static class Program
             foreach (var method in methods)
             {
                 var fullName = $"{type.Name}.{method.Name}";
-                if (filter != null &&
+                if (!string.IsNullOrEmpty(filter) &&
                     !fullName.Contains(filter, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -411,6 +431,11 @@ public static class Program
         }
 
         Console.WriteLine($"Analyzer Test Summary: {passed} passed, {failed} failed.");
+        if (!string.IsNullOrEmpty(filter) && passed + failed == 0)
+        {
+            Console.Error.WriteLine($"No tests matched filter '{rawFilter}'.");
+            return 1;
+        }
         return failed > 0 ? 1 : 0;
     }
 }

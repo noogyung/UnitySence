@@ -1,9 +1,18 @@
-import { CompletionItemKind, type CompletionItem, type Position } from 'vscode-languageserver';
+import { CompletionItemKind, InsertTextFormat, type CompletionItem, type Position } from 'vscode-languageserver';
 import {
   extractMemberChainExpression,
   type IncludeDependencyGraph,
 } from '../indexer/hlslIncludeGraph.ts';
-import { UNITY_BUILTIN_MACROS } from '../parser/unityHlslMacroPrepass.ts';
+import {
+  detectShaderLabContext,
+  SHADERLAB_PROPERTY_ATTRIBUTES,
+  SHADERLAB_PROPERTY_TYPES,
+  SHADERLAB_RENDER_STATES,
+  SHADERLAB_STENCIL_ITEMS,
+  SHADERLAB_TAGS,
+  type ShaderLabDocEntry,
+} from '../parser/shaderLabContext.ts';
+import { UNITY_BUILTIN_MACROS, type UnityMacroSpec } from '../parser/unityHlslMacroPrepass.ts';
 
 const HLSL_PREPROCESSOR_DIRECTIVES = [
   {
@@ -67,11 +76,172 @@ const HLSL_SEMANTICS_AND_TYPES = [
   { label: 'WaveActiveSum', kind: CompletionItemKind.Function, detail: '[UnityBrain] T WaveActiveSum(T value) — SM 6.0 Wave 전체 합산' },
   { label: 'WaveReadLaneFirst', kind: CompletionItemKind.Function, detail: '[UnityBrain] T WaveReadLaneFirst(T value) — 첫 번째 활성 레인 값 브로드캐스트' },
   { label: 'asfloat', kind: CompletionItemKind.Function, detail: '[UnityBrain] float asfloat(uint/int x) — 비트 재해석 float 변환' },
+  { label: 'asint', kind: CompletionItemKind.Function, detail: '[UnityBrain] int asint(float/uint x) — 비트 재해석 부호 있는 int 변환' },
   { label: 'asuint', kind: CompletionItemKind.Function, detail: '[UnityBrain] uint asuint(float x) — 비트 재해석 uint 변환' },
   { label: 'f16tof32', kind: CompletionItemKind.Function, detail: '[UnityBrain] float f16tof32(uint value) — 16비트 half를 32비트 float로 언팩' },
   { label: 'f32tof16', kind: CompletionItemKind.Function, detail: '[UnityBrain] uint f32tof16(float value) — 32비트 float를 16비트 half 비트로 팩' },
   { label: 'NonUniformResourceIndex', kind: CompletionItemKind.Function, detail: '[UnityBrain] uint NonUniformResourceIndex(uint index) — Bindless 리소스 인덱싱' },
+  { label: 'lerp', kind: CompletionItemKind.Function, detail: '[UnityBrain] T lerp(T x, T y, T s) — 선형 보간 (x + s * (y - x))' },
+  { label: 'saturate', kind: CompletionItemKind.Function, detail: '[UnityBrain] T saturate(T x) — [0, 1] 범위로 클램프' },
+  { label: 'clamp', kind: CompletionItemKind.Function, detail: '[UnityBrain] T clamp(T x, T minVal, T maxVal) — [min, max] 범위 제한' },
+  { label: 'dot', kind: CompletionItemKind.Function, detail: '[UnityBrain] scalar dot(vec a, vec b) — 두 벡터의 내적' },
+  { label: 'cross', kind: CompletionItemKind.Function, detail: '[UnityBrain] float3 cross(float3 a, float3 b) — 두 3D 벡터의 외적' },
+  { label: 'mul', kind: CompletionItemKind.Function, detail: '[UnityBrain] mul(m, v) — 행렬-벡터 또는 행렬-행렬 곱셈' },
+  { label: 'normalize', kind: CompletionItemKind.Function, detail: '[UnityBrain] T normalize(T v) — 단위 벡터 정규화' },
+  { label: 'length', kind: CompletionItemKind.Function, detail: '[UnityBrain] float length(vec v) — 벡터 유클리드 길이' },
+  { label: 'distance', kind: CompletionItemKind.Function, detail: '[UnityBrain] float distance(vec a, vec b) — 두 점 사이 거리' },
+  { label: 'reflect', kind: CompletionItemKind.Function, detail: '[UnityBrain] T reflect(T i, T n) — 입사 벡터 반사' },
+  { label: 'refract', kind: CompletionItemKind.Function, detail: '[UnityBrain] T refract(T i, T n, float eta) — 스넬 법칙 굴절 벡터' },
+  { label: 'pow', kind: CompletionItemKind.Function, detail: '[UnityBrain] T pow(T base, T exp) — 거듭제곱 base^exp' },
+  { label: 'exp', kind: CompletionItemKind.Function, detail: '[UnityBrain] T exp(T x) — 자연지수 e^x' },
+  { label: 'exp2', kind: CompletionItemKind.Function, detail: '[UnityBrain] T exp2(T x) — 2^x' },
+  { label: 'log', kind: CompletionItemKind.Function, detail: '[UnityBrain] T log(T x) — 자연로그 ln(x)' },
+  { label: 'log2', kind: CompletionItemKind.Function, detail: '[UnityBrain] T log2(T x) — 밑이 2인 로그' },
+  { label: 'sin', kind: CompletionItemKind.Function, detail: '[UnityBrain] T sin(T x) — 라디안 각도의 사인값' },
+  { label: 'cos', kind: CompletionItemKind.Function, detail: '[UnityBrain] T cos(T x) — 라디안 각도의 코사인값' },
+  { label: 'tan', kind: CompletionItemKind.Function, detail: '[UnityBrain] T tan(T x) — 라디안 각도의 탄젠트값' },
+  { label: 'asin', kind: CompletionItemKind.Function, detail: '[UnityBrain] T asin(T x) — [-1, 1] 아크사인' },
+  { label: 'acos', kind: CompletionItemKind.Function, detail: '[UnityBrain] T acos(T x) — [-1, 1] 아크코사인' },
+  { label: 'atan', kind: CompletionItemKind.Function, detail: '[UnityBrain] T atan(T x) — 아크탄젠트' },
+  { label: 'atan2', kind: CompletionItemKind.Function, detail: '[UnityBrain] T atan2(T y, T x) — y/x의 아크탄젠트' },
+  { label: 'abs', kind: CompletionItemKind.Function, detail: '[UnityBrain] T abs(T x) — 절댓값' },
+  { label: 'sign', kind: CompletionItemKind.Function, detail: '[UnityBrain] T sign(T x) — 부호 (-1, 0, 1)' },
+  { label: 'floor', kind: CompletionItemKind.Function, detail: '[UnityBrain] T floor(T x) — 내림 정수' },
+  { label: 'ceil', kind: CompletionItemKind.Function, detail: '[UnityBrain] T ceil(T x) — 올림 정수' },
+  { label: 'round', kind: CompletionItemKind.Function, detail: '[UnityBrain] T round(T x) — 가장 가까운 정수로 반올림' },
+  { label: 'frac', kind: CompletionItemKind.Function, detail: '[UnityBrain] T frac(T x) — 소수부 반환 (x - floor(x))' },
+  { label: 'fmod', kind: CompletionItemKind.Function, detail: '[UnityBrain] T fmod(T x, T y) — 부동소수점 나머지' },
+  { label: 'step', kind: CompletionItemKind.Function, detail: '[UnityBrain] T step(T edge, T x) — x >= edge 이면 1, 아니면 0' },
+  { label: 'smoothstep', kind: CompletionItemKind.Function, detail: '[UnityBrain] T smoothstep(T minVal, T maxVal, T x) — 부드러운 에르미트 보간' },
+  { label: 'max', kind: CompletionItemKind.Function, detail: '[UnityBrain] T max(T a, T b) — 두 값 중 큰 값' },
+  { label: 'min', kind: CompletionItemKind.Function, detail: '[UnityBrain] T min(T a, T b) — 두 값 중 작은 값' },
+  { label: 'sqrt', kind: CompletionItemKind.Function, detail: '[UnityBrain] T sqrt(T x) — 제곱근' },
+  { label: 'rsqrt', kind: CompletionItemKind.Function, detail: '[UnityBrain] T rsqrt(T x) — 역제곱근 (1 / sqrt(x))' },
+  { label: 'ddx', kind: CompletionItemKind.Function, detail: '[UnityBrain] T ddx(T x) — 픽셀 셰이더 화면 X축 편미분' },
+  { label: 'ddy', kind: CompletionItemKind.Function, detail: '[UnityBrain] T ddy(T x) — 픽셀 셰이더 화면 Y축 편미분' },
+  { label: 'fwidth', kind: CompletionItemKind.Function, detail: '[UnityBrain] T fwidth(T x) — abs(ddx(x)) + abs(ddy(x))' },
+  { label: 'clip', kind: CompletionItemKind.Function, detail: '[UnityBrain] void clip(T x) — x < 0이면 현재 픽셀 폐기(discard)' },
+  { label: 'discard', kind: CompletionItemKind.Keyword, detail: '[UnityBrain] HLSL discard — 현재 프래그먼트 픽셀 폐기' },
+  { label: 'tex2D', kind: CompletionItemKind.Function, detail: '[UnityBrain] float4 tex2D(sampler2D s, float2 uv) — 레거시 2D 텍스처 샘플링' },
+  { label: 'tex2Dlod', kind: CompletionItemKind.Function, detail: '[UnityBrain] float4 tex2Dlod(sampler2D s, float4 uv_lod) — 명시적 MIP LOD 2D 샘플링' },
+  { label: 'texCUBE', kind: CompletionItemKind.Function, detail: '[UnityBrain] float4 texCUBE(samplerCUBE s, float3 dir) — 큐브맵 샘플링' },
+  { label: 'all', kind: CompletionItemKind.Function, detail: '[UnityBrain] bool all(T x) — 모든 성분이 0이 아니면 true' },
+  { label: 'any', kind: CompletionItemKind.Function, detail: '[UnityBrain] bool any(T x) — 하나 이상의 성분이 0이 아니면 true' },
+  { label: 'mad', kind: CompletionItemKind.Function, detail: '[UnityBrain] T mad(T a, T b, T c) — 곱셈-덧셈 융합 연산 (a * b + c)' },
+  { label: 'rcp', kind: CompletionItemKind.Function, detail: '[UnityBrain] T rcp(T x) — 역수 (1 / x)' },
 ];
+
+function stripRedundantClosingDelim(insertText: string | undefined, lineSuffix: string): string | undefined {
+  if (!insertText) return insertText;
+  if (lineSuffix.startsWith('"') && insertText.endsWith('"')) {
+    return insertText.slice(0, -1);
+  }
+  if (lineSuffix.startsWith(')') && insertText.endsWith(')')) {
+    return insertText.slice(0, -1);
+  }
+  return insertText;
+}
+
+function buildMacroSnippetInsertText(macro: UnityMacroSpec): string | undefined {
+  if (macro.name === 'CBUFFER_START') {
+    return 'CBUFFER_START(${1:UnityPerMaterial})\n\t$0\nCBUFFER_END';
+  }
+  if (macro.name === 'UNITY_INSTANCING_BUFFER_START') {
+    return 'UNITY_INSTANCING_BUFFER_START(${1:Props})\n\t$0\nUNITY_INSTANCING_BUFFER_END(${1:Props})';
+  }
+  if (macro.name === 'UNITY_DOTS_INSTANCING_START') {
+    return 'UNITY_DOTS_INSTANCING_START(${1:MaterialPropertyMetadata})\n\t$0\nUNITY_DOTS_INSTANCING_END(${1:MaterialPropertyMetadata})';
+  }
+  const paramMatch = /\(([^)]*)\)/.exec(macro.signature);
+  if (!paramMatch) return undefined;
+  const rawParams = paramMatch[1]
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (rawParams.length === 0) return `${macro.name}()`;
+  const placeholders = rawParams.map((p, idx) => `\${${idx + 1}:${p}}`).join(', ');
+  return `${macro.name}(${placeholders})`;
+}
+
+function toShaderLabCompletionItems(
+  entries: readonly ShaderLabDocEntry[],
+  prefix: string,
+  kind: CompletionItemKind,
+  lineSuffix = '',
+): CompletionItem[] {
+  return entries
+    .filter((e) => !prefix || e.label.toLowerCase().startsWith(prefix))
+    .map((e) => ({
+      label: e.label,
+      kind,
+      detail: e.detail,
+      documentation: e.documentation,
+      insertText: stripRedundantClosingDelim(e.insertText, lineSuffix),
+      insertTextFormat: e.isSnippet ? InsertTextFormat.Snippet : InsertTextFormat.PlainText,
+    }));
+}
+
+const SHADERLAB_VALUE_MAP: Record<string, readonly ShaderLabDocEntry[]> = {
+  Cull: [
+    { label: 'Back', detail: '[UnityBrain] Cull Mode', documentation: '뒷면 폴리곤을 컬링합니다 (기본값).' },
+    { label: 'Front', detail: '[UnityBrain] Cull Mode', documentation: '앞면 폴리곤을 컬링합니다.' },
+    { label: 'Off', detail: '[UnityBrain] Cull Mode', documentation: '양면을 모두 렌더링합니다.' },
+  ],
+  ZWrite: [
+    { label: 'On', detail: '[UnityBrain] ZWrite Mode', documentation: '깊이 버퍼에 기록합니다 (불투명 기본값).' },
+    { label: 'Off', detail: '[UnityBrain] ZWrite Mode', documentation: '깊이 버퍼에 기록하지 않습니다 (투명/이펙트).' },
+  ],
+  ZTest: [
+    { label: 'LEqual', detail: '[UnityBrain] ZTest Mode', documentation: '기존 깊이보다 작거나 같으면 통과합니다 (기본값).' },
+    { label: 'Less', detail: '[UnityBrain] ZTest Mode', documentation: '기존 깊이보다 작으면 통과합니다.' },
+    { label: 'Greater', detail: '[UnityBrain] ZTest Mode', documentation: '기존 깊이보다 크면 통과합니다.' },
+    { label: 'GEqual', detail: '[UnityBrain] ZTest Mode', documentation: '기존 깊이보다 크거나 같으면 통과합니다.' },
+    { label: 'Equal', detail: '[UnityBrain] ZTest Mode', documentation: '기존 깊이와 같으면 통과합니다.' },
+    { label: 'NotEqual', detail: '[UnityBrain] ZTest Mode', documentation: '기존 깊이와 다르면 통과합니다.' },
+    { label: 'Always', detail: '[UnityBrain] ZTest Mode', documentation: '깊이 테스트를 항상 통과합니다.' },
+    { label: 'Never', detail: '[UnityBrain] ZTest Mode', documentation: '깊이 테스트를 항상 실패합니다.' },
+  ],
+  Blend: [
+    { label: 'SrcAlpha OneMinusSrcAlpha', detail: '[UnityBrain] Alpha Blend', documentation: '표준 알파 블렌딩.' },
+    { label: 'One One', detail: '[UnityBrain] Additive Blend', documentation: '가산(Additive) 블렌딩.' },
+    { label: 'One OneMinusSrcAlpha', detail: '[UnityBrain] Premultiplied Blend', documentation: 'Premultiplied 알파 블렌딩.' },
+    { label: 'DstColor Zero', detail: '[UnityBrain] Multiplicative Blend', documentation: '곱셈(Multiply) 블렌딩.' },
+    { label: 'Off', detail: '[UnityBrain] Blend Off', documentation: '블렌딩을 비활성화합니다.' },
+  ],
+  BlendOp: [
+    { label: 'Add', detail: '[UnityBrain] BlendOp', documentation: 'Source + Destination' },
+    { label: 'Sub', detail: '[UnityBrain] BlendOp', documentation: 'Source - Destination' },
+    { label: 'RevSub', detail: '[UnityBrain] BlendOp', documentation: 'Destination - Source' },
+    { label: 'Min', detail: '[UnityBrain] BlendOp', documentation: 'min(Source, Destination)' },
+    { label: 'Max', detail: '[UnityBrain] BlendOp', documentation: 'max(Source, Destination)' },
+  ],
+  ColorMask: [
+    { label: 'RGBA', detail: '[UnityBrain] ColorMask', documentation: '모든 컬러 채널 기록 (기본값).' },
+    { label: 'RGB', detail: '[UnityBrain] ColorMask', documentation: '알파 제외 RGB 채널만 기록.' },
+    { label: 'A', detail: '[UnityBrain] ColorMask', documentation: '알파 채널만 기록.' },
+    { label: '0', detail: '[UnityBrain] ColorMask', documentation: '컬러 버퍼 기록 안 함 (ShadowCaster/DepthOnly).' },
+  ],
+  Comp: [
+    { label: 'Always', detail: '[UnityBrain] Stencil Comp', documentation: '항상 통과' },
+    { label: 'Equal', detail: '[UnityBrain] Stencil Comp', documentation: 'Ref == StencilBuffer' },
+    { label: 'NotEqual', detail: '[UnityBrain] Stencil Comp', documentation: 'Ref != StencilBuffer' },
+    { label: 'Less', detail: '[UnityBrain] Stencil Comp', documentation: 'Ref < StencilBuffer' },
+    { label: 'LEqual', detail: '[UnityBrain] Stencil Comp', documentation: 'Ref <= StencilBuffer' },
+    { label: 'Greater', detail: '[UnityBrain] Stencil Comp', documentation: 'Ref > StencilBuffer' },
+    { label: 'GEqual', detail: '[UnityBrain] Stencil Comp', documentation: 'Ref >= StencilBuffer' },
+    { label: 'Never', detail: '[UnityBrain] Stencil Comp', documentation: '항상 실패' },
+  ],
+  Pass: [
+    { label: 'Keep', detail: '[UnityBrain] Stencil Op', documentation: '현재 스텐실 값 유지' },
+    { label: 'Replace', detail: '[UnityBrain] Stencil Op', documentation: 'Ref 값으로 대체' },
+    { label: 'Zero', detail: '[UnityBrain] Stencil Op', documentation: '0으로 설정' },
+    { label: 'Invert', detail: '[UnityBrain] Stencil Op', documentation: '비트 반전' },
+    { label: 'IncrSat', detail: '[UnityBrain] Stencil Op', documentation: '1 증가 (포화)' },
+    { label: 'DecrSat', detail: '[UnityBrain] Stencil Op', documentation: '1 감소 (포화)' },
+  ],
+};
+SHADERLAB_VALUE_MAP.Fail = SHADERLAB_VALUE_MAP.Pass;
+SHADERLAB_VALUE_MAP.ZFail = SHADERLAB_VALUE_MAP.Pass;
 
 export class ShaderCompletionProvider {
   private readonly graph: IncludeDependencyGraph;
@@ -88,7 +258,9 @@ export class ShaderCompletionProvider {
     this.graph.setOpenDocumentContent(documentUri, documentText);
     const filePath = this.graph.normalizeFilePath(documentUri);
     const lines = documentText.split(/\r?\n/);
-    const linePrefix = (lines[position.line] ?? '').slice(0, position.character);
+    const currentLineText = lines[position.line] ?? '';
+    const linePrefix = currentLineText.slice(0, position.character);
+    const lineSuffix = currentLineText.slice(position.character);
 
     // Case 0: Preprocessor directive completion (`#`, `#in`, `#include_`, `#prag`, etc.)
     const directiveMatch = /^\s*#\s*([A-Za-z_]*)$/.exec(linePrefix);
@@ -101,8 +273,32 @@ export class ShaderCompletionProvider {
           filterText: d.name,
           kind: CompletionItemKind.Keyword,
           detail: d.detail,
-          insertText: d.insertText,
+          insertText: stripRedundantClosingDelim(d.insertText, lineSuffix),
         }));
+    }
+
+    // Case 0.5: #pragma vertex/fragment/hull/domain/geometry/kernel <functionName> completion
+    const pragmaEntryMatch = /^\s*#\s*pragma\s+(vertex|fragment|hull|domain|geometry|kernel)\s+([A-Za-z0-9_]*)$/.exec(
+      linePrefix,
+    );
+    if (pragmaEntryMatch) {
+      const fnPrefix = pragmaEntryMatch[2].toLowerCase();
+      const visible = this.graph.findAllVisibleSymbols(filePath, position.line);
+      const seenFns = new Set<string>();
+      const fnItems: CompletionItem[] = [];
+      for (const sym of visible) {
+        if (sym.kind !== 'function') continue;
+        if (seenFns.has(sym.name)) continue;
+        if (fnPrefix && !sym.name.toLowerCase().startsWith(fnPrefix)) continue;
+        seenFns.add(sym.name);
+        fnItems.push({
+          label: sym.name,
+          kind: CompletionItemKind.Function,
+          detail: `[UnityBrain] #pragma ${pragmaEntryMatch[1]} 후보 · ${sym.signature ?? sym.name}`,
+          documentation: sym.documentation ?? `[UnityBrain] ${pragmaEntryMatch[1]} 엔트리 함수입니다.`,
+        });
+      }
+      return fnItems;
     }
 
     // Case 1: #include "..." or #include_with_pragmas "..." path completion
@@ -146,7 +342,7 @@ export class ShaderCompletionProvider {
               }));
           }
 
-          const vecMatch = /^(float|half|real|min16float|int|uint)([234])$/.exec(cleanType);
+          const vecMatch = /^(float|half|real|min16float|fixed|int|uint|bool)([234])$/.exec(cleanType);
           if (vecMatch) {
             const scalarType = vecMatch[1];
             const compCount = Number(vecMatch[2]);
@@ -167,6 +363,99 @@ export class ShaderCompletionProvider {
         }
       }
       return [];
+    }
+
+    // Case 2.5: ShaderLab DSL context outside HLSLPROGRAM/CGPROGRAM blocks
+    const shaderLabCtx = detectShaderLabContext(documentText, position.line, position.character, filePath);
+    if (shaderLabCtx !== 'hlsl') {
+      const stateValMatch = /^\s*(Cull|ZWrite|ZTest|Blend|BlendOp|ColorMask|Comp|Pass|Fail|ZFail)\s+([A-Za-z0-9_]*)$/.exec(
+        linePrefix,
+      );
+      if (stateValMatch) {
+        const candidates = SHADERLAB_VALUE_MAP[stateValMatch[1]] ?? [];
+        const valPrefix = stateValMatch[2].toLowerCase();
+        return toShaderLabCompletionItems(candidates, valPrefix, CompletionItemKind.EnumMember, lineSuffix);
+      }
+
+      const slIdentMatch = /([A-Za-z_][A-Za-z0-9_]*)?$/.exec(linePrefix);
+      const slPrefix = (slIdentMatch?.[1] ?? '').toLowerCase();
+      if (shaderLabCtx === 'propertyAttribute') {
+        return toShaderLabCompletionItems(SHADERLAB_PROPERTY_ATTRIBUTES, slPrefix, CompletionItemKind.Property, lineSuffix);
+      }
+      if (shaderLabCtx === 'properties') {
+        const propTypePrefix = (/([A-Za-z0-9_]*)$/.exec(linePrefix)?.[1] ?? '').toLowerCase();
+        const missingDisplayName = /\(\s*[A-Za-z0-9_]*$/.test(linePrefix);
+        const typeEntries = missingDisplayName
+          ? SHADERLAB_PROPERTY_TYPES.map((t) => ({
+              ...t,
+              insertText: `"\${1:Display Name}", ${t.insertText ?? t.label}`,
+              isSnippet: true,
+            }))
+          : SHADERLAB_PROPERTY_TYPES;
+        const attrItems = toShaderLabCompletionItems(SHADERLAB_PROPERTY_ATTRIBUTES, slPrefix, CompletionItemKind.Property, lineSuffix);
+        const typeItems = toShaderLabCompletionItems(typeEntries, propTypePrefix, CompletionItemKind.TypeParameter, lineSuffix);
+        return [...typeItems, ...attrItems];
+      }
+      if (shaderLabCtx === 'tags') {
+        const tagValMatch = /"([A-Za-z0-9_]+)"\s*=\s*"([^"]*)$/.exec(linePrefix);
+        if (tagValMatch) {
+          const tagValuesByKey: Record<string, readonly string[]> = {
+            Queue: ['Background', 'Geometry', 'AlphaTest', 'Transparent', 'Overlay'],
+            RenderType: ['Opaque', 'Transparent', 'TransparentCutout', 'Background', 'Overlay'],
+            RenderPipeline: ['UniversalPipeline', 'HDRenderPipeline'],
+            LightMode: ['UniversalForward', 'UniversalForwardOnly', 'ShadowCaster', 'DepthOnly', 'DepthNormals', 'Meta', 'SRPDefaultUnlit'],
+            IgnoreProjector: ['True', 'False'],
+            DisableBatching: ['True', 'False', 'LODFading'],
+            PreviewType: ['Sphere', 'Plane', 'Skybox'],
+          };
+          const vals = tagValuesByKey[tagValMatch[1]] ?? [];
+          const vPrefix = tagValMatch[2].toLowerCase();
+          return vals
+            .filter((v) => !vPrefix || v.toLowerCase().startsWith(vPrefix))
+            .map((v) => ({
+              label: v,
+              kind: CompletionItemKind.EnumMember,
+              detail: `[UnityBrain] ${tagValMatch[1]} Tag Value`,
+            }));
+        }
+        const hasOpeningQuote = /"[^"=]*$/.test(linePrefix);
+        if (hasOpeningQuote) {
+          return SHADERLAB_TAGS
+            .filter((t) => !slPrefix || t.label.toLowerCase().startsWith(slPrefix))
+            .map((t) => {
+              const strippedInsert = t.insertText?.startsWith('"')
+                ? t.insertText.slice(1)
+                : t.insertText;
+              return {
+                label: t.label,
+                kind: CompletionItemKind.Property,
+                detail: t.detail,
+                documentation: t.documentation,
+                insertText: stripRedundantClosingDelim(strippedInsert, lineSuffix),
+                insertTextFormat: t.isSnippet ? InsertTextFormat.Snippet : InsertTextFormat.PlainText,
+              };
+            });
+        }
+        return toShaderLabCompletionItems(SHADERLAB_TAGS, slPrefix, CompletionItemKind.Property, lineSuffix);
+      }
+      if (shaderLabCtx === 'stencil') {
+        return toShaderLabCompletionItems(SHADERLAB_STENCIL_ITEMS, slPrefix, CompletionItemKind.Keyword, lineSuffix);
+      }
+      if (shaderLabCtx === 'pass' || shaderLabCtx === 'subshader' || shaderLabCtx === 'renderState' || shaderLabCtx === 'root') {
+        const stateItems = toShaderLabCompletionItems(SHADERLAB_RENDER_STATES, slPrefix, CompletionItemKind.Keyword, lineSuffix);
+        const rootBlocks: ShaderLabDocEntry[] =
+          shaderLabCtx === 'root' || shaderLabCtx === 'subshader'
+            ? [
+                { label: 'Properties', insertText: 'Properties\n{\n\t$0\n}', isSnippet: true, detail: '[UnityBrain] ShaderLab Block', documentation: '머티리얼 인스펙터 프로퍼티 선언 블록입니다.' },
+                { label: 'SubShader', insertText: 'SubShader\n{\n\tTags { "RenderPipeline" = "UniversalPipeline" "RenderType" = "Opaque" }\n\t$0\n}', isSnippet: true, detail: '[UnityBrain] ShaderLab Block', documentation: '셰이더 서브 구현 블록입니다.' },
+                { label: 'Pass', insertText: 'Pass\n{\n\tName "${1:ForwardLit}"\n\tHLSLPROGRAM\n\t$0\n\tENDHLSL\n}', isSnippet: true, detail: '[UnityBrain] ShaderLab Block', documentation: '렌더 패스 블록입니다.' },
+              ]
+            : [];
+        return [
+          ...toShaderLabCompletionItems(rootBlocks, slPrefix, CompletionItemKind.Snippet, lineSuffix),
+          ...stateItems,
+        ];
+      }
     }
 
     // Case 3: General HLSL symbols + Unity macros + Semantics (Pass-scoped)
@@ -220,11 +509,15 @@ export class ShaderCompletionProvider {
       if (seenLabels.has(macro.name)) continue;
       if (prefix && !macro.name.toLowerCase().startsWith(prefix)) continue;
       seenLabels.add(macro.name);
+      const snippetText = stripRedundantClosingDelim(buildMacroSnippetInsertText(macro), lineSuffix);
       items.push({
         label: macro.name,
         kind: CompletionItemKind.Snippet,
         detail: `[UnityBrain] [${macro.pipeline}] ${macro.signature}`,
         documentation: `[UnityBrain] ${macro.description}`,
+        ...(snippetText
+          ? { insertText: snippetText, insertTextFormat: InsertTextFormat.Snippet }
+          : {}),
       });
     }
 

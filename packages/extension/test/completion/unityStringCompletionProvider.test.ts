@@ -308,9 +308,15 @@ describe('UnityStringCompletionProvider', () => {
       const scenePath = path.join(tmpRoot, 'Assets', 'Scenes', 'Stage01.unity');
       fs.writeFileSync(scenePath, '%YAML 1.1\n', 'utf8');
 
+      let mockUnityUdpOk = true;
+      let udpCalls = 0;
       const defProvider = new UnityCSharpDefinitionProvider({
         projectRoot: tmpRoot,
         getCache: () => MOCK_CACHE,
+        openInUnityEditor: async () => {
+          udpCalls += 1;
+          return mockUnityUdpOk;
+        },
       });
 
       const code = [
@@ -390,13 +396,27 @@ describe('UnityStringCompletionProvider', () => {
         revealRange: () => {},
         setDecorations: () => {},
       } as unknown as vscode.TextEditor;
+      mockUnityUdpOk = true;
       await vscode.commands.executeCommand('unityBrain.csharpGoToDefinition');
       expect(revealCount).toBe(1);
+      expect(udpCalls).toBe(1);
       expect(vscode.window.activeTextEditor?.document.uri.fsPath).toBe(csDoc.uri.fsPath);
 
-      // 4. Ctrl+Click path (`provideDefinition` when Unity is live): arms String.cs close guard
+      // 3b. Live Unity process without UDP listener: F12 falls back to opening scene locally
+      mockUnityUdpOk = false;
+      await vscode.commands.executeCommand('unityBrain.csharpGoToDefinition');
+      expect(revealCount).toBe(1);
+      expect(udpCalls).toBe(2);
+      expect(path.resolve(vscode.window.activeTextEditor!.document.uri.fsPath)).toBe(
+        path.resolve(scenePath),
+      );
+
+      // 4. Ctrl+Click / Hover path (`provideDefinition` when Unity is live): pure local Location, zero UDP or String.cs side effects
+      const udpCallsBeforeHover = udpCalls;
       const ctrlClickLoc = defProvider.provideDefinition(csDoc, sceneStrPos);
-      expect(ctrlClickLoc).toBeUndefined();
+      expect(ctrlClickLoc).toBeDefined();
+      expect(path.resolve(ctrlClickLoc!.uri.fsPath)).toBe(path.resolve(scenePath));
+      expect(udpCalls).toBe(udpCallsBeforeHover);
       const fakeStringDoc = vscode.__mock.createTextDocument(
         vscode.Uri.parse('csharp-metadata://System/String.cs'),
         'namespace System { public sealed class String {} }',
@@ -405,7 +425,7 @@ describe('UnityStringCompletionProvider', () => {
       vscode.__mock.emitters.onDidChangeActiveTextEditor.fire({
         document: fakeStringDoc,
       } as unknown as vscode.TextEditor);
-      expect(closeEditorCount).toBe(1);
+      expect(closeEditorCount).toBe(0);
     } finally {
       for (const d of disposables) {
         d.dispose();
@@ -415,7 +435,7 @@ describe('UnityStringCompletionProvider', () => {
     }
   });
 
-  it('resolves F12 Go to Definition for Shader properties, InputActions, Animator parameters, and arms String.cs guard for location results', () => {
+  it('resolves F12 Go to Definition for Shader properties, InputActions, Animator parameters while keeping provideDefinition pure', () => {
     const tmpRoot = path.join(process.cwd(), 'test-output', `csharp-def-unity6-${Date.now()}`);
     const disposables: vscode.Disposable[] = [];
     try {
@@ -485,9 +505,15 @@ describe('UnityStringCompletionProvider', () => {
         }),
       );
 
+      let mockUnityUdpOk = true;
+      let udpCalls = 0;
       const defProvider = new UnityCSharpDefinitionProvider({
         projectRoot: tmpRoot,
         getCache: () => MOCK_CACHE,
+        openInUnityEditor: async () => {
+          udpCalls += 1;
+          return mockUnityUdpOk;
+        },
       });
 
       const code = [
@@ -561,7 +587,7 @@ describe('UnityStringCompletionProvider', () => {
       expect(path.resolve(a3!.uri.fsPath)).toBe(path.resolve(controllerPath));
       expect(a3!.range.start.line).toBe(8);
 
-      // Ctrl+Click guard armed even on location results closes Roslyn String.cs fallback
+      // provideDefinition stays 100% pure (never arms side-effectful closeActiveEditor listeners)
       const fakeStringDoc = vscode.__mock.createTextDocument(
         vscode.Uri.parse('csharp-metadata://System/String.cs'),
         'namespace System { public sealed class String {} }',
@@ -570,7 +596,7 @@ describe('UnityStringCompletionProvider', () => {
       vscode.__mock.emitters.onDidChangeActiveTextEditor.fire({
         document: fakeStringDoc,
       } as unknown as vscode.TextEditor);
-      expect(closeEditorCount).toBe(1);
+      expect(closeEditorCount).toBe(0);
 
       // Live Unity Editor running: Animator parameter resolves to kind: 'unity' targeting Player.controller
       fs.mkdirSync(path.join(tmpRoot, 'Library'), { recursive: true });
@@ -584,6 +610,10 @@ describe('UnityStringCompletionProvider', () => {
         targetPath: controllerPath,
         label: 'Player.controller (Attack)',
       });
+      const liveHoverCtrlLoc = defProvider.provideDefinition(doc, posOf('/*A1*/'));
+      expect(path.resolve(liveHoverCtrlLoc!.uri.fsPath)).toBe(path.resolve(controllerPath));
+      expect(udpCalls).toBe(0);
+      expect(mockUnityUdpOk).toBe(true);
     } finally {
       for (const d of disposables) {
         d.dispose();

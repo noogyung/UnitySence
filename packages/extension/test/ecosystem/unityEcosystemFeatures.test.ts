@@ -402,11 +402,12 @@ describe('Unity Ecosystem Features (Asmdef, UI Toolkit, Editor Integration)', ()
     const result = generateUnityLaunchConfig(root);
     expect(result.editorInfo?.process_id).toBe(42420);
     const written = JSON.parse(fs.readFileSync(result.filePath, 'utf8')) as {
-      configurations: Array<{ name: string; type: string; processId?: string }>;
+      configurations: Array<{ name: string; type: string; request?: string; processId?: string }>;
     };
     expect(written.configurations.some((c) => c.name === 'Custom Node Config')).toBe(true);
     const unityCfg = written.configurations.find((c) => c.type === 'vstuc');
-    expect(unityCfg?.processId).toBe('42420');
+    expect(unityCfg?.request).toBe('attach');
+    expect(unityCfg?.processId).toBeUndefined();
 
     const winLog = resolveUnityEditorLogPath(root, 'win32', { LOCALAPPDATA: 'C:\\Users\\Demo\\AppData\\Local' });
     expect(winLog.toLowerCase()).toContain('unity');

@@ -119,74 +119,97 @@ export function extractUnityApiXmlToJson(
   const parsed = parser.parse(xmlContent) as RawXmlApiRoot;
   const rawTypes = asArray(parsed.api?.type);
 
-  const types: UnityApiTypeEntry[] = rawTypes
-    .filter((t) => Boolean(t['@_name']))
-    .map((rawType) => {
-      const name = String(rawType['@_name']);
-      const ns = rawType['@_ns'] ? String(rawType['@_ns']) : '';
-      const fullName = ns ? `${ns}.${name}` : name;
-      const kind: 'class' | 'struct' = rawType['@_kind'] === 'struct' ? 'struct' : 'class';
+  const typeMap = new Map<string, UnityApiTypeEntry>();
+  for (const rawType of rawTypes) {
+    if (!rawType['@_name']) continue;
+    const name = String(rawType['@_name']);
+    const ns = rawType['@_ns'] ? String(rawType['@_ns']) : '';
+    const fullName = ns ? `${ns}.${name}` : name;
+    const kind: 'class' | 'struct' = rawType['@_kind'] === 'struct' ? 'struct' : 'class';
 
-      const events: UnityEventFunction[] = asArray(rawType.message)
-        .filter((m) => Boolean(m['@_name']))
-        .map((msg) => {
-          const eventName = String(msg['@_name']);
-          const returnType = msg.returns?.['@_type']
-            ? String(msg.returns['@_type'])
-            : msg['@_returnType']
-            ? String(msg['@_returnType'])
-            : 'void';
-          const supportsCoroutine =
-            msg['@_coroutine'] === 'true' || COROUTINE_SUPPORTED_EVENTS.has(eventName);
-          const isStatic = msg['@_static'] === 'true';
-          const isPerformanceCritical = PERFORMANCE_CRITICAL_EVENTS.has(eventName);
-          const description = extractText(msg.summary) || extractText(msg.docstring) || `${eventName} Unity message.`;
+    const events: UnityEventFunction[] = asArray(rawType.message)
+      .filter((m) => Boolean(m['@_name']))
+      .map((msg) => {
+        const eventName = String(msg['@_name']);
+        const returnType = msg.returns?.['@_type']
+          ? String(msg.returns['@_type'])
+          : msg['@_returnType']
+          ? String(msg['@_returnType'])
+          : 'void';
+        const supportsCoroutine =
+          msg['@_coroutine'] === 'true' || COROUTINE_SUPPORTED_EVENTS.has(eventName);
+        const isStatic = msg['@_static'] === 'true';
+        const isPerformanceCritical = PERFORMANCE_CRITICAL_EVENTS.has(eventName);
+        const description = extractText(msg.summary) || extractText(msg.docstring) || `${eventName} Unity message.`;
 
-          const rawParams = [
-            ...asArray(msg.parameters?.parameter),
-            ...asArray(msg.parameters?.param),
-          ];
-          const parameters: UnityApiParameter[] = rawParams
-            .filter((p) => Boolean(p['@_name'] && p['@_type']))
-            .map((p) => {
-              const entry: UnityApiParameter = {
-                name: String(p['@_name']),
-                type: String(p['@_type']),
-              };
-              if (p['@_optional'] === 'true') {
-                entry.isOptional = true;
-              }
-              const pDesc = p['@_description'] ? String(p['@_description']) : p['#text'];
-              if (pDesc) {
-                entry.description = String(pDesc).trim();
-              }
-              return entry;
-            });
+        const rawParams = [
+          ...asArray(msg.parameters?.parameter),
+          ...asArray(msg.parameters?.param),
+        ];
+        const parameters: UnityApiParameter[] = rawParams
+          .filter((p) => Boolean(p['@_name'] && p['@_type']))
+          .map((p) => {
+            const entry: UnityApiParameter = {
+              name: String(p['@_name']),
+              type: String(p['@_type']),
+            };
+            if (p['@_optional'] === 'true') {
+              entry.isOptional = true;
+            }
+            const pDesc = p['@_description'] ? String(p['@_description']) : p['#text'];
+            if (pDesc) {
+              entry.description = String(pDesc).trim();
+            }
+            return entry;
+          });
 
-          const fn: UnityEventFunction = {
-            name: eventName,
-            returnType,
-            supportsCoroutine,
-            description,
-            parameters,
-          };
-          if (isStatic) fn.isStatic = true;
-          if (isPerformanceCritical) fn.isPerformanceCritical = true;
-          if (msg['@_minimumVersion']) fn.minimumUnityVersion = String(msg['@_minimumVersion']);
-          if (msg['@_maximumVersion']) fn.maximumUnityVersion = String(msg['@_maximumVersion']);
-          return fn;
-        });
+        const fn: UnityEventFunction = {
+          name: eventName,
+          returnType,
+          supportsCoroutine,
+          description,
+          parameters,
+        };
+        if (isStatic) fn.isStatic = true;
+        if (isPerformanceCritical) fn.isPerformanceCritical = true;
+        if (msg['@_minimumVersion']) fn.minimumUnityVersion = String(msg['@_minimumVersion']);
+        if (msg['@_maximumVersion']) fn.maximumUnityVersion = String(msg['@_maximumVersion']);
+        return fn;
+      });
 
+    const existing = typeMap.get(fullName);
+    if (existing) {
+      const seenEvents = new Set(existing.events.map((e) => e.name));
+      for (const ev of events) {
+        if (!seenEvents.has(ev.name)) {
+          seenEvents.add(ev.name);
+          existing.events.push(ev);
+        }
+      }
+      if (!existing.minimumUnityVersion && rawType['@_minimumVersion']) {
+        existing.minimumUnityVersion = String(rawType['@_minimumVersion']);
+      }
+    } else {
+      const seenEvents = new Set<string>();
+      const dedupedEvents: UnityEventFunction[] = [];
+      for (const ev of events) {
+        if (!seenEvents.has(ev.name)) {
+          seenEvents.add(ev.name);
+          dedupedEvents.push(ev);
+        }
+      }
       const entry: UnityApiTypeEntry = {
         fullName,
         kind,
-        events,
+        events: dedupedEvents,
       };
       if (rawType['@_minimumVersion']) {
         entry.minimumUnityVersion = String(rawType['@_minimumVersion']);
       }
-      return entry;
-    });
+      typeMap.set(fullName, entry);
+    }
+  }
+  const types: UnityApiTypeEntry[] = Array.from(typeMap.values());
 
   const db: UnityApiDatabase = {
     schemaVersion: 1,
@@ -219,8 +242,14 @@ function parseCliArgs(argv: string[]): { input: string; output: string; commit?:
   return { input, output, commit };
 }
 
-const isEntrypoint =
-  process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+const resolvedArgv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
+const resolvedSelf = path.resolve(fileURLToPath(import.meta.url));
+const isEntrypoint = Boolean(
+  resolvedArgv1 &&
+    (process.platform === 'win32'
+      ? resolvedArgv1.toLowerCase() === resolvedSelf.toLowerCase()
+      : resolvedArgv1 === resolvedSelf),
+);
 
 if (isEntrypoint) {
   const { input, output, commit } = parseCliArgs(process.argv.slice(2));

@@ -35,8 +35,8 @@ export interface UnityDaemonClientOptions {
 
 export interface CSharpCodeDeclarations {
   classes: Array<{ className: string; line: number }>;
-  serializedFields: Array<{ fieldName: string; line: number }>;
-  methods: Array<{ methodName: string; line: number }>;
+  serializedFields: Array<{ fieldName: string; line: number; className?: string }>;
+  methods: Array<{ methodName: string; line: number; className?: string }>;
 }
 
 export interface ShowAssetUsagesCommandArgs {
@@ -44,6 +44,10 @@ export interface ShowAssetUsagesCommandArgs {
   projectRoot: string;
   locations: AssetUsageLocation[];
 }
+
+const DAEMON_REQUEST_TIMEOUT_MS = 15_000;
+const DAEMON_RETRY_COOLDOWN_MS = 5_000;
+const DAEMON_MAX_STDERR_BYTES = 8192;
 
 export class UnityDaemonClient implements vscode.Disposable {
   private readonly projectRoot: string;
@@ -56,6 +60,11 @@ export class UnityDaemonClient implements vscode.Disposable {
   private connection: MessageConnection | null = null;
   private startPromise: Promise<void> | null = null;
   private shadowDaemonDir: string | null = null;
+  private disposed = false;
+  private lastFailureAt = 0;
+  private consecutiveFailures = 0;
+  private stderrChunks: string[] = [];
+  private stderrBytes = 0;
 
   constructor(options: UnityDaemonClientOptions) {
     this.projectRoot = path.resolve(options.projectRoot);
@@ -66,15 +75,34 @@ export class UnityDaemonClient implements vscode.Disposable {
     this.transportFactory = options.transportFactory;
   }
 
-  public async start(): Promise<void> {
+  public async start(bypassCooldown = false): Promise<void> {
+    if (this.disposed) {
+      throw new Error('UnityDaemonClient has been disposed.');
+    }
     if (this.transport) {
       return;
     }
     if (this.startPromise) {
       return this.startPromise;
     }
+    if (
+      !bypassCooldown &&
+      this.lastFailureAt > 0 &&
+      Date.now() - this.lastFailureAt < DAEMON_RETRY_COOLDOWN_MS
+    ) {
+      const remaining = DAEMON_RETRY_COOLDOWN_MS - (Date.now() - this.lastFailureAt);
+      throw new Error(
+        `UnityBrain.Daemon retry cooldown active after ${this.consecutiveFailures} failure(s) (${remaining}ms remaining).`,
+      );
+    }
 
-    this.startPromise = this.doStart();
+    this.startPromise = this.doStart().catch((err) => {
+      if (!this.disposed) {
+        this.lastFailureAt = Date.now();
+        this.consecutiveFailures++;
+      }
+      throw err;
+    });
     try {
       await this.startPromise;
     } finally {
@@ -92,6 +120,7 @@ export class UnityDaemonClient implements vscode.Disposable {
     if (!daemonDll) {
       throw new Error('UnityBrain.Daemon.dll was not found in extension binaries.');
     }
+    const shadowDirSnapshot = this.shadowDaemonDir;
 
     const child = spawn(
       'dotnet',
@@ -104,14 +133,65 @@ export class UnityDaemonClient implements vscode.Disposable {
 
     if (!child.stdout || !child.stdin) {
       child.kill();
+      this.cleanupShadowDir(shadowDirSnapshot);
       throw new Error('Failed to attach stdio streams to UnityBrain.Daemon child process.');
     }
+
+    this.stderrChunks = [];
+    this.stderrBytes = 0;
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const chunkBytes = Buffer.byteLength(text, 'utf8');
+      if (this.stderrBytes + chunkBytes <= DAEMON_MAX_STDERR_BYTES) {
+        this.stderrChunks.push(text);
+        this.stderrBytes += chunkBytes;
+      } else {
+        const tail = `${this.stderrChunks.join('')}${text}`.slice(-DAEMON_MAX_STDERR_BYTES);
+        this.stderrChunks = [tail];
+        this.stderrBytes = Buffer.byteLength(tail, 'utf8');
+      }
+    });
 
     const conn = createMessageConnection(
       new StreamMessageReader(child.stdout),
       new StreamMessageWriter(child.stdin),
     );
+
+    if (typeof conn.onError === 'function') {
+      conn.onError(() => {
+        if (this.connection === conn) {
+          this.resetConnectionState(!this.disposed);
+        }
+      });
+    }
+    if (typeof conn.onClose === 'function') {
+      conn.onClose(() => {
+        if (this.connection === conn) {
+          this.resetConnectionState(false);
+        }
+      });
+    }
+
+    child.on('error', () => {
+      if (this.childProcess === child) {
+        this.resetConnectionState(!this.disposed);
+      }
+    });
+    child.on('exit', () => {
+      if (this.childProcess === child) {
+        this.resetConnectionState(!this.disposed);
+      }
+      this.cleanupShadowDir(shadowDirSnapshot);
+    });
+
     conn.listen();
+
+    if (this.disposed) {
+      conn.dispose();
+      if (!child.killed) child.kill();
+      this.cleanupShadowDir(shadowDirSnapshot);
+      throw new Error('UnityDaemonClient was disposed during startup.');
+    }
 
     this.childProcess = child;
     this.connection = conn;
@@ -137,16 +217,92 @@ export class UnityDaemonClient implements vscode.Disposable {
         if (!child.killed) {
           child.kill();
         }
-        if (this.shadowDaemonDir) {
-          try {
-            fs.rmSync(this.shadowDaemonDir, { recursive: true, force: true });
-          } catch {
-            // Ignore cleanup error if process is still exiting
-          }
-          this.shadowDaemonDir = null;
-        }
+        this.cleanupShadowDir(shadowDirSnapshot);
       },
     };
+  }
+
+  private resetConnectionState(recordFailure: boolean): void {
+    if (recordFailure) {
+      this.lastFailureAt = Date.now();
+      this.consecutiveFailures++;
+    }
+    const activeTransport = this.transport;
+    this.transport = null;
+    const activeConn = this.connection;
+    this.connection = null;
+    const activeChild = this.childProcess;
+    this.childProcess = null;
+
+    if (activeTransport) {
+      try {
+        activeTransport.dispose();
+      } catch {
+        // Ignore transport teardown errors
+      }
+    }
+    if (activeConn) {
+      try {
+        activeConn.dispose();
+      } catch {
+        // Ignore connection teardown errors
+      }
+    }
+    if (activeChild && !activeChild.killed) {
+      try {
+        activeChild.kill();
+      } catch {
+        // Ignore kill error
+      }
+    }
+    this.cleanupShadowDir();
+  }
+
+  private cleanupShadowDir(explicitDir?: string | null): void {
+    const dir = explicitDir ?? this.shadowDaemonDir;
+    if (!dir) return;
+    if (!explicitDir || dir === this.shadowDaemonDir) {
+      this.shadowDaemonDir = null;
+    }
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup error while child handle is still releasing
+    }
+  }
+
+  private isPidAlive(pid: number): boolean {
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+    if (pid === process.pid) return true;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | undefined)?.code;
+      return code === 'EPERM';
+    }
+  }
+
+  private sweepStaleShadowDirs(runtimeRoot: string): void {
+    if (!fs.existsSync(runtimeRoot)) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(runtimeRoot, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const match = /^daemon-(\d+)-/.exec(entry.name);
+      if (!match) continue;
+      const pid = Number.parseInt(match[1], 10);
+      if (this.isPidAlive(pid)) continue;
+      try {
+        fs.rmSync(path.join(runtimeRoot, entry.name), { recursive: true, force: true });
+      } catch {
+        // Ignore in-use directory
+      }
+    }
   }
 
   private resolveDaemonDllPath(): string | null {
@@ -154,6 +310,7 @@ export class UnityDaemonClient implements vscode.Disposable {
     if (fs.existsSync(extDaemonDll)) {
       try {
         const runtimeRoot = path.join(os.tmpdir(), 'unitybrain-runtime');
+        this.sweepStaleShadowDirs(runtimeRoot);
         const shadowDir = path.join(runtimeRoot, `daemon-${process.pid}-${Date.now()}`);
         fs.mkdirSync(shadowDir, { recursive: true });
         const sourceDir = path.dirname(extDaemonDll);
@@ -181,22 +338,71 @@ export class UnityDaemonClient implements vscode.Disposable {
     return null;
   }
 
+  private async sendRequestWithTimeout<T>(
+    method: string,
+    params?: unknown,
+    bypassCooldown = false,
+  ): Promise<T> {
+    await this.start(bypassCooldown);
+    const activeTransport = this.transport;
+    if (!activeTransport || this.disposed) {
+      throw new Error('UnityBrain.Daemon transport is unavailable.');
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        activeTransport.sendRequest<T>(method, params),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            if (this.childProcess) {
+              this.resetConnectionState(!this.disposed);
+            } else if (!this.disposed) {
+              this.lastFailureAt = Date.now();
+              this.consecutiveFailures++;
+            }
+            const stderrTail = this.stderrChunks.join('').trim();
+            const suffix = stderrTail ? ` [stderr: ${stderrTail.slice(-300)}]` : '';
+            reject(
+              new Error(
+                `UnityBrain.Daemon request '${method}' timed out after ${DAEMON_REQUEST_TIMEOUT_MS}ms.${suffix}`,
+              ),
+            );
+          }, DAEMON_REQUEST_TIMEOUT_MS);
+        }),
+      ]);
+      this.lastFailureAt = 0;
+      this.consecutiveFailures = 0;
+      return result;
+    } catch (err) {
+      if (!this.disposed) {
+        this.lastFailureAt = Date.now();
+        this.consecutiveFailures++;
+      }
+      throw err;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   public async getStatus(): Promise<DaemonIndexStatus> {
-    await this.start();
-    return this.transport!.sendRequest<DaemonIndexStatus>('index/status', {});
+    return this.sendRequestWithTimeout<DaemonIndexStatus>('index/status', {});
   }
 
   public async rebuild(force = false): Promise<{ indexedAssets: number; elapsedMs: number }> {
-    await this.start();
-    return this.transport!.sendRequest<{ indexedAssets: number; elapsedMs: number }>(
+    if (force) {
+      this.lastFailureAt = 0;
+      this.consecutiveFailures = 0;
+    }
+    return this.sendRequestWithTimeout<{ indexedAssets: number; elapsedMs: number }>(
       'index/rebuild',
       { force },
+      force,
     );
   }
 
   public async findByScriptGuid(scriptGuid: string): Promise<AssetUsageLocation[]> {
-    await this.start();
-    const res = await this.transport!.sendRequest<{ locations?: AssetUsageLocation[] }>(
+    const res = await this.sendRequestWithTimeout<{ locations?: AssetUsageLocation[] }>(
       'usage/findByScriptGuid',
       { scriptGuid },
     );
@@ -208,8 +414,7 @@ export class UnityDaemonClient implements vscode.Disposable {
     className: string | undefined,
     methodName: string,
   ): Promise<AssetUsageLocation[]> {
-    await this.start();
-    const res = await this.transport!.sendRequest<{ locations?: AssetUsageLocation[] }>(
+    const res = await this.sendRequestWithTimeout<{ locations?: AssetUsageLocation[] }>(
       'usage/findByMethod',
       { scriptGuid, className, methodName },
     );
@@ -220,8 +425,7 @@ export class UnityDaemonClient implements vscode.Disposable {
     scriptGuid: string,
     fieldName?: string,
   ): Promise<SerializedFieldValueEntry[]> {
-    await this.start();
-    const res = await this.transport!.sendRequest<{ fields?: SerializedFieldValueEntry[] }>(
+    const res = await this.sendRequestWithTimeout<{ fields?: SerializedFieldValueEntry[] }>(
       'inspector/getSerializedValues',
       { scriptGuid, fieldName },
     );
@@ -260,18 +464,9 @@ export class UnityDaemonClient implements vscode.Disposable {
   }
 
   public dispose(): void {
-    if (this.transport) {
-      this.transport.dispose();
-      this.transport = null;
-    }
-    if (this.connection) {
-      this.connection.dispose();
-      this.connection = null;
-    }
-    if (this.childProcess && !this.childProcess.killed) {
-      this.childProcess.kill();
-    }
-    this.childProcess = null;
+    if (this.disposed) return;
+    this.disposed = true;
+    this.resetConnectionState(false);
   }
 }
 
@@ -286,16 +481,63 @@ export async function readMetaGuid(assetFilePath: string): Promise<string | null
   }
 }
 
+function stripLeadingAttributes(trimmedLine: string): {
+  rest: string;
+  hasSerializeField: boolean;
+} {
+  let i = 0;
+  let hasSerializeField = false;
+  while (i < trimmedLine.length && trimmedLine[i] === '[') {
+    let depth = 0;
+    let inStr: string | null = null;
+    const start = i;
+    while (i < trimmedLine.length) {
+      const ch = trimmedLine[i];
+      if (inStr) {
+        if (ch === '\\') {
+          i += 2;
+          continue;
+        }
+        if (ch === inStr) inStr = null;
+      } else {
+        if (ch === '"' || ch === "'") inStr = ch;
+        else if (ch === '[') depth++;
+        else if (ch === ']') {
+          depth--;
+          if (depth === 0) {
+            i++;
+            break;
+          }
+        }
+      }
+      i++;
+    }
+    if (depth !== 0) {
+      i = start;
+      break;
+    }
+    const attrSegment = trimmedLine.slice(start, i);
+    if (/\b(?:field\s*:\s*)?(?:UnityEngine\.)?SerializeField\b/.test(attrSegment)) {
+      hasSerializeField = true;
+    }
+    while (i < trimmedLine.length && /\s/.test(trimmedLine[i])) i++;
+  }
+  return {
+    rest: trimmedLine.slice(i).trim(),
+    hasSerializeField,
+  };
+}
+
 export function parseCSharpDeclarations(sourceText: string): CSharpCodeDeclarations {
   const classes: Array<{ className: string; line: number }> = [];
-  const serializedFields: Array<{ fieldName: string; line: number }> = [];
-  const methods: Array<{ methodName: string; line: number }> = [];
+  const serializedFields: Array<{ fieldName: string; line: number; className?: string }> = [];
+  const methods: Array<{ methodName: string; line: number; className?: string }> = [];
 
   const lines = sourceText.split(/\r?\n/);
   let pendingSerializeField = false;
   let braceDepth = 0;
-  let pendingClassBrace = false;
-  let memberBraceDepth = 1;
+  let pendingClass: { className: string; memberBraceDepth: number } | null = null;
+  const classStack: Array<{ className: string; memberBraceDepth: number }> = [];
   const nonMethodKeywords = new Set([
     'if', 'for', 'foreach', 'while', 'switch', 'catch', 'using', 'lock', 'return', 'throw',
     'else', 'new', 'class', 'struct', 'interface', 'enum', 'namespace', 'get', 'set', 'add', 'remove',
@@ -307,48 +549,67 @@ export function parseCSharpDeclarations(sourceText: string): CSharpCodeDeclarati
       continue;
     }
 
-    if (/\[[^\]]*\b(?:UnityEngine\.)?SerializeField\b[^\]]*\]/.test(trimmed)) {
+    const { rest, hasSerializeField } = stripLeadingAttributes(trimmed);
+    if (hasSerializeField) {
       pendingSerializeField = true;
     }
 
-    const classMatch = /^(?:public|internal|private|protected|abstract|sealed|static|partial|\s)*\bclass\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(
-      trimmed,
-    );
-    if (classMatch) {
-      classes.push({ className: classMatch[1], line: i });
-      pendingSerializeField = false;
-      pendingClassBrace = true;
-    } else if (braceDepth === memberBraceDepth || (!pendingClassBrace && braceDepth === 1)) {
-      const methodMatch =
-        /^(?:(?:public|private|protected|internal|virtual|override|async|static|sealed|new|unsafe|extern)\s+)*([A-Za-z_][A-Za-z0-9_<>.?[\]]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(
-          trimmed,
-        );
-      if (
-        methodMatch &&
-        !nonMethodKeywords.has(methodMatch[1]) &&
-        !nonMethodKeywords.has(methodMatch[2]) &&
-        !trimmed.startsWith('[')
-      ) {
-        methods.push({ methodName: methodMatch[2], line: i });
+    if (rest.length > 0) {
+      const classMatch = /^(?:public|internal|private|protected|abstract|sealed|static|partial|\s)*\bclass\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(
+        rest,
+      );
+      const currentClass = classStack[classStack.length - 1];
+      if (classMatch) {
+        classes.push({ className: classMatch[1], line: i });
         pendingSerializeField = false;
-      } else {
-        const isPublicField = /\bpublic\b/.test(trimmed) && !/\b(?:static|const|readonly)\b/.test(trimmed);
-        const fieldMatch = /^(?:\[[^\]]+\]\s*)*(?:public|private|protected|internal|\s)+[A-Za-z0-9_<>\[\].,\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)/.exec(
-          trimmed,
-        );
-        const autoPropMatch = pendingSerializeField
-          ? /^(?:\[[^\]]+\]\s*)*(?:(?:public|private|protected|internal|virtual|override|new)\s+)*[A-Za-z0-9_<>\[\].,?\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{\s*get\b/.exec(
-              trimmed,
-            )
-          : null;
-        if (fieldMatch && (pendingSerializeField || isPublicField) && !trimmed.includes('(')) {
-          serializedFields.push({ fieldName: fieldMatch[1], line: i });
+        pendingClass = { className: classMatch[1], memberBraceDepth: -1 };
+      } else if (currentClass && braceDepth === currentClass.memberBraceDepth) {
+        const methodMatch =
+          /^(?:(?:public|private|protected|internal|virtual|override|async|static|sealed|new|unsafe|extern)\s+)*([A-Za-z_][A-Za-z0-9_<>.?[\]]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(
+            rest,
+          );
+        if (
+          methodMatch &&
+          !nonMethodKeywords.has(methodMatch[1]) &&
+          !nonMethodKeywords.has(methodMatch[2])
+        ) {
+          methods.push({ methodName: methodMatch[2], line: i, className: currentClass.className });
           pendingSerializeField = false;
-        } else if (autoPropMatch && !trimmed.includes('(')) {
-          serializedFields.push({ fieldName: autoPropMatch[1], line: i });
-          pendingSerializeField = false;
-        } else if (!trimmed.startsWith('[')) {
-          pendingSerializeField = false;
+        } else {
+          const isPublicField =
+            /\bpublic\b/.test(rest) && !/\b(?:static|const|readonly)\b/.test(rest);
+          const fieldMatch =
+            /^(?:(?:public|private|protected|internal|readonly|volatile|new)\s+)*([A-Za-z_][A-Za-z0-9_<>\[\].,?]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)/.exec(
+              rest,
+            );
+          const autoPropMatch = pendingSerializeField
+            ? /^(?:(?:public|private|protected|internal|virtual|override|new)\s+)*[A-Za-z0-9_<>\[\].,?\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{\s*get\b/.exec(
+                rest,
+              )
+            : null;
+          if (
+            fieldMatch &&
+            !nonMethodKeywords.has(fieldMatch[1]) &&
+            !nonMethodKeywords.has(fieldMatch[2]) &&
+            (pendingSerializeField || isPublicField) &&
+            !rest.split('=')[0].includes('(')
+          ) {
+            serializedFields.push({
+              fieldName: fieldMatch[2],
+              line: i,
+              className: currentClass.className,
+            });
+            pendingSerializeField = false;
+          } else if (autoPropMatch && !rest.includes('(')) {
+            serializedFields.push({
+              fieldName: autoPropMatch[1],
+              line: i,
+              className: currentClass.className,
+            });
+            pendingSerializeField = false;
+          } else {
+            pendingSerializeField = false;
+          }
         }
       }
     }
@@ -357,12 +618,19 @@ export function parseCSharpDeclarations(sourceText: string): CSharpCodeDeclarati
     for (const ch of codeOnly) {
       if (ch === '{') {
         braceDepth++;
-        if (pendingClassBrace) {
-          memberBraceDepth = braceDepth;
-          pendingClassBrace = false;
+        if (pendingClass) {
+          pendingClass.memberBraceDepth = braceDepth;
+          classStack.push(pendingClass);
+          pendingClass = null;
         }
       } else if (ch === '}') {
         braceDepth = Math.max(0, braceDepth - 1);
+        while (
+          classStack.length > 0 &&
+          braceDepth < classStack[classStack.length - 1].memberBraceDepth
+        ) {
+          classStack.pop();
+        }
       }
     }
   }
@@ -529,7 +797,7 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
             tooltip: `[UnityBrain] 유니티 에셋에 직렬화된 '${field.fieldName}' 필드 값 보기`,
             arguments: [
               {
-                title: `[UnityBrain] ${primaryClass}.${field.fieldName} 인스펙터 직렬화 값`,
+                title: `[UnityBrain] ${field.className ?? primaryClass}.${field.fieldName} 인스펙터 직렬화 값`,
                 projectRoot: this.projectRoot,
                 locations: fieldLocations,
               } satisfies ShowAssetUsagesCommandArgs,
@@ -544,7 +812,9 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
     const methodResults = await Promise.all(
       candidateMethods.map(async (m) => ({
         method: m,
-        locations: await this.daemonClient.findByMethod(scriptGuid, primaryClass, m.methodName).catch(() => []),
+        locations: await this.daemonClient
+          .findByMethod(scriptGuid, m.className ?? primaryClass, m.methodName)
+          .catch(() => []),
       })),
     );
 
@@ -565,7 +835,7 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
           tooltip: `[UnityBrain] ${item.method.methodName}()를 호출하는 UnityEvent 바인딩 보기`,
           arguments: [
             {
-              title: `[UnityBrain] ${primaryClass}.${item.method.methodName}() 이벤트 콜백 목록`,
+              title: `[UnityBrain] ${item.method.className ?? primaryClass}.${item.method.methodName}() 이벤트 콜백 목록`,
               projectRoot: this.projectRoot,
               locations: item.locations,
             } satisfies ShowAssetUsagesCommandArgs,

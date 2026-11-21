@@ -34,7 +34,12 @@ public static class Program
 {
     public static async Task<int> Main(string[] args)
     {
-        var filter = args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]) ? args[0] : null;
+        var rawFilter = args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]) ? args[0].Trim() : null;
+        string? filter = rawFilter;
+        if (filter != null && filter.StartsWith("FullyQualifiedName~", StringComparison.OrdinalIgnoreCase))
+        {
+            filter = filter.Substring("FullyQualifiedName~".Length).Trim();
+        }
         var asm = Assembly.GetExecutingAssembly();
         int passed = 0;
         int failed = 0;
@@ -49,7 +54,7 @@ public static class Program
             foreach (var method in methods)
             {
                 var fullName = $"{type.Name}.{method.Name}";
-                if (filter != null &&
+                if (!string.IsNullOrEmpty(filter) &&
                     !fullName.Contains(filter, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -76,6 +81,11 @@ public static class Program
         }
 
         Console.WriteLine($"Daemon Test Summary: {passed} passed, {failed} failed.");
+        if (!string.IsNullOrEmpty(filter) && passed + failed == 0)
+        {
+            Console.Error.WriteLine($"No tests matched filter '{rawFilter}'.");
+            return 1;
+        }
         return failed > 0 ? 1 : 0;
     }
 }

@@ -6,6 +6,7 @@ import {
   type IncludeDependencyGraph,
 } from '../indexer/hlslIncludeGraph.ts';
 import { ShaderDefinitionProvider } from './definitionProvider.ts';
+import { detectShaderLabContext, SHADERLAB_HOVER_DOCS } from '../parser/shaderLabContext.ts';
 import { UNITY_BUILTIN_MACROS } from '../parser/unityHlslMacroPrepass.ts';
 
 export class ShaderHoverProvider {
@@ -111,7 +112,25 @@ export class ShaderHoverProvider {
       }
     }
 
-    // 3-2. Local variables & function parameters in enclosing scope
+    // 3-2. ShaderLab Properties & DSL keywords when outside HLSL/CG blocks
+    const shaderLabCtx = detectShaderLabContext(documentText, position.line, position.character, filePath);
+    if (!isMemberAccess && shaderLabCtx !== 'hlsl') {
+      const slProp = parsed.symbols.find((s) => s.name === word && s.kind === 'property');
+      if (slProp) {
+        return this.buildSymbolHover(slProp, undefined, projectRoot);
+      }
+      const slDoc = SHADERLAB_HOVER_DOCS.get(word);
+      if (slDoc) {
+        return {
+          contents: {
+            kind: MarkupKind.Markdown,
+            value: `**${slDoc.label}** — *${slDoc.detail}*\n\n${slDoc.documentation}`,
+          },
+        };
+      }
+    }
+
+    // 3-3. Local variables & function parameters in enclosing scope
     if (!isMemberAccess) {
       const scope = parsed.localVarScopes.find(
         (sc) => position.line >= sc.startLine && position.line <= sc.endLine && sc.declarations.has(word),
@@ -137,23 +156,7 @@ export class ShaderHoverProvider {
         sym.kind !== 'property'
           ? hits.find((h) => h.kind === 'property')
           : undefined;
-      const declaredIn = this.formatVirtualLocation(sym.uri, projectRoot);
-      const parts = [
-        `\`\`\`hlsl\n${sym.signature ?? `${sym.returnType ?? ''} ${sym.name}`.trim()}\n\`\`\``,
-      ];
-      if (sym.documentation) {
-        parts.push(sym.documentation);
-      }
-      if (propNote) {
-        parts.push(`ShaderLab 프로퍼티: \`${propNote.signature ?? propNote.name}\``);
-      }
-      parts.push(`**[UnityBrain]** 선언 위치: \`${declaredIn}\``);
-      return {
-        contents: {
-          kind: MarkupKind.Markdown,
-          value: parts.join('\n\n'),
-        },
-      };
+      return this.buildSymbolHover(sym, propNote, projectRoot);
     }
 
     // 5. Built-in Unity macro table fallback
@@ -168,6 +171,46 @@ export class ShaderHoverProvider {
     }
 
     return null;
+  }
+
+  private buildSymbolHover(
+    sym: { name: string; kind: string; returnType?: string; signature?: string; documentation?: string; uri: string },
+    propNote: { name: string; signature?: string; documentation?: string } | undefined,
+    projectRoot?: string,
+  ): Hover {
+    const declaredIn = this.formatVirtualLocation(sym.uri, projectRoot);
+    const parts = [
+      `\`\`\`hlsl\n${sym.signature ?? `${sym.returnType ?? ''} ${sym.name}`.trim()}\n\`\`\``,
+    ];
+    if (sym.documentation) {
+      parts.push(sym.documentation);
+    }
+    if (propNote) {
+      parts.push(`ShaderLab 프로퍼티: \`${propNote.signature ?? propNote.name}\``);
+    }
+    const colorPropText = propNote?.signature ?? (sym.kind === 'property' ? sym.signature : undefined);
+    const colorDocText = propNote?.documentation ?? (sym.kind === 'property' ? sym.documentation : undefined);
+    const isColorProp =
+      (colorPropText && /,\s*Color\s*\)/.test(colorPropText)) || sym.returnType === 'Color';
+    if (isColorProp && colorDocText) {
+      const cm = /\(\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*\)/.exec(colorDocText);
+      if (cm) {
+        const toHex = (v: string) =>
+          Math.max(0, Math.min(255, Math.round(Number.parseFloat(v) * 255)))
+            .toString(16)
+            .padStart(2, '0')
+            .toUpperCase();
+        const hex = `#${toHex(cm[1])}${toHex(cm[2])}${toHex(cm[3])}${toHex(cm[4])}`;
+        parts.push(`색상 미리보기: \`rgba(${cm[1]}, ${cm[2]}, ${cm[3]}, ${cm[4]})\` · **\`${hex}\`**`);
+      }
+    }
+    parts.push(`**[UnityBrain]** 선언 위치: \`${declaredIn}\``);
+    return {
+      contents: {
+        kind: MarkupKind.Markdown,
+        value: parts.join('\n\n'),
+      },
+    };
   }
 
   private extractPreprocessorDirectiveKeywords(

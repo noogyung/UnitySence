@@ -27,5 +27,9 @@
       "end": "^\\s*(?://\\s*#?endregion\\b|\\b(?:ENDHLSL|ENDCG|ENDGLSL)\\b)"
     }
   },
+  "indentationRules": {
+    "increaseIndentPattern": "^((?!//).)*\\{[^}\"'/]*$",
+    "decreaseIndentPattern": "^\\s*\\}"
+  },
   "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\`\\~\\!\\@\\#\\%\\^\\&\\*\\(\\)\\-\\=\\+\\[\\{\\]\\}\\\\\\|\\;\\:\\'\\\"\\,\\.\\<\\>\\/\\?\\s]+)"
 }

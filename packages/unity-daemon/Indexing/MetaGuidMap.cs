@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Threading;
 
 namespace UnityBrain.Daemon.Indexing;
 
@@ -9,7 +8,7 @@ public readonly record struct FileStamp(long LastWriteUtcTicks, long Length);
 
 public sealed class MetaGuidMap
 {
-    private readonly Lock _gate = new();
+    private readonly object _gate = new();
     private readonly Dictionary<string, string> _guidToPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _pathToGuid = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, FileStamp> _metaStamps = new(StringComparer.OrdinalIgnoreCase);
@@ -27,29 +26,36 @@ public sealed class MetaGuidMap
 
     public static string? TryReadGuidFast(string metaFullPath)
     {
-        if (!File.Exists(metaFullPath))
+        try
+        {
+            if (!File.Exists(metaFullPath))
+            {
+                return null;
+            }
+
+            using var stream = new FileStream(metaFullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096);
+            using var reader = new StreamReader(stream);
+
+            string? line;
+            int lineLimit = 16;
+            while (lineLimit-- > 0 && (line = reader.ReadLine()) != null)
+            {
+                ReadOnlySpan<char> span = line.AsSpan().TrimStart();
+                if (!span.StartsWith("guid:", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                ReadOnlySpan<char> value = span.Slice("guid:".Length).Trim();
+                if (value.Length == 32 && IsHexString(value))
+                {
+                    return value.ToString().ToLowerInvariant();
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return null;
-        }
-
-        using var stream = new FileStream(metaFullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096);
-        using var reader = new StreamReader(stream);
-
-        string? line;
-        int lineLimit = 16;
-        while (lineLimit-- > 0 && (line = reader.ReadLine()) != null)
-        {
-            ReadOnlySpan<char> span = line.AsSpan().TrimStart();
-            if (!span.StartsWith("guid:", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            ReadOnlySpan<char> value = span.Slice("guid:".Length).Trim();
-            if (value.Length == 32 && IsHexString(value))
-            {
-                return value.ToString().ToLowerInvariant();
-            }
         }
 
         return null;
@@ -68,6 +74,72 @@ public sealed class MetaGuidMap
         return true;
     }
 
+    public static IEnumerable<FileInfo> EnumerateFilesSafe(string rootDir)
+    {
+        if (!Directory.Exists(rootDir))
+        {
+            yield break;
+        }
+
+        var pathComparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        var visitedDirs = new HashSet<string>(pathComparer);
+        var stack = new Stack<DirectoryInfo>();
+        stack.Push(new DirectoryInfo(rootDir));
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            string canonical;
+            try
+            {
+                var target = current.ResolveLinkTarget(returnFinalTarget: true);
+                canonical = Path.GetFullPath(target?.FullName ?? current.FullName);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            if (!visitedDirs.Add(canonical))
+            {
+                continue;
+            }
+
+            FileInfo[] files;
+            DirectoryInfo[] subDirs;
+            try
+            {
+                files = current.GetFiles();
+                subDirs = current.GetDirectories();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var file in files)
+            {
+                if ((file.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0)
+                {
+                    continue;
+                }
+                yield return file;
+            }
+
+            foreach (var sub in subDirs)
+            {
+                if ((sub.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0 ||
+                    sub.Name.StartsWith('.'))
+                {
+                    continue;
+                }
+                stack.Push(sub);
+            }
+        }
+    }
+
     public void Clear()
     {
         lock (_gate)
@@ -84,30 +156,44 @@ public sealed class MetaGuidMap
         var pathToGuid = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var metaStamps = new Dictionary<string, FileStamp>(StringComparer.OrdinalIgnoreCase);
 
-        string assetsDir = Path.Combine(projectRoot, "Assets");
-        if (Directory.Exists(assetsDir))
+        var scanRoots = new[]
         {
-            var opts = new EnumerationOptions
-            {
-                RecurseSubdirectories = true,
-                IgnoreInaccessible = true,
-                AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
-            };
+            Path.Combine(projectRoot, "Assets"),
+            Path.Combine(projectRoot, "Packages"),
+        };
 
-            foreach (var metaPath in Directory.EnumerateFiles(assetsDir, "*.meta", opts))
+        foreach (var scanDir in scanRoots)
+        {
+            foreach (var info in EnumerateFilesSafe(scanDir))
             {
-                var info = new FileInfo(metaPath);
-                var guid = TryReadGuidFast(metaPath);
+                if (!info.Name.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                long ticks;
+                long length;
+                try
+                {
+                    ticks = info.LastWriteTimeUtc.Ticks;
+                    length = info.Length;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
+                var guid = TryReadGuidFast(info.FullName);
                 if (guid == null) continue;
 
-                string relMeta = Path.GetRelativePath(projectRoot, metaPath).Replace('\\', '/');
+                string relMeta = Path.GetRelativePath(projectRoot, info.FullName).Replace('\\', '/');
                 string assetRel = relMeta.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)
                     ? relMeta.Substring(0, relMeta.Length - ".meta".Length)
                     : relMeta;
 
                 guidToPath[guid] = assetRel;
                 pathToGuid[assetRel] = guid;
-                metaStamps[relMeta] = new FileStamp(info.LastWriteTimeUtc.Ticks, info.Length);
+                metaStamps[relMeta] = new FileStamp(ticks, length);
             }
         }
 
@@ -161,8 +247,16 @@ public sealed class MetaGuidMap
             return true;
         }
 
-        var info = new FileInfo(metaFullPath);
-        var stamp = new FileStamp(info.LastWriteTimeUtc.Ticks, info.Length);
+        FileStamp stamp;
+        try
+        {
+            var info = new FileInfo(metaFullPath);
+            stamp = new FileStamp(info.LastWriteTimeUtc.Ticks, info.Length);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
 
         lock (_gate)
         {

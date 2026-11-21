@@ -164,37 +164,39 @@ export interface SerializedFieldValueEntry {
   line: number;
 }
 
+export type DaemonIndexStatus = {
+  state: 'idle' | 'indexing' | 'ready' | 'error';
+  indexedAssets: number;
+  indexedMetas: number;
+  lastBuildMs: number;
+};
+
 export interface DaemonRpcMethods {
   'index/status': {
     params: Record<string, never>;
-    result: {
-      state: 'idle' | 'indexing' | 'ready' | 'error';
-      indexedAssets: number;
-      indexedMetas: number;
-      lastBuildMs: number;
-    };
+    result: DaemonIndexStatus;
   };
   'index/rebuild': {
-    params: { force?: boolean };
+    params: { force?: boolean; forceFull?: boolean };
     result: {
       indexedAssets: number;
       elapsedMs: number;
     };
   };
   'usage/findByScriptGuid': {
-    params: { guid: string };
+    params: { scriptGuid?: string; guid?: string };
     result: {
       locations: AssetUsageLocation[];
     };
   };
   'usage/findByMethod': {
-    params: { guid: string; methodName: string };
+    params: { scriptGuid?: string; guid?: string; className?: string; methodName: string };
     result: {
       locations: AssetUsageLocation[];
     };
   };
   'inspector/getSerializedValues': {
-    params: { guid: string; fieldName?: string };
+    params: { scriptGuid?: string; guid?: string; fieldName?: string };
     result: {
       fields: SerializedFieldValueEntry[];
     };

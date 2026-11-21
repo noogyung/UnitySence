@@ -2,7 +2,7 @@
   "name": "unitybrain",
   "displayName": "UnityBrain",
   "description": "JetBrains Rider 수준의 Unity 개발 지능형 지원 확장 (ShaderLab/HLSL LSP, Roslyn 분석기, YAML 에셋 인덱서, .meta 자동 동기화).",
-  "version": "1.0.0",
+  "version": "1.1.2",
   "publisher": "unitybrain",
   "license": "MIT",
   "icon": "resources/icon.png",
@@ -32,6 +32,7 @@
   ],
   "activationEvents": [
     "workspaceContains:ProjectSettings/ProjectVersion.txt",
+    "workspaceContains:**/ProjectSettings/ProjectVersion.txt",
     "workspaceContains:Assets"
   ],
   "scripts": {
@@ -40,8 +41,8 @@
     "test": "node ../../tools/cli.mjs test extension"
   },
   "dependencies": {
-    "fast-xml-parser": "^4.5.0",
-    "vscode-jsonrpc": "^8.2.0"
+    "vscode-jsonrpc": "^8.2.0",
+    "vscode-languageserver": "^9.0.1"
   },
   "devDependencies": {
     "vscode": "^1.90.0",
@@ -103,6 +104,10 @@
         "title": "[UnityBrain] 셰이더 키워드 On/Off 전환"
       },
       {
+        "command": "unityBrain.testCurrentShader",
+        "title": "[UnityBrain] 현재 셰이더 Live Test 실행"
+      },
+      {
         "command": "unityBrain.showAssetUsages",
         "title": "[UnityBrain] 유니티 에셋 참조 위치 보기"
       },
@@ -125,13 +130,40 @@
       {
         "command": "unityBrain.csharpGoToDefinition",
         "title": "[UnityBrain] C# Unity 에셋/심볼 정의로 이동"
+      },
+      {
+        "command": "unityBrain.refreshShaderExplorer",
+        "title": "[UnityBrain] 셰이더 탐색기 새로고침"
       }
     ],
+    "views": {
+      "explorer": [
+        {
+          "id": "unityBrain.shaderExplorer",
+          "name": "UnityBrain Shaders",
+          "when": "unityBrain.isUnityProject"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "unityBrain.csharpGoToDefinition",
         "key": "f12",
-        "when": "editorTextFocus && editorLangId == csharp"
+        "when": "unityBrain.isUnityProject && editorTextFocus && editorLangId == csharp"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "unity-shaderlab",
+        "path": "./snippets/shaderlab.json"
+      },
+      {
+        "language": "shaderlab",
+        "path": "./snippets/shaderlab.json"
+      },
+      {
+        "language": "hlsl",
+        "path": "./snippets/hlsl.json"
       }
     ],
     "configuration": {
@@ -156,6 +188,22 @@
           "type": "string",
           "default": "",
           "description": "[UnityBrain] CGIncludes 및 빌트인 패키지를 찾기 위한 Unity Editor 설치 디렉터리 수동 지정 경로(선택 사항)입니다."
+        },
+        "unityBrain.shader.format.indentSize": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "[UnityBrain] ShaderLab/HLSL 포매팅 들여쓰기 크기입니다 (0 이하면 에디터 tabSize를 따릅니다)."
+        },
+        "unityBrain.shader.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "[UnityBrain] ShaderLab/HLSL/Compute 정적 진단 및 SRP Batcher CBUFFER 검사를 활성화합니다."
+        },
+        "unityBrain.completion.showEventSnippets": {
+          "type": "boolean",
+          "default": true,
+          "description": "[UnityBrain] C# MonoBehaviour/NetworkBehaviour 유니티 이벤트 함수 자동완성 제안을 표시합니다."
         }
       }
     }

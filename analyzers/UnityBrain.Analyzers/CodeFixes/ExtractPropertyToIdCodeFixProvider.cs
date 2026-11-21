@@ -26,6 +26,8 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
 
     public override async Task RegisterCodeFixesAsync(CodeFixContext context)
     {
+        if (context.Diagnostics.IsEmpty) return;
+
         var root = await context.Document.GetSyntaxRootAsync(context.CancellationToken).ConfigureAwait(false);
         if (root == null) return;
 
@@ -67,9 +69,10 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
 
         string targetHashMethodName = kind == "Animator" ? "StringToHash" : "PropertyToID";
         string? existingFieldName = FindExistingCachedFieldName(typeDecl, targetHashMethodName, propertyName);
-        string fieldName = existingFieldName ?? GenerateUniqueFieldName(typeDecl, propertyName, kind);
+        var typeSymbol = semanticModel?.GetDeclaredSymbol(typeDecl, ct);
+        string fieldName = existingFieldName ?? GenerateUniqueFieldName(typeDecl, typeSymbol, propertyName, kind);
 
-        var matchingLiterals = FindMatchingLiteralsInType(
+        var matchingCalls = FindMatchingCallsInType(
             typeDecl,
             targetLiteral,
             semanticModel,
@@ -77,20 +80,50 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
             propertyName,
             ct);
 
+        var replaceMap = new Dictionary<SyntaxNode, SyntaxNode>();
+        foreach (var entry in matchingCalls)
+        {
+            var idExpr = SyntaxFactory.IdentifierName(fieldName);
+            if (entry.LiteralNode.Parent is ArgumentSyntax argSyntax && argSyntax.NameColon != null)
+            {
+                if (!string.IsNullOrEmpty(entry.IntOverloadFirstParamName))
+                {
+                    var updatedNameColon = argSyntax.NameColon.WithName(
+                        SyntaxFactory.IdentifierName(entry.IntOverloadFirstParamName).WithTriviaFrom(argSyntax.NameColon.Name));
+                    var updatedArg = argSyntax
+                        .WithNameColon(updatedNameColon)
+                        .WithExpression(idExpr.WithTriviaFrom(entry.LiteralNode));
+                    replaceMap[argSyntax] = updatedArg;
+                }
+                else
+                {
+                    replaceMap[argSyntax] = argSyntax
+                        .WithNameColon(null)
+                        .WithExpression(idExpr.WithTriviaFrom(entry.LiteralNode))
+                        .WithLeadingTrivia(argSyntax.GetLeadingTrivia());
+                }
+            }
+            else
+            {
+                replaceMap[entry.LiteralNode] = idExpr.WithTriviaFrom(entry.LiteralNode);
+            }
+        }
+
         var newTypeDecl = typeDecl.ReplaceNodes(
-            matchingLiterals,
-            (orig, _) => SyntaxFactory.IdentifierName(fieldName).WithTriviaFrom(orig));
+            replaceMap.Keys,
+            (orig, _) => replaceMap[orig]);
 
         if (existingFieldName == null)
         {
-            bool hasUnityEngineUsing = HasUnityEngineUsing(root);
+            bool hasUnityEngineUsing = HasUnityEngineUsing(root, typeDecl);
             string hashCallTarget = kind == "Animator"
                 ? (hasUnityEngineUsing ? "Animator.StringToHash" : "UnityEngine.Animator.StringToHash")
                 : (hasUnityEngineUsing ? "Shader.PropertyToID" : "UnityEngine.Shader.PropertyToID");
 
+            string eol = DetectEol(root);
             string quotedName = SymbolDisplay.FormatLiteral(propertyName, quote: true);
             var fieldDecl = SyntaxFactory.ParseMemberDeclaration(
-                $"private static readonly int {fieldName} = {hashCallTarget}({quotedName});\n")!
+                $"private static readonly int {fieldName} = {hashCallTarget}({quotedName});{eol}")!
                 .WithAdditionalAnnotations(Formatter.Annotation);
 
             int insertIdx = 0;
@@ -113,7 +146,11 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
         return document.WithSyntaxRoot(newRoot);
     }
 
-    private static List<LiteralExpressionSyntax> FindMatchingLiteralsInType(
+    private sealed record MatchingLiteralEntry(
+        LiteralExpressionSyntax LiteralNode,
+        string? IntOverloadFirstParamName);
+
+    private static List<MatchingLiteralEntry> FindMatchingCallsInType(
         TypeDeclarationSyntax typeDecl,
         LiteralExpressionSyntax targetLiteral,
         SemanticModel? model,
@@ -121,8 +158,27 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
         string propertyName,
         CancellationToken ct)
     {
-        var matches = new List<LiteralExpressionSyntax> { targetLiteral };
-        if (model == null) return matches;
+        var entries = new List<MatchingLiteralEntry>();
+        var seen = new HashSet<LiteralExpressionSyntax>();
+
+        string? ResolveIntParamName(IMethodSymbol? called)
+        {
+            if (called == null) return null;
+            return UncachedShaderOrAnimatorIdAnalyzer.FindMatchingIntOverload(called)?.Parameters.FirstOrDefault()?.Name;
+        }
+
+        if (targetLiteral.FirstAncestorOrSelf<InvocationExpressionSyntax>() is { } targetInv && model != null &&
+            model.GetSymbolInfo(targetInv, ct).Symbol is IMethodSymbol targetCalled)
+        {
+            entries.Add(new MatchingLiteralEntry(targetLiteral, ResolveIntParamName(targetCalled)));
+        }
+        else
+        {
+            entries.Add(new MatchingLiteralEntry(targetLiteral, null));
+        }
+        seen.Add(targetLiteral);
+
+        if (model == null) return entries;
 
         foreach (var inv in typeDecl.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
@@ -138,14 +194,15 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
 
             var lit = UncachedShaderOrAnimatorIdAnalyzer.TryGetStringLiteralArgument(inv, called);
             if (lit != null &&
-                lit != targetLiteral &&
+                !seen.Contains(lit) &&
                 lit.Token.ValueText == propertyName)
             {
-                matches.Add(lit);
+                seen.Add(lit);
+                entries.Add(new MatchingLiteralEntry(lit, ResolveIntParamName(called)));
             }
         }
 
-        return matches;
+        return entries;
     }
 
     private static string? FindExistingCachedFieldName(
@@ -155,6 +212,16 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
     {
         foreach (var field in typeDecl.Members.OfType<FieldDeclarationSyntax>())
         {
+            if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)))
+            {
+                continue;
+            }
+            if (field.Declaration.Type.ToString() != "int" &&
+                field.Declaration.Type.ToString() != "System.Int32" &&
+                field.Declaration.Type.ToString() != "Int32")
+            {
+                continue;
+            }
             foreach (var v in field.Declaration.Variables)
             {
                 if (v.Initializer?.Value is InvocationExpressionSyntax inv &&
@@ -174,20 +241,40 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
         return null;
     }
 
-    private static bool HasUnityEngineUsing(SyntaxNode root)
+    private static bool HasUnityEngineUsing(SyntaxNode root, TypeDeclarationSyntax contextNode)
     {
-        if (root is CompilationUnitSyntax cu)
+        static bool IsDirectUnityEngineUsing(UsingDirectiveSyntax u) =>
+            u.Alias == null &&
+            u.StaticKeyword.IsKind(SyntaxKind.None) &&
+            u.Name?.ToString() == "UnityEngine";
+
+        for (SyntaxNode? cur = contextNode; cur != null; cur = cur.Parent)
         {
-            if (cu.Usings.Any(u => u.Name?.ToString() == "UnityEngine"))
+            if (cur is BaseNamespaceDeclarationSyntax ns && ns.Usings.Any(IsDirectUnityEngineUsing))
+            {
+                return true;
+            }
+            if (cur is CompilationUnitSyntax cu && cu.Usings.Any(IsDirectUnityEngineUsing))
             {
                 return true;
             }
         }
+        if (root is CompilationUnitSyntax rootCu && rootCu.Usings.Any(IsDirectUnityEngineUsing))
+        {
+            return true;
+        }
         return false;
+    }
+
+    private static string DetectEol(SyntaxNode root)
+    {
+        var text = root.ToFullString();
+        return text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
     }
 
     private static string GenerateUniqueFieldName(
         TypeDeclarationSyntax typeDecl,
+        INamedTypeSymbol? typeSymbol,
         string rawName,
         string kind)
     {
@@ -216,11 +303,24 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
             baseName += suffix;
         }
 
-        var existingNames = typeDecl.Members
-            .OfType<FieldDeclarationSyntax>()
-            .SelectMany(f => f.Declaration.Variables.Select(v => v.Identifier.ValueText))
-            .Concat(typeDecl.Members.OfType<PropertyDeclarationSyntax>().Select(p => p.Identifier.ValueText))
-            .ToHashSet(StringComparer.Ordinal);
+        var existingNames = new HashSet<string>(
+            typeDecl.Members
+                .SelectMany(m => m switch
+                {
+                    FieldDeclarationSyntax f => f.Declaration.Variables.Select(v => v.Identifier.ValueText),
+                    PropertyDeclarationSyntax p => new[] { p.Identifier.ValueText },
+                    MethodDeclarationSyntax md => new[] { md.Identifier.ValueText },
+                    _ => Array.Empty<string>(),
+                }),
+            StringComparer.Ordinal);
+
+        for (var cur = typeSymbol; cur != null; cur = cur.BaseType)
+        {
+            foreach (var m in cur.GetMembers())
+            {
+                existingNames.Add(m.Name);
+            }
+        }
 
         string candidate = baseName;
         int n = 2;

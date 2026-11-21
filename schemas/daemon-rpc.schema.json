@@ -19,32 +19,64 @@
         },
         "index/rebuild": {
           "type": "object",
-          "required": ["indexedAssets", "elapsedMs"],
           "properties": {
+            "params": {
+              "type": "object",
+              "properties": {
+                "force": { "type": "boolean" },
+                "forceFull": { "type": "boolean" }
+              }
+            },
             "indexedAssets": { "type": "integer" },
             "elapsedMs": { "type": "number" }
-          }
+          },
+          "required": ["indexedAssets", "elapsedMs"]
         },
         "usage/findByScriptGuid": {
           "type": "object",
-          "required": ["locations"],
           "properties": {
+            "params": {
+              "type": "object",
+              "properties": {
+                "scriptGuid": { "type": "string" },
+                "guid": { "type": "string" }
+              }
+            },
             "locations": { "type": "array" }
-          }
+          },
+          "required": ["locations"]
         },
         "usage/findByMethod": {
           "type": "object",
-          "required": ["locations"],
           "properties": {
+            "params": {
+              "type": "object",
+              "properties": {
+                "scriptGuid": { "type": "string" },
+                "guid": { "type": "string" },
+                "className": { "type": "string" },
+                "methodName": { "type": "string" }
+              },
+              "required": ["methodName"]
+            },
             "locations": { "type": "array" }
-          }
+          },
+          "required": ["locations"]
         },
         "inspector/getSerializedValues": {
           "type": "object",
-          "required": ["fields"],
           "properties": {
+            "params": {
+              "type": "object",
+              "properties": {
+                "scriptGuid": { "type": "string" },
+                "guid": { "type": "string" },
+                "fieldName": { "type": "string" }
+              }
+            },
             "fields": { "type": "array" }
-          }
+          },
+          "required": ["fields"]
         }
       }
     }

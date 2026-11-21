@@ -1,7 +1,14 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as vscode from 'vscode';
 import type { IncludeDependencyGraph } from '../../../shader-lsp/src/indexer/hlslIncludeGraph.ts';
-import { extractVirtualHlslDocument } from '../../../shader-lsp/src/parser/shaderLabVirtualDoc.ts';
+import { findBlockIndexAtLine, isLineVisibleInPass } from '../../../shader-lsp/src/indexer/hlslSymbolTable.ts';
+import {
+  blankShaderCommentsPreservingLayout,
+  extractVirtualHlslDocument,
+} from '../../../shader-lsp/src/parser/shaderLabVirtualDoc.ts';
+import { normalizePathKey } from '../../../shader-lsp/src/vfs/virtualPathResolver.ts';
 
 export const SHADER_SEMANTIC_TOKEN_TYPES = [
   'struct',
@@ -82,6 +89,37 @@ const BUILTIN_HLSL_SIGNATURES: Record<string, Array<{ label: string; doc: string
   f16tof32: [{ label: 'float f16tof32(uint value)', doc: '[UnityBrain] 하위 16비트 half 값을 32비트 float로 변환합니다.' }],
   f32tof16: [{ label: 'uint f32tof16(float value)', doc: '[UnityBrain] 32비트 float 값을 하위 16비트 half 비트로 변환합니다.' }],
   NonUniformResourceIndex: [{ label: 'uint NonUniformResourceIndex(uint index)', doc: '[UnityBrain] SM 5.1+/6.x 동적(비균일) 디스크립터 배열 인덱싱을 표시합니다.' }],
+  sin: [{ label: 'T sin(T x)', doc: '[UnityBrain] 라디안 각도 x의 사인 값을 계산합니다.' }],
+  cos: [{ label: 'T cos(T x)', doc: '[UnityBrain] 라디안 각도 x의 코사인 값을 계산합니다.' }],
+  tan: [{ label: 'T tan(T x)', doc: '[UnityBrain] 라디안 각도 x의 탄젠트 값을 계산합니다.' }],
+  asin: [{ label: 'T asin(T x)', doc: '[UnityBrain] [-1, 1] 범위 값의 아크사인을 계산합니다.' }],
+  acos: [{ label: 'T acos(T x)', doc: '[UnityBrain] [-1, 1] 범위 값의 아크코사인을 계산합니다.' }],
+  atan: [{ label: 'T atan(T x)', doc: '[UnityBrain] 값 x의 아크탄젠트를 계산합니다.' }],
+  atan2: [{ label: 'T atan2(T y, T x)', doc: '[UnityBrain] y/x의 아크탄젠트(사분면 보존)를 계산합니다.' }],
+  abs: [{ label: 'T abs(T x)', doc: '[UnityBrain] x의 절댓값을 반환합니다.' }],
+  sign: [{ label: 'T sign(T x)', doc: '[UnityBrain] x의 부호(-1, 0, 1)를 반환합니다.' }],
+  floor: [{ label: 'T floor(T x)', doc: '[UnityBrain] x보다 작거나 같은 최대 정수를 반환합니다.' }],
+  ceil: [{ label: 'T ceil(T x)', doc: '[UnityBrain] x보다 크거나 같은 최소 정수를 반환합니다.' }],
+  round: [{ label: 'T round(T x)', doc: '[UnityBrain] x를 가장 가까운 정수로 반올림합니다.' }],
+  frac: [{ label: 'T frac(T x)', doc: '[UnityBrain] x의 소수부(x - floor(x))를 반환합니다.' }],
+  fmod: [{ label: 'T fmod(T x, T y)', doc: '[UnityBrain] x를 y로 나눈 부동소수점 나머지를 반환합니다.' }],
+  sqrt: [{ label: 'T sqrt(T x)', doc: '[UnityBrain] x의 제곱근을 계산합니다.' }],
+  rsqrt: [{ label: 'T rsqrt(T x)', doc: '[UnityBrain] x의 역제곱근(1 / sqrt(x))을 계산합니다.' }],
+  exp: [{ label: 'T exp(T x)', doc: '[UnityBrain] 자연지수 e^x를 계산합니다.' }],
+  exp2: [{ label: 'T exp2(T x)', doc: '[UnityBrain] 2^x를 계산합니다.' }],
+  log: [{ label: 'T log(T x)', doc: '[UnityBrain] x의 자연로그 ln(x)를 계산합니다.' }],
+  log2: [{ label: 'T log2(T x)', doc: '[UnityBrain] x의 밑이 2인 로그를 계산합니다.' }],
+  ddx: [{ label: 'T ddx(T x)', doc: '[UnityBrain] 픽셀 셰이더에서 화면 X축 방향 편미분을 계산합니다.' }],
+  ddy: [{ label: 'T ddy(T x)', doc: '[UnityBrain] 픽셀 셰이더에서 화면 Y축 방향 편미분을 계산합니다.' }],
+  fwidth: [{ label: 'T fwidth(T x)', doc: '[UnityBrain] abs(ddx(x)) + abs(ddy(x))를 반환합니다.' }],
+  clip: [{ label: 'void clip(T x)', doc: '[UnityBrain] x의 어느 한 성분이라도 0 미만이면 현재 픽셀을 폐기합니다.' }],
+  all: [{ label: 'bool all(T x)', doc: '[UnityBrain] x의 모든 성분이 0이 아니면 true를 반환합니다.' }],
+  any: [{ label: 'bool any(T x)', doc: '[UnityBrain] x의 성분 중 하나라도 0이 아니면 true를 반환합니다.' }],
+  mad: [{ label: 'T mad(T mvalue, T avalue, T bvalue)', doc: '[UnityBrain] 곱셈-덧셈 융합 연산(mvalue * avalue + bvalue)을 수행합니다.' }],
+  rcp: [{ label: 'T rcp(T x)', doc: '[UnityBrain] x의 빠른 근사 역수(1 / x)를 계산합니다.' }],
+  sincos: [{ label: 'void sincos(T x, out T s, out T c)', doc: '[UnityBrain] x의 사인(s)과 코사인(c)을 동시에 계산합니다.' }],
+  tex2Dproj: [{ label: 'float4 tex2Dproj(sampler2D s, float4 t)', doc: '[UnityBrain] 투영 나눗셈(t.xy / t.w)을 적용해 2D 텍스처를 샘플링합니다.' }],
+  texCUBE: [{ label: 'float4 texCUBE(samplerCUBE s, float3 t)', doc: '[UnityBrain] 방향 벡터 t로 큐브맵 텍스처를 샘플링합니다.' }],
 };
 
 export function stripCommentsAndStringsByLine(lines: readonly string[]): string[] {
@@ -162,7 +200,6 @@ export class ShaderSemanticTokensProvider {
     const propertyNames = new Set<string>();
     const macroNames = new Set<string>();
     const globalVarNames = new Set<string>();
-    const fieldNames = new Set<string>();
 
     for (const f of walk.files) {
       for (const sym of f.symbols) {
@@ -171,7 +208,6 @@ export class ShaderSemanticTokensProvider {
         else if (sym.kind === 'property') propertyNames.add(sym.name);
         else if (sym.kind === 'macro') macroNames.add(sym.name);
         else if (sym.kind === 'variable' || sym.kind === 'cbuffer') globalVarNames.add(sym.name);
-        else if (sym.kind === 'field') fieldNames.add(sym.name);
       }
     }
 
@@ -205,7 +241,13 @@ export class ShaderSemanticTokensProvider {
 
       if (/^\s*#/.test(codeLine)) {
         const trimmed = codeLine.trim();
-        if (/^#\s*pragma\b/.test(trimmed)) {
+        const incDirectiveMatch = /^(\s*#\s*(?:include_with_pragmas|include))\b/.exec(codeLine);
+        if (incDirectiveMatch) {
+          const hashIdx = incDirectiveMatch[1].indexOf('#');
+          if (hashIdx >= 0) {
+            builder.push(lineIdx, hashIdx, incDirectiveMatch[1].length - hashIdx, 5, 0);
+          }
+        } else if (/^#\s*pragma\b/.test(trimmed)) {
           const identRe = /\b([A-Za-z_][A-Za-z0-9_]*)\b/g;
           let m: RegExpExecArray | null;
           while ((m = identRe.exec(codeLine)) !== null) {
@@ -213,6 +255,18 @@ export class ShaderSemanticTokensProvider {
             if (pragmaEntryNames.has(ident)) {
               builder.push(lineIdx, m.index, ident.length, 1, 0);
             } else if (pragmaKeywords.has(ident) || macroNames.has(ident)) {
+              builder.push(lineIdx, m.index, ident.length, 5, 0);
+            }
+          }
+        } else if (/^#\s*(?:if|ifdef|ifndef|elif)\b/.test(trimmed)) {
+          const identRe = /\b([A-Za-z_][A-Za-z0-9_]*)\b/g;
+          let m: RegExpExecArray | null;
+          while ((m = identRe.exec(codeLine)) !== null) {
+            const ident = m[1];
+            if (ident === 'if' || ident === 'ifdef' || ident === 'ifndef' || ident === 'elif' || ident === 'defined') {
+              continue;
+            }
+            if (macroNames.has(ident) || pragmaKeywords.has(ident) || /^[A-Z][A-Z0-9_]{2,}$/.test(ident)) {
               builder.push(lineIdx, m.index, ident.length, 5, 0);
             }
           }
@@ -262,8 +316,6 @@ export class ShaderSemanticTokensProvider {
           builder.push(lineIdx, col, ident.length, 5, 0);
         } else if (codeLine.slice(col + ident.length).trimStart().startsWith('(')) {
           builder.push(lineIdx, col, ident.length, 1, 0);
-        } else if (fieldNames.has(ident)) {
-          builder.push(lineIdx, col, ident.length, 4, 0);
         }
       }
     }
@@ -293,8 +345,8 @@ export class ShaderDocumentSymbolProvider {
     const topSymbols: vscode.DocumentSymbol[] = [];
 
     if (parsed.properties.length > 0) {
-      const firstPropLine = parsed.properties[0].line;
-      const lastPropLine = parsed.properties[parsed.properties.length - 1].line;
+      const firstPropLine = parsed.properties[0].line ?? 0;
+      const lastPropLine = parsed.properties[parsed.properties.length - 1].line ?? firstPropLine;
       const propsGroup = new vscode.DocumentSymbol(
         'Properties',
         `셰이더 프로퍼티 ${parsed.properties.length}개`,
@@ -303,19 +355,152 @@ export class ShaderDocumentSymbolProvider {
         safeRange(firstPropLine, 0, firstPropLine, 10),
       );
       for (const prop of parsed.properties) {
-        const lineLen = doc.lineAt(Math.min(prop.line, docLineCount - 1)).text.length;
+        const pLine = prop.line ?? 0;
+        const pCol = prop.column ?? 0;
+        const lineLen = doc.lineAt(Math.min(pLine, docLineCount - 1)).text.length;
         propsGroup.children.push(
           new vscode.DocumentSymbol(
             prop.name,
             `${prop.displayName} (${prop.type})`,
             vscode.SymbolKind.Property,
-            safeRange(prop.line, prop.column, prop.line, lineLen),
-            safeRange(prop.line, prop.column, prop.line, prop.column + prop.name.length),
+            safeRange(pLine, pCol, pLine, lineLen),
+            safeRange(pLine, pCol, pLine, pCol + prop.name.length),
           ),
         );
       }
       topSymbols.push(propsGroup);
     }
+
+    const rawLines = text.split(/\r?\n/);
+    const subShaderPassRanges: Array<{
+      kind: 'SubShader' | 'Pass';
+      name: string;
+      startLine: number;
+      endLine: number;
+      node: vscode.DocumentSymbol;
+      parentSubShaderIdx?: number;
+    }> = [];
+    {
+      const shaderLabChars = Array.from(text);
+      for (const blk of parsed.blocks ?? []) {
+        for (let k = blk.codeStartOffset; k < blk.codeEndOffset && k < shaderLabChars.length; k++) {
+          if (shaderLabChars[k] !== '\n' && shaderLabChars[k] !== '\r') {
+            shaderLabChars[k] = ' ';
+          }
+        }
+      }
+      const shaderLabLines = stripCommentsAndStringsByLine(shaderLabChars.join('').split(/\r?\n/));
+      const blockStack: Array<{
+        kind: 'SubShader' | 'Pass' | 'Stencil' | 'Other';
+        name: string;
+        startLine: number;
+        parentSubShaderIdx?: number;
+      }> = [];
+      let pendingKind: 'SubShader' | 'Pass' | 'Stencil' | 'Other' | null = null;
+      let pendingStartLine = 0;
+      let currentSubShaderIdx = -1;
+      let passCounter = 0;
+      let subShaderCounter = 0;
+
+      const tokenRe = /\b(SubShader|Pass|Stencil|Category)\b|([{}])/g;
+      for (let i = 0; i < shaderLabLines.length; i++) {
+        const line = shaderLabLines[i];
+        tokenRe.lastIndex = 0;
+        let tok: RegExpExecArray | null;
+        while ((tok = tokenRe.exec(line)) !== null) {
+          const kw = tok[1];
+          const brace = tok[2];
+          if (kw) {
+            if (kw === 'SubShader') {
+              pendingKind = 'SubShader';
+              pendingStartLine = i;
+            } else if (kw === 'Pass') {
+              if (blockStack[blockStack.length - 1]?.kind !== 'Stencil') {
+                pendingKind = 'Pass';
+                pendingStartLine = i;
+              }
+            } else if (kw === 'Stencil') {
+              pendingKind = 'Stencil';
+              pendingStartLine = i;
+            } else if (kw === 'Category') {
+              pendingKind = 'Other';
+              pendingStartLine = i;
+            }
+          } else if (brace === '{') {
+            if (pendingKind === 'SubShader') {
+              subShaderCounter++;
+              blockStack.push({ kind: 'SubShader', name: `SubShader #${subShaderCounter}`, startLine: pendingStartLine });
+              currentSubShaderIdx = subShaderPassRanges.length;
+              pendingKind = null;
+            } else if (pendingKind === 'Pass') {
+              passCounter++;
+              blockStack.push({
+                kind: 'Pass',
+                name: `Pass #${passCounter}`,
+                startLine: pendingStartLine,
+                parentSubShaderIdx: currentSubShaderIdx >= 0 ? currentSubShaderIdx : undefined,
+              });
+              pendingKind = null;
+            } else if (pendingKind === 'Stencil') {
+              blockStack.push({ kind: 'Stencil', name: 'Stencil', startLine: pendingStartLine });
+              pendingKind = null;
+            } else {
+              blockStack.push({ kind: 'Other', name: '', startLine: i });
+              pendingKind = null;
+            }
+          } else if (brace === '}' && blockStack.length > 0) {
+            const popped = blockStack.pop()!;
+            if (popped.kind === 'SubShader' || popped.kind === 'Pass') {
+              let displayName = popped.name;
+              if (popped.kind === 'Pass') {
+                const rawSlice = rawLines.slice(popped.startLine, Math.min(i + 1, popped.startLine + 12)).join('\n');
+                const nameMatch = /\bName\s+"([^"]+)"/.exec(rawSlice);
+                if (nameMatch) {
+                  displayName = `Pass "${nameMatch[1]}"`;
+                }
+              }
+              const r = safeRange(popped.startLine, 0, i, doc.lineAt(Math.min(i, docLineCount - 1)).text.length);
+              const sel = safeRange(popped.startLine, 0, popped.startLine, doc.lineAt(Math.min(popped.startLine, docLineCount - 1)).text.length);
+              const node = new vscode.DocumentSymbol(
+                displayName,
+                popped.kind === 'SubShader' ? 'ShaderLab SubShader' : 'ShaderLab Pass',
+                popped.kind === 'SubShader' ? vscode.SymbolKind.Module : vscode.SymbolKind.Class,
+                r,
+                sel,
+              );
+              subShaderPassRanges.push({
+                kind: popped.kind,
+                name: displayName,
+                startLine: popped.startLine,
+                endLine: i,
+                node,
+                parentSubShaderIdx: popped.parentSubShaderIdx,
+              });
+              if (popped.kind === 'SubShader') {
+                currentSubShaderIdx = -1;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const passEntries = subShaderPassRanges.filter((e) => e.kind === 'Pass');
+    const subShaderEntries = subShaderPassRanges.filter((e) => e.kind === 'SubShader');
+
+    const attachToHierarchy = (symLine: number, node: vscode.DocumentSymbol) => {
+      const passHit = passEntries.find((p) => symLine >= p.startLine && symLine <= p.endLine);
+      if (passHit) {
+        passHit.node.children.push(node);
+        return;
+      }
+      const ssHit = subShaderEntries.find((s) => symLine >= s.startLine && symLine <= s.endLine);
+      if (ssHit) {
+        ssHit.node.children.push(node);
+        return;
+      }
+      topSymbols.push(node);
+    };
 
     const structNodes = new Map<string, vscode.DocumentSymbol>();
     for (const sym of parsed.symbols) {
@@ -343,7 +528,10 @@ export class ShaderDocumentSymbolProvider {
       const node = new vscode.DocumentSymbol(sym.name, detail, kind, symRange, selRange);
       if (sym.kind === 'struct') {
         structNodes.set(`${sym.line}:${sym.name}`, node);
-        const fields = parsed.structFieldsByStruct.get(sym.name) ?? [];
+        const symBlockIdx = findBlockIndexAtLine(parsed.blocks, sym.line);
+        const scopedGroups = parsed.scopedStructFields?.get(sym.name);
+        const matchedGroup = scopedGroups?.find((g) => g.blockIndex === symBlockIdx);
+        const fields = matchedGroup?.fields ?? parsed.structFieldsByStruct.get(sym.name) ?? [];
         for (const f of fields) {
           const fRange = safeRange(f.line, f.column, f.line, f.column + f.name.length);
           node.children.push(
@@ -351,7 +539,19 @@ export class ShaderDocumentSymbolProvider {
           );
         }
       }
-      topSymbols.push(node);
+      attachToHierarchy(sym.line, node);
+    }
+
+    for (const p of passEntries) {
+      const parentSs = subShaderEntries.find((s) => p.startLine >= s.startLine && p.endLine <= s.endLine);
+      if (parentSs) {
+        parentSs.node.children.push(p.node);
+      } else {
+        topSymbols.push(p.node);
+      }
+    }
+    for (const s of subShaderEntries) {
+      topSymbols.push(s.node);
     }
 
     if (parsed.shaderName) {
@@ -370,17 +570,72 @@ export class ShaderDocumentSymbolProvider {
   }
 }
 
+function splitTopLevelParams(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let inString = false;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === '\\' && i + 1 < text.length) {
+        i++;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '(' || ch === '[' || ch === '<' || ch === '{') {
+      depth++;
+    } else if ((ch === ')' || ch === ']' || ch === '>' || ch === '}') && depth > 0) {
+      depth--;
+    } else if (ch === ',' && depth === 0) {
+      const seg = text.slice(start, i).trim();
+      if (seg) out.push(seg);
+      start = i + 1;
+    }
+  }
+  const tail = text.slice(start).trim();
+  if (tail) out.push(tail);
+  return out;
+}
+
+function formatReadableUriLocation(uriStr: string): string {
+  try {
+    const fsPath = uriStr.startsWith('file://') ? fileURLToPath(uriStr) : uriStr;
+    const slashNorm = fsPath.replace(/\\/g, '/');
+    const pkgIdx = slashNorm.toLowerCase().indexOf('/library/packagecache/');
+    if (pkgIdx >= 0) {
+      return `Packages/${slashNorm.slice(pkgIdx + '/library/packagecache/'.length)}`;
+    }
+    const assetsIdx = slashNorm.toLowerCase().indexOf('/assets/');
+    if (assetsIdx >= 0) {
+      return slashNorm.slice(assetsIdx + 1);
+    }
+    return path.basename(fsPath);
+  } catch {
+    return uriStr;
+  }
+}
+
 export class ShaderSignatureHelpProvider {
   constructor(private readonly shaderGraph: IncludeDependencyGraph) {}
 
   public provideSignatureHelp(doc: vscode.TextDocument, position: vscode.Position): vscode.SignatureHelp | undefined {
-    const startLine = Math.max(0, position.line - 5);
-    const snippet = doc.getText(new vscode.Range(new vscode.Position(startLine, 0), position));
+    const startLine = Math.max(0, position.line - 40);
+    const rawSnippet = doc.getText(new vscode.Range(new vscode.Position(startLine, 0), position));
+    const snippet = stripCommentsAndStringsByLine(rawSnippet.split(/\r?\n/)).join('\n');
     const callContext = this.findEnclosingCall(snippet);
     if (!callContext) return undefined;
 
     this.shaderGraph.setOpenDocumentContent(doc.uri.toString(), doc.getText());
-    const visible = this.shaderGraph.findSymbolsVisibleFrom(doc.uri.toString(), callContext.funcName);
+    const visible = this.shaderGraph.findSymbolsVisibleFrom(
+      doc.uri.toString(),
+      callContext.funcName,
+      position.line,
+    );
     const candidates: Array<{ label: string; doc: string; params: string[] }> = [];
 
     for (const sym of visible) {
@@ -388,7 +643,7 @@ export class ShaderSignatureHelpProvider {
         const params = this.extractParamList(sym.signature);
         candidates.push({
           label: sym.signature,
-          doc: `[UnityBrain] 선언 위치: ${sym.uri}`,
+          doc: `[UnityBrain] 선언 위치: ${formatReadableUriLocation(sym.uri)}:${sym.line + 1}`,
           params,
         });
       }
@@ -407,14 +662,36 @@ export class ShaderSignatureHelpProvider {
 
     if (candidates.length === 0) return undefined;
 
+    let bestSigIdx = 0;
+    let bestParamDelta = Number.POSITIVE_INFINITY;
+    let fallbackMaxIdx = 0;
+    let maxParams = -1;
+    for (let idx = 0; idx < candidates.length; idx++) {
+      const len = candidates[idx].params.length;
+      if (len > maxParams) {
+        maxParams = len;
+        fallbackMaxIdx = idx;
+      }
+      if (len > callContext.argIndex) {
+        const delta = len - callContext.argIndex;
+        if (delta < bestParamDelta) {
+          bestParamDelta = delta;
+          bestSigIdx = idx;
+        }
+      }
+    }
+    if (!Number.isFinite(bestParamDelta)) {
+      bestSigIdx = fallbackMaxIdx;
+    }
+
     const help = new vscode.SignatureHelp();
     help.signatures = candidates.map((cand) => {
       const sigInfo = new vscode.SignatureInformation(cand.label, cand.doc);
       sigInfo.parameters = cand.params.map((p) => new vscode.ParameterInformation(p));
       return sigInfo;
     });
-    help.activeSignature = 0;
-    const paramCount = candidates[0].params.length;
+    help.activeSignature = bestSigIdx;
+    const paramCount = candidates[bestSigIdx].params.length;
     help.activeParameter = paramCount > 0 ? Math.min(callContext.argIndex, paramCount - 1) : 0;
     return help;
   }
@@ -447,27 +724,29 @@ export class ShaderSignatureHelpProvider {
     if (open < 0 || close <= open) return [];
     const inner = signature.slice(open + 1, close).trim();
     if (!inner || inner === 'void') return [];
-    return inner.split(',').map((s) => s.trim()).filter(Boolean);
+    return splitTopLevelParams(inner);
   }
 }
 
 function collectIdentifierMatches(
   text: string,
   symbolName: string,
-): Array<{ line: number; col: number; isWrite: boolean }> {
+): Array<{ line: number; col: number; isWrite: boolean; isDotAccess: boolean }> {
   const escaped = symbolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const wordRe = new RegExp(`\\b${escaped}\\b`, 'g');
   const codeLines = stripCommentsAndStringsByLine(text.split(/\r?\n/));
-  const hits: Array<{ line: number; col: number; isWrite: boolean }> = [];
+  const hits: Array<{ line: number; col: number; isWrite: boolean; isDotAccess: boolean }> = [];
 
   for (let lineIdx = 0; lineIdx < codeLines.length; lineIdx++) {
     const line = codeLines[lineIdx];
     wordRe.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = wordRe.exec(line)) !== null) {
-      const after = line.slice(m.index + symbolName.length).trimStart();
+      const col = m.index;
+      const isDotAccess = col > 0 && line[col - 1] === '.';
+      const after = line.slice(col + symbolName.length).trimStart();
       const isWrite = /^(?:\+=|-=|\*=|\/=|%=|=(?!=))/.test(after);
-      hits.push({ line: lineIdx, col: m.index, isWrite });
+      hits.push({ line: lineIdx, col, isWrite, isDotAccess });
     }
   }
   return hits;
@@ -483,7 +762,11 @@ export class ShaderDocumentHighlightProvider {
     const word = doc.getText(wordRange);
     if (!word || SHADER_KEYWORDS_SKIP.has(word)) return [];
 
-    const matches = collectIdentifierMatches(doc.getText(), word);
+    const lineText = doc.lineAt(position.line).text;
+    const isDotCursor = wordRange.start.character > 0 && lineText[wordRange.start.character - 1] === '.';
+    const matches = collectIdentifierMatches(doc.getText(), word).filter((hit) =>
+      isDotCursor ? hit.isDotAccess : !hit.isDotAccess,
+    );
     return matches.map(
       (hit) =>
         new vscode.DocumentHighlight(
@@ -494,33 +777,122 @@ export class ShaderDocumentHighlightProvider {
   }
 }
 
+function isTokenInCommentOrString(doc: vscode.TextDocument, wordRange: vscode.Range, word: string): boolean {
+  const lines = doc.getText().split(/\r?\n/);
+  const strippedLines = stripCommentsAndStringsByLine(lines);
+  const strippedSlice = (strippedLines[wordRange.start.line] ?? '').slice(
+    wordRange.start.character,
+    wordRange.end.character,
+  );
+  return strippedSlice !== word;
+}
+
+function isVectorSwizzleToken(doc: vscode.TextDocument, wordRange: vscode.Range, word: string): boolean {
+  if (!SWIZZLE_RE.test(word)) return false;
+  const lineText = doc.lineAt(wordRange.start.line).text;
+  return wordRange.start.character > 0 && lineText[wordRange.start.character - 1] === '.';
+}
+
 function collectCrossFileOccurrences(
   doc: vscode.TextDocument,
   word: string,
   shaderGraph: IncludeDependencyGraph,
+  position: vscode.Position,
 ): Array<{ uri: vscode.Uri; filePath: string; line: number; col: number }> {
   const uriStr = doc.uri.toString();
+  const entryKey = normalizePathKey(uriStr);
   const entryNorm = shaderGraph.normalizeFilePath(uriStr);
-  shaderGraph.setOpenDocumentContent(uriStr, doc.getText());
-  const walk = shaderGraph.collectReachableFiles(uriStr);
-  const parents = shaderGraph.findParentIncludeFiles(uriStr);
+  const parsed = shaderGraph.setOpenDocumentContent(uriStr, doc.getText());
+  const cursorLine = position.line;
+  const lineText = doc.lineAt(cursorLine).text;
+  const wordRange = doc.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+  const isDotCursor = Boolean(
+    wordRange && wordRange.start.character > 0 && lineText[wordRange.start.character - 1] === '.',
+  );
 
-  const visitedFiles = new Set<string>();
+  // If cursor is on a local variable or function parameter (and not a `.member` access), restrict to that function scope
+  if (!isDotCursor) {
+    const localScope = parsed.localVarScopes.find(
+      (sc) => cursorLine >= sc.startLine && cursorLine <= sc.endLine && sc.declarations.has(word),
+    );
+    const decl = localScope?.declarations.get(word);
+    if (localScope && decl && cursorLine >= decl.line) {
+      const matches = collectIdentifierMatches(doc.getText(), word);
+      return matches
+        .filter(
+          (hit) => !hit.isDotAccess && hit.line >= localScope.startLine && hit.line <= localScope.endLine,
+        )
+        .map((hit) => ({
+          uri: doc.uri,
+          filePath: entryNorm,
+          line: hit.line,
+          col: hit.col,
+        }));
+    }
+  }
+
+  const walk = shaderGraph.collectReachableFiles(uriStr);
+  const isShaderFile = /\.(shader|urtshader)$/i.test(entryNorm);
+  const isShaderLabProp = parsed.properties.some((p) => p.name === word);
+  const declaredInReachableHeader = walk.files
+    .slice(1)
+    .some((f) => f.symbols.some((s) => s.name === word));
+  const restrictToCurrentShaderFile =
+    isShaderFile && !isShaderLabProp && !declaredInReachableHeader && !isDotCursor;
+
+  const parents = restrictToCurrentShaderFile ? [] : shaderGraph.findParentIncludeFiles(uriStr);
+  const candidates = restrictToCurrentShaderFile
+    ? [parsed]
+    : [...walk.files, ...parents];
+
+  const openBuffersByKey = new Map<string, string>();
+  for (const openDoc of vscode.workspace.textDocuments ?? []) {
+    openBuffersByKey.set(normalizePathKey(openDoc.uri.toString()), openDoc.getText());
+  }
+
+  const symDeclInCurrent = parsed.symbols.find(
+    (s) => s.name === word && s.kind !== 'property' && isLineVisibleInPass(parsed.blocks, s.line, cursorLine),
+  );
+
+  const visitedKeys = new Set<string>();
   const results: Array<{ uri: vscode.Uri; filePath: string; line: number; col: number }> = [];
-  const candidates = [...walk.files, ...parents];
 
   for (const file of candidates) {
-    if (visitedFiles.has(file.filePath)) continue;
-    visitedFiles.add(file.filePath);
+    const fileKey = normalizePathKey(file.filePath);
+    if (visitedKeys.has(fileKey)) continue;
+    visitedKeys.add(fileKey);
 
-    const content =
-      file.filePath === entryNorm
-        ? doc.getText()
-        : fs.existsSync(file.filePath)
+    const isCurrent = fileKey === entryKey;
+    let content = isCurrent ? doc.getText() : openBuffersByKey.get(fileKey);
+    if (content === undefined) {
+      try {
+        content = fs.existsSync(file.filePath)
           ? fs.readFileSync(file.filePath, 'utf8')
           : file.virtualHlsl;
+      } catch {
+        content = file.virtualHlsl;
+      }
+    }
+
     const matches = collectIdentifierMatches(content, word);
     for (const hit of matches) {
+      if (isDotCursor) {
+        const isStructFieldDecl =
+          file.symbols.some((s) => s.kind === 'field' && s.name === word && s.line === hit.line);
+        if (!hit.isDotAccess && !isStructFieldDecl) continue;
+      } else if (hit.isDotAccess) {
+        continue;
+      }
+
+      if (
+        isCurrent &&
+        restrictToCurrentShaderFile &&
+        symDeclInCurrent &&
+        !isLineVisibleInPass(parsed.blocks, symDeclInCurrent.line, hit.line)
+      ) {
+        continue;
+      }
+
       results.push({
         uri: vscode.Uri.parse(file.uri),
         filePath: file.filePath,
@@ -541,7 +913,7 @@ export class ShaderReferenceProvider {
     const word = doc.getText(wordRange);
     if (!word || SHADER_KEYWORDS_SKIP.has(word)) return [];
 
-    return collectCrossFileOccurrences(doc, word, this.shaderGraph).map(
+    return collectCrossFileOccurrences(doc, word, this.shaderGraph, position).map(
       (occ) =>
         new vscode.Location(occ.uri, new vscode.Range(occ.line, occ.col, occ.line, occ.col + word.length)),
     );
@@ -552,6 +924,10 @@ export class ShaderRenameProvider {
   constructor(private readonly shaderGraph: IncludeDependencyGraph) {}
 
   public prepareRename(doc: vscode.TextDocument, position: vscode.Position): vscode.Range {
+    const filePath = this.shaderGraph.normalizeFilePath(doc.uri.toString());
+    if (filePath.replace(/\\/g, '/').toLowerCase().includes('/library/packagecache/')) {
+      throw new Error('[UnityBrain] 읽기 전용 PackageCache 셰이더 파일의 심볼은 이름을 변경할 수 없습니다.');
+    }
     const wordRange = doc.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
     if (!wordRange) {
       throw new Error('[UnityBrain] 이름을 변경할 심볼 위에 커서를 두세요.');
@@ -559,6 +935,12 @@ export class ShaderRenameProvider {
     const word = doc.getText(wordRange);
     if (!word || SHADER_KEYWORDS_SKIP.has(word)) {
       throw new Error('[UnityBrain] 셰이더 예약어는 이름을 변경할 수 없습니다.');
+    }
+    if (isTokenInCommentOrString(doc, wordRange, word)) {
+      throw new Error('[UnityBrain] 주석 또는 문자열 리터럴 내부에서는 이름을 변경할 수 없습니다.');
+    }
+    if (isVectorSwizzleToken(doc, wordRange, word)) {
+      throw new Error('[UnityBrain] 벡터 스위즐 컴포넌트(.xyz, .rgba)는 이름을 변경할 수 없습니다.');
     }
     return wordRange;
   }
@@ -568,13 +950,26 @@ export class ShaderRenameProvider {
     position: vscode.Position,
     newName: string,
   ): vscode.WorkspaceEdit | undefined {
+    const trimmedNewName = newName.trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmedNewName) || SHADER_KEYWORDS_SKIP.has(trimmedNewName)) {
+      throw new Error(`[UnityBrain] '${newName}'은(는) 유효한 HLSL/ShaderLab 식별자 이름이 아닙니다.`);
+    }
+
+    const filePath = this.shaderGraph.normalizeFilePath(doc.uri.toString());
+    if (filePath.replace(/\\/g, '/').toLowerCase().includes('/library/packagecache/')) {
+      return undefined;
+    }
+
     const wordRange = doc.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
     if (!wordRange) return undefined;
     const word = doc.getText(wordRange);
     if (!word || SHADER_KEYWORDS_SKIP.has(word)) return undefined;
+    if (isTokenInCommentOrString(doc, wordRange, word) || isVectorSwizzleToken(doc, wordRange, word)) {
+      return undefined;
+    }
 
     const edit = new vscode.WorkspaceEdit();
-    for (const occ of collectCrossFileOccurrences(doc, word, this.shaderGraph)) {
+    for (const occ of collectCrossFileOccurrences(doc, word, this.shaderGraph, position)) {
       // Never modify read-only Unity PackageCache headers during rename
       if (occ.filePath.replace(/\\/g, '/').toLowerCase().includes('/library/packagecache/')) {
         continue;
@@ -582,7 +977,7 @@ export class ShaderRenameProvider {
       edit.replace(
         occ.uri,
         new vscode.Range(occ.line, occ.col, occ.line, occ.col + word.length),
-        newName,
+        trimmedNewName,
       );
     }
     return edit;
@@ -592,45 +987,88 @@ export class ShaderRenameProvider {
 export class ShaderFoldingRangeProvider {
   public provideFoldingRanges(doc: vscode.TextDocument): vscode.FoldingRange[] {
     const lines = doc.getText().split(/\r?\n/);
+    const strippedLines = stripCommentsAndStringsByLine(lines);
     const ranges: vscode.FoldingRange[] = [];
     const braceStack: number[] = [];
     const directiveStack: number[] = [];
-    const programStack: number[] = [];
+    const regionStack: number[] = [];
+    const programStack: Array<{ startLine: number; expectedEnd: 'ENDHLSL' | 'ENDCG' }> = [];
+
     let blockCommentStart: number | null = null;
-
     for (let i = 0; i < lines.length; i++) {
-      const raw = lines[i];
-      const trimmed = raw.trim();
-
-      if (blockCommentStart !== null) {
-        if (trimmed.includes('*/')) {
-          if (i > blockCommentStart) {
-            ranges.push(new vscode.FoldingRange(blockCommentStart, i, vscode.FoldingRangeKind.Comment));
+      const line = lines[i];
+      let inString = false;
+      for (let c = 0; c < line.length; c++) {
+        const ch = line[c];
+        const next = line[c + 1];
+        if (blockCommentStart !== null) {
+          if (ch === '*' && next === '/') {
+            if (i > blockCommentStart) {
+              ranges.push(new vscode.FoldingRange(blockCommentStart, i, vscode.FoldingRangeKind.Comment));
+            }
+            blockCommentStart = null;
+            c++;
           }
-          blockCommentStart = null;
+          continue;
         }
-        continue;
+        if (inString) {
+          if (ch === '\\' && c + 1 < line.length) c++;
+          else if (ch === '"') inString = false;
+          continue;
+        }
+        if (ch === '"') {
+          inString = true;
+        } else if (ch === '/' && next === '/') {
+          break;
+        } else if (ch === '/' && next === '*') {
+          blockCommentStart = i;
+          c++;
+        }
       }
-      if (trimmed.startsWith('/*') && !trimmed.includes('*/')) {
-        blockCommentStart = i;
-        continue;
+    }
+
+    const blockTokenRe = /\b(HLSLPROGRAM|HLSLINCLUDE|CGPROGRAM|CGINCLUDE|ENDHLSL|ENDCG)\b/g;
+    for (let i = 0; i < strippedLines.length; i++) {
+      const codeOnly = strippedLines[i];
+      const trimmedCode = codeOnly.trim();
+      const rawTrimmed = lines[i].trim();
+
+      if (/^\/\/\s*#?region\b/i.test(rawTrimmed)) {
+        regionStack.push(i);
+      } else if (/^\/\/\s*#?endregion\b/i.test(rawTrimmed) && regionStack.length > 0) {
+        const start = regionStack.pop()!;
+        if (i > start) ranges.push(new vscode.FoldingRange(start, i, vscode.FoldingRangeKind.Region));
       }
 
-      if (/^#\s*(?:if|ifdef|ifndef)\b/.test(trimmed)) {
+      if (/^#\s*(?:if|ifdef|ifndef)\b/.test(trimmedCode)) {
         directiveStack.push(i);
-      } else if (/^#\s*endif\b/.test(trimmed) && directiveStack.length > 0) {
+      } else if (/^#\s*endif\b/.test(trimmedCode) && directiveStack.length > 0) {
         const start = directiveStack.pop()!;
         if (i > start) ranges.push(new vscode.FoldingRange(start, i, vscode.FoldingRangeKind.Region));
       }
 
-      if (/^(?:HLSLPROGRAM|HLSLINCLUDE|CGPROGRAM|CGINCLUDE)\b/.test(trimmed)) {
-        programStack.push(i);
-      } else if (/^(?:ENDHLSL|ENDCG)\b/.test(trimmed) && programStack.length > 0) {
-        const start = programStack.pop()!;
-        if (i > start) ranges.push(new vscode.FoldingRange(start, i, vscode.FoldingRangeKind.Region));
+      blockTokenRe.lastIndex = 0;
+      let bm: RegExpExecArray | null;
+      while ((bm = blockTokenRe.exec(codeOnly)) !== null) {
+        const tok = bm[1];
+        if (tok === 'ENDHLSL' || tok === 'ENDCG') {
+          for (let k = programStack.length - 1; k >= 0; k--) {
+            if (programStack[k].expectedEnd === tok) {
+              const [{ startLine }] = programStack.splice(k, 1);
+              if (i > startLine) {
+                ranges.push(new vscode.FoldingRange(startLine, i, vscode.FoldingRangeKind.Region));
+              }
+              break;
+            }
+          }
+        } else {
+          programStack.push({
+            startLine: i,
+            expectedEnd: tok.startsWith('HLSL') ? 'ENDHLSL' : 'ENDCG',
+          });
+        }
       }
 
-      const codeOnly = raw.replace(/\/\/.*$/, '').replace(/"(?:\\.|[^"\\])*"/g, '');
       for (const ch of codeOnly) {
         if (ch === '{') braceStack.push(i);
         else if (ch === '}' && braceStack.length > 0) {
@@ -645,24 +1083,30 @@ export class ShaderFoldingRangeProvider {
 
 export class ShaderDocumentColorProvider {
   public provideDocumentColors(doc: vscode.TextDocument): vscode.ColorInformation[] {
-    const lines = doc.getText().split(/\r?\n/);
+    const cleanLines = blankShaderCommentsPreservingLayout(doc.getText()).split(/\r?\n/);
     const infos: vscode.ColorInformation[] = [];
-    const propColorRe = /\(\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*\)/g;
-    const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+    const propColorRe =
+      /\(\s*([0-9]*\.?[0-9]+)[fFhH]?\s*,\s*([0-9]*\.?[0-9]+)[fFhH]?\s*,\s*([0-9]*\.?[0-9]+)[fFhH]?\s*,\s*([0-9]*\.?[0-9]+)[fFhH]?\s*\)/g;
+    const colorVarRe =
+      /\b(?:float4|half4|real4|fixed4)\s+[A-Za-z0-9_]*(?:color|col|tint|albedo|diffuse|specular|emissive|emission|ambient)[A-Za-z0-9_]*\s*=\s*(?:float4|half4|real4|fixed4)?\s*\(/i;
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const isColorDecl =
-        /,\s*Color\s*\)\s*=/.test(line) || /\b(?:float4|half4|real4|fixed4)\s*\(/.test(line);
-      if (!isColorDecl) continue;
+    for (let i = 0; i < cleanLines.length; i++) {
+      const line = cleanLines[i];
+      const isShaderLabColor = /,\s*Color\s*\)\s*=/.test(line);
+      const isColorVar = colorVarRe.test(line);
+      if (!isShaderLabColor && !isColorVar) continue;
 
       propColorRe.lastIndex = 0;
       let m: RegExpExecArray | null;
       while ((m = propColorRe.exec(line)) !== null) {
-        const r = clamp01(Number.parseFloat(m[1]));
-        const g = clamp01(Number.parseFloat(m[2]));
-        const b = clamp01(Number.parseFloat(m[3]));
-        const a = clamp01(Number.parseFloat(m[4]));
+        const r = Number.parseFloat(m[1]);
+        const g = Number.parseFloat(m[2]);
+        const b = Number.parseFloat(m[3]);
+        const a = Number.parseFloat(m[4]);
+        // Skip HDR colors (> 1.0) so VS Code's 0..1 ColorPicker does not clamp away HDR intensity
+        if (r > 1.0 || g > 1.0 || b > 1.0 || a > 1.0 || r < 0 || g < 0 || b < 0 || a < 0) {
+          continue;
+        }
         const range = new vscode.Range(i, m.index, i, m.index + m[0].length);
         infos.push(new vscode.ColorInformation(range, new vscode.Color(r, g, b, a)));
       }
@@ -678,18 +1122,18 @@ export class ShaderDocumentColorProvider {
   }
 }
 
-const VALID_CULL_VALUES = new Set(['Back', 'Front', 'Off']);
-const VALID_ZWRITE_VALUES = new Set(['On', 'Off']);
+const VALID_CULL_VALUES = new Set(['back', 'front', 'off']);
+const VALID_ZWRITE_VALUES = new Set(['on', 'off']);
 const VALID_ZTEST_VALUES = new Set([
-  'Less',
-  'Greater',
-  'LEqual',
-  'GEqual',
-  'Equal',
-  'NotEqual',
-  'Always',
-  'Never',
-  'Off',
+  'less',
+  'greater',
+  'lequal',
+  'gequal',
+  'equal',
+  'notequal',
+  'always',
+  'never',
+  'off',
 ]);
 
 export function collectComputeAndShaderLabDiagnostics(
@@ -700,22 +1144,205 @@ export function collectComputeAndShaderLabDiagnostics(
   shaderGraph.setOpenDocumentContent(doc.uri.toString(), text);
   const filePath = shaderGraph.normalizeFilePath(doc.uri.toString());
   const virtualDoc = extractVirtualHlslDocument(text, filePath);
-  const visible = shaderGraph.findAllVisibleSymbols(doc.uri.toString());
+  const reachableWalk = shaderGraph.collectReachableFiles(doc.uri.toString());
   const diags: vscode.Diagnostic[] = [];
   const lines = text.split(/\r?\n/);
 
-  // 1. Validate #pragma kernel entry points (for .compute and compute blocks)
+  // 1. Validate #pragma entry points (kernel, vertex, fragment, hull, domain, geometry)
   for (const ep of virtualDoc.pragmas.entryPoints) {
-    if (ep.stage !== 'kernel') continue;
-    const hasFn = visible.some((s) => s.name === ep.name && s.kind === 'function');
-    if (!hasFn) {
+    const hits = shaderGraph.findSymbolsVisibleFrom(doc.uri.toString(), ep.name, ep.line);
+    const hasFnOrMacro = hits.some((s) => s.kind === 'function' || s.kind === 'macro');
+    if (!hasFnOrMacro) {
+      const msg =
+        ep.stage === 'kernel'
+          ? `[UnityBrain] Compute Shader 커널 함수 '${ep.name}'이(가) 정의되지 않았습니다.`
+          : `[UnityBrain] #pragma ${ep.stage} 엔트리 함수 '${ep.name}'이(가) 정의되지 않았습니다.`;
       diags.push(
         new vscode.Diagnostic(
           new vscode.Range(ep.line, ep.column, ep.line, ep.column + ep.name.length),
-          `[UnityBrain] Compute Shader 커널 함수 '${ep.name}'이(가) 정의되지 않았습니다.`,
+          msg,
+          ep.stage === 'kernel' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning,
+        ),
+      );
+    }
+  }
+
+  // 1-2. Validate HLSLPROGRAM/ENDHLSL, CGPROGRAM/ENDCG, and brace balance
+  {
+    const strippedForBlocks = stripCommentsAndStringsByLine(lines);
+    const programStack: Array<{ tag: string; expectedEnd: string; line: number; col: number }> = [];
+    let braceStack: Array<{ line: number; col: number }> = [];
+    const preprocBranchStack: Array<{
+      entryStack: Array<{ line: number; col: number }>;
+      branchEndStacks: Array<Array<{ line: number; col: number }>>;
+    }> = [];
+    const blockTokRe = /\b(HLSLPROGRAM|HLSLINCLUDE|CGPROGRAM|CGINCLUDE|ENDHLSL|ENDCG)\b/g;
+
+    let inDefineContinuation = false;
+    for (let i = 0; i < strippedForBlocks.length; i++) {
+      const sLine = strippedForBlocks[i];
+
+      blockTokRe.lastIndex = 0;
+      let bm: RegExpExecArray | null;
+      while ((bm = blockTokRe.exec(sLine)) !== null) {
+        const tok = bm[1];
+        if (tok === 'ENDHLSL' || tok === 'ENDCG') {
+          const top = programStack[programStack.length - 1];
+          if (!top) {
+            diags.push(
+              new vscode.Diagnostic(
+                new vscode.Range(i, bm.index, i, bm.index + tok.length),
+                `[UnityBrain] 대응하는 시작 블록 없이 '${tok}'이(가) 닫혔습니다.`,
+                vscode.DiagnosticSeverity.Error,
+              ),
+            );
+          } else if (top.expectedEnd !== tok) {
+            diags.push(
+              new vscode.Diagnostic(
+                new vscode.Range(i, bm.index, i, bm.index + tok.length),
+                `[UnityBrain] '${top.tag}' 블록은 '${top.expectedEnd}'로 닫아야 합니다 ('${tok}' 사용됨).`,
+                vscode.DiagnosticSeverity.Error,
+              ),
+            );
+            programStack.pop();
+          } else {
+            programStack.pop();
+          }
+        } else {
+          const expectedEnd = tok.startsWith('HLSL') ? 'ENDHLSL' : 'ENDCG';
+          programStack.push({ tag: tok, expectedEnd, line: i, col: bm.index });
+        }
+      }
+
+      if (inDefineContinuation) {
+        inDefineContinuation = sLine.trimEnd().endsWith('\\');
+        continue;
+      }
+
+      const trimmedLine = sLine.trim();
+      if (/^#\s*define\b/.test(trimmedLine)) {
+        inDefineContinuation = sLine.trimEnd().endsWith('\\');
+        continue;
+      }
+
+      if (/^#\s*(?:if|ifdef|ifndef)\b/.test(trimmedLine)) {
+        preprocBranchStack.push({
+          entryStack: [...braceStack],
+          branchEndStacks: [],
+        });
+        continue;
+      }
+      if (/^#\s*(?:elif|else)\b/.test(trimmedLine) && preprocBranchStack.length > 0) {
+        const top = preprocBranchStack[preprocBranchStack.length - 1];
+        top.branchEndStacks.push([...braceStack]);
+        braceStack = [...top.entryStack];
+        continue;
+      }
+      if (/^#\s*endif\b/.test(trimmedLine) && preprocBranchStack.length > 0) {
+        const top = preprocBranchStack.pop()!;
+        top.branchEndStacks.push([...braceStack]);
+        braceStack = [...top.branchEndStacks[0]];
+        continue;
+      }
+
+      for (let c = 0; c < sLine.length; c++) {
+        if (sLine[c] === '{') braceStack.push({ line: i, col: c });
+        else if (sLine[c] === '}') {
+          if (braceStack.length === 0) {
+            diags.push(
+              new vscode.Diagnostic(
+                new vscode.Range(i, c, i, c + 1),
+                '[UnityBrain] 여는 중괄호 "{" 없이 닫는 중괄호 "}"가 있습니다.',
+                vscode.DiagnosticSeverity.Error,
+              ),
+            );
+          } else {
+            braceStack.pop();
+          }
+        }
+      }
+    }
+
+    for (const unclosed of programStack) {
+      diags.push(
+        new vscode.Diagnostic(
+          new vscode.Range(unclosed.line, unclosed.col, unclosed.line, unclosed.col + unclosed.tag.length),
+          `[UnityBrain] '${unclosed.tag}' 블록이 '${unclosed.expectedEnd}'로 닫히지 않았습니다.`,
           vscode.DiagnosticSeverity.Error,
         ),
       );
+    }
+    for (const unclosedBrace of braceStack) {
+      diags.push(
+        new vscode.Diagnostic(
+          new vscode.Range(unclosedBrace.line, unclosedBrace.col, unclosedBrace.line, unclosedBrace.col + 1),
+          '[UnityBrain] 닫히지 않은 여는 중괄호 "{"가 있습니다.',
+          vscode.DiagnosticSeverity.Error,
+        ),
+      );
+    }
+  }
+
+  // 1-3. Validate SRP Batcher CBUFFER_START(UnityPerMaterial) coverage across passes and included files
+  if (virtualDoc.isShaderLab && virtualDoc.properties.length > 0) {
+    const cleanSources: string[] = [blankShaderCommentsPreservingLayout(virtualDoc.virtualHlsl)];
+    for (let fi = 1; fi < reachableWalk.files.length; fi++) {
+      const f = reachableWalk.files[fi];
+      let fileText = f.virtualHlsl;
+      try {
+        if (fs.existsSync(f.filePath)) {
+          fileText = fs.readFileSync(f.filePath, 'utf8');
+        }
+      } catch {
+        // Keep parsed virtualHlsl fallback
+      }
+      cleanSources.push(blankShaderCommentsPreservingLayout(fileText));
+    }
+
+    const cbufferRe = /CBUFFER_START\s*\(\s*UnityPerMaterial\s*\)([\s\S]*?)CBUFFER_END/g;
+    const cbufferBodies: string[] = [];
+    for (const src of cleanSources) {
+      cbufferRe.lastIndex = 0;
+      let cm: RegExpExecArray | null;
+      while ((cm = cbufferRe.exec(src)) !== null) {
+        cbufferBodies.push(cm[1]);
+      }
+    }
+
+    if (cbufferBodies.length > 0) {
+      const combinedCbufferBody = cbufferBodies.join('\n');
+      const texTypes = new Set(['2D', '2DArray', '3D', 'Cube', 'CubeArray', 'Any']);
+      const skipAttrRe = /\[(?:HideInInspector|PerRendererData|NonModifiableTextureData)\]/;
+
+      for (const prop of virtualDoc.properties) {
+        if (texTypes.has(prop.type)) continue;
+        const propLine = prop.line ?? 0;
+        const propCol = prop.column ?? 0;
+
+        let hasSkipAttr = false;
+        for (let lookback = 0; lookback <= 3 && propLine - lookback >= 0; lookback++) {
+          const checkLine = lines[propLine - lookback] ?? '';
+          if (lookback > 0 && (checkLine.includes('=') || checkLine.includes('{'))) {
+            break;
+          }
+          if (skipAttrRe.test(checkLine)) {
+            hasSkipAttr = true;
+            break;
+          }
+        }
+        if (hasSkipAttr) continue;
+
+        const propRe = new RegExp(`\\b${prop.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+        if (!propRe.test(combinedCbufferBody)) {
+          diags.push(
+            new vscode.Diagnostic(
+              new vscode.Range(propLine, propCol, propLine, propCol + prop.name.length),
+              `[UnityBrain] SRP Batcher: 프로퍼티 '${prop.name}'이(가) CBUFFER_START(UnityPerMaterial)에 선언되어 있지 않습니다.`,
+              vscode.DiagnosticSeverity.Warning,
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -726,7 +1353,6 @@ export function collectComputeAndShaderLabDiagnostics(
   const strippedLines = stripCommentsAndStringsByLine(lines);
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
     const strippedLine = strippedLines[i] ?? '';
     const inHlsl = hlslRanges.some((r) => i >= r.start && i <= r.end);
 
@@ -752,17 +1378,13 @@ export function collectComputeAndShaderLabDiagnostics(
       continue;
     }
 
-    const codeOnly = line
-      .replace(/\/\/.*$/, '')
-      .replace(/"(?:\\.|[^"\\])*"/g, '')
-      .trim();
-    if (/\([^)]*\)\s*=/.test(codeOnly)) {
+    if (/\([^)]*\)\s*=/.test(strippedLine)) {
       continue;
     }
 
-    const cullM = /(?<![\w\[])Cull\s+([A-Za-z0-9_]+)/.exec(codeOnly);
-    if (cullM && !VALID_CULL_VALUES.has(cullM[1])) {
-      const col = line.indexOf(cullM[1]);
+    const cullM = /(?<![\w\[])Cull\s+([A-Za-z0-9_]+)/.exec(strippedLine);
+    if (cullM && !VALID_CULL_VALUES.has(cullM[1].toLowerCase())) {
+      const col = cullM.index + cullM[0].indexOf(cullM[1]);
       diags.push(
         new vscode.Diagnostic(
           new vscode.Range(i, col, i, col + cullM[1].length),
@@ -771,9 +1393,9 @@ export function collectComputeAndShaderLabDiagnostics(
         ),
       );
     }
-    const zwM = /(?<![\w\[])ZWrite\s+([A-Za-z0-9_]+)/.exec(codeOnly);
-    if (zwM && !VALID_ZWRITE_VALUES.has(zwM[1])) {
-      const col = line.indexOf(zwM[1]);
+    const zwM = /(?<![\w\[])ZWrite\s+([A-Za-z0-9_]+)/.exec(strippedLine);
+    if (zwM && !VALID_ZWRITE_VALUES.has(zwM[1].toLowerCase())) {
+      const col = zwM.index + zwM[0].indexOf(zwM[1]);
       diags.push(
         new vscode.Diagnostic(
           new vscode.Range(i, col, i, col + zwM[1].length),
@@ -782,9 +1404,9 @@ export function collectComputeAndShaderLabDiagnostics(
         ),
       );
     }
-    const ztM = /(?<![\w\[])ZTest\s+([A-Za-z0-9_]+)/.exec(codeOnly);
-    if (ztM && !VALID_ZTEST_VALUES.has(ztM[1])) {
-      const col = line.indexOf(ztM[1]);
+    const ztM = /(?<![\w\[])ZTest\s+([A-Za-z0-9_]+)/.exec(strippedLine);
+    if (ztM && !VALID_ZTEST_VALUES.has(ztM[1].toLowerCase())) {
+      const col = ztM.index + ztM[0].indexOf(ztM[1]);
       diags.push(
         new vscode.Diagnostic(
           new vscode.Range(i, col, i, col + ztM[1].length),

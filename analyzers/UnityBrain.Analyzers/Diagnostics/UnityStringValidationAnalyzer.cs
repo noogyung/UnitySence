@@ -2,11 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using System.Text.Json;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using UnityBrain.Analyzers.Json;
 
 namespace UnityBrain.Analyzers.Diagnostics;
 
@@ -44,7 +45,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
 
         context.RegisterCompilationStartAction(startCtx =>
         {
-            var settings = LoadProjectSettings(startCtx.Options.AdditionalFiles);
+            var settings = LoadProjectSettings(startCtx.Options.AdditionalFiles, startCtx.CancellationToken);
 
             startCtx.RegisterSyntaxNodeAction(
                 nodeCtx => AnalyzeInvocation(nodeCtx, settings),
@@ -71,7 +72,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
 
         string containingType = called.ContainingType.ToDisplayString();
 
-        // 1. UB3001: MonoBehaviour.Invoke / InvokeRepeating / CancelInvoke / IsInvoking / StartCoroutine
+        // 1. UB3001: MonoBehaviour.Invoke / InvokeRepeating / CancelInvoke / IsInvoking / StartCoroutine / StopCoroutine
         if (containingType == "UnityEngine.MonoBehaviour" &&
             InvokeOrCoroutineMethods.Contains(called.Name) &&
             called.Parameters.Length > 0 &&
@@ -203,7 +204,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    private static bool IsUnityTagProperty(SemanticModel model, ExpressionSyntax expr, System.Threading.CancellationToken ct)
+    private static bool IsUnityTagProperty(SemanticModel model, ExpressionSyntax expr, CancellationToken ct)
     {
         if (model.GetSymbolInfo(expr, ct).Symbol is not IPropertySymbol prop ||
             prop.Name != "tag")
@@ -226,21 +227,53 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
 
         if (inv.Expression is MemberAccessExpressionSyntax ma)
         {
-            targetType = context.SemanticModel.GetTypeInfo(ma.Expression, context.CancellationToken).Type as INamedTypeSymbol;
+            if (ma.Expression is BaseExpressionSyntax)
+            {
+                targetType = context.SemanticModel.GetEnclosingSymbol(inv.SpanStart, context.CancellationToken)?.ContainingType;
+            }
+            else
+            {
+                targetType = context.SemanticModel.GetTypeInfo(ma.Expression, context.CancellationToken).Type as INamedTypeSymbol;
+                // Avoid false positives when calling Invoke/StartCoroutine on a base-typed `MonoBehaviour` parameter/field.
+                if (targetType != null && targetType.ToDisplayString() == "UnityEngine.MonoBehaviour")
+                {
+                    return;
+                }
+            }
         }
         targetType ??= context.SemanticModel.GetEnclosingSymbol(inv.SpanStart, context.CancellationToken)?.ContainingType;
         if (targetType == null) return;
 
-        var matchingMethods = new List<IMethodSymbol>();
+        bool isCoroutine = apiName == "StartCoroutine" || apiName == "StopCoroutine";
+        var allMembers = new List<IMethodSymbol>();
+        var validCandidates = new List<IMethodSymbol>();
         for (var cur = targetType; cur != null; cur = cur.BaseType)
         {
             foreach (var member in cur.GetMembers(targetMethodName).OfType<IMethodSymbol>())
             {
-                matchingMethods.Add(member);
+                if (member.MethodKind != MethodKind.Ordinary || member.IsStatic || member.Arity != 0)
+                {
+                    continue;
+                }
+                allMembers.Add(member);
+                if (isCoroutine)
+                {
+                    if (member.Parameters.Length <= 1)
+                    {
+                        validCandidates.Add(member);
+                    }
+                }
+                else
+                {
+                    if (member.Parameters.Length == 0)
+                    {
+                        validCandidates.Add(member);
+                    }
+                }
             }
         }
 
-        if (matchingMethods.Count == 0)
+        if (validCandidates.Count == 0)
         {
             context.ReportDiagnostic(Diagnostic.Create(
                 DiagnosticIds.UB3001Rule,
@@ -251,9 +284,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
 
         if (apiName == "StartCoroutine")
         {
-            bool hasEnumeratorReturn = matchingMethods.Any(m =>
-                m.ReturnType.ToDisplayString() == "System.Collections.IEnumerator" ||
-                m.ReturnType.Name == "IEnumerator");
+            bool hasEnumeratorReturn = validCandidates.Any(m => IsSystemCollectionsIEnumerator(m.ReturnType));
 
             if (!hasEnumeratorReturn)
             {
@@ -263,6 +294,23 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                     $"[UnityBrain] StartCoroutine 대상 메서드 '{targetMethodName}'('{targetType.Name}')는 반드시 IEnumerator를 반환해야 합니다."));
             }
         }
+    }
+
+    private static bool IsSystemCollectionsIEnumerator(ITypeSymbol returnType)
+    {
+        var full = returnType.ToDisplayString();
+        if (full == "System.Collections.IEnumerator")
+        {
+            return true;
+        }
+        foreach (var iface in returnType.AllInterfaces)
+        {
+            if (iface.ToDisplayString() == "System.Collections.IEnumerator")
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static bool IsEnabledScene(ProjectSettingsSnapshot settings, string sceneArg)
@@ -335,7 +383,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
             int indent = 0;
             while (indent < rawLine.Length && rawLine[indent] == ' ') indent++;
 
-            if (indent <= 2)
+            if (indent <= 2 && !trimmed.StartsWith("-", StringComparison.Ordinal))
             {
                 if (trimmed == "tags:" || trimmed == "tags: []")
                 {
@@ -371,6 +419,30 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
         }
     }
 
+    private static void AddSceneVariants(HashSet<string> enabledScenes, string scenePath)
+    {
+        var norm = scenePath.Replace('\\', '/');
+        enabledScenes.Add(norm);
+        if (norm.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
+        {
+            enabledScenes.Add(norm.Substring(0, norm.Length - ".unity".Length));
+        }
+        if (norm.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+        {
+            var sub = norm.Substring("Assets/".Length);
+            enabledScenes.Add(sub);
+            if (sub.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
+            {
+                enabledScenes.Add(sub.Substring(0, sub.Length - ".unity".Length));
+            }
+        }
+        var fileNameNoExt = System.IO.Path.GetFileNameWithoutExtension(norm);
+        if (!string.IsNullOrEmpty(fileNameNoExt))
+        {
+            enabledScenes.Add(fileNameNoExt);
+        }
+    }
+
     private static void ParseEditorBuildSettingsAsset(
         string yaml,
         HashSet<string> enabledScenes,
@@ -391,17 +463,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-            var norm = currentPath!.Replace('\\', '/');
-            enabledScenes.Add(norm);
-            if (norm.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
-            {
-                enabledScenes.Add(norm.Substring(0, norm.Length - ".unity".Length));
-            }
-            var fileNameNoExt = System.IO.Path.GetFileNameWithoutExtension(norm);
-            if (!string.IsNullOrEmpty(fileNameNoExt))
-            {
-                enabledScenes.Add(fileNameNoExt);
-            }
+            AddSceneVariants(enabledScenes, currentPath!);
 
             currentHasEntry = false;
             currentEnabled = false;
@@ -412,13 +474,29 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
         foreach (var rawLine in lines)
         {
             var trimmed = rawLine.Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("%", StringComparison.Ordinal) || trimmed.StartsWith("---", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            int indent = 0;
+            while (indent < rawLine.Length && rawLine[indent] == ' ') indent++;
+
             if (trimmed == "m_Scenes:" || trimmed == "m_Scenes: []")
             {
+                Flush();
                 hasBuildScenes = true;
                 inScenes = !trimmed.EndsWith("[]", StringComparison.Ordinal);
                 continue;
             }
             if (!inScenes) continue;
+
+            if (indent <= 2 && !trimmed.StartsWith("-", StringComparison.Ordinal) && trimmed.Contains(':'))
+            {
+                Flush();
+                inScenes = false;
+                continue;
+            }
 
             if (trimmed.StartsWith("- enabled:", StringComparison.Ordinal))
             {
@@ -438,7 +516,9 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
         Flush();
     }
 
-    private static ProjectSettingsSnapshot LoadProjectSettings(ImmutableArray<AdditionalText> additionalFiles)
+    private static ProjectSettingsSnapshot LoadProjectSettings(
+        ImmutableArray<AdditionalText> additionalFiles,
+        CancellationToken cancellationToken = default)
     {
         bool hasAnyFile = false;
         bool hasTags = false;
@@ -452,7 +532,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
         {
             if (file.Path.EndsWith("TagManager.asset", StringComparison.OrdinalIgnoreCase))
             {
-                var yaml = file.GetText()?.ToString();
+                var yaml = file.GetText(cancellationToken)?.ToString();
                 if (!string.IsNullOrWhiteSpace(yaml))
                 {
                     hasAnyFile = true;
@@ -463,7 +543,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
 
             if (file.Path.EndsWith("EditorBuildSettings.asset", StringComparison.OrdinalIgnoreCase))
             {
-                var yaml = file.GetText()?.ToString();
+                var yaml = file.GetText(cancellationToken)?.ToString();
                 if (!string.IsNullOrWhiteSpace(yaml))
                 {
                     hasAnyFile = true;
@@ -477,7 +557,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            var text = file.GetText()?.ToString();
+            var text = file.GetText(cancellationToken)?.ToString();
             if (string.IsNullOrWhiteSpace(text))
             {
                 continue;
@@ -485,74 +565,68 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
 
             try
             {
-                using var doc = JsonDocument.Parse(text);
-                var root = doc.RootElement;
+                if (SimpleJson.Parse(text!) is not Dictionary<string, object?> root)
+                {
+                    continue;
+                }
                 hasAnyFile = true;
 
-                if (root.TryGetProperty("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array)
+                if (root.TryGetValue("tags", out var tagsRaw) && tagsRaw is List<object?> tagsList)
                 {
                     hasTags = true;
-                    foreach (var el in tagsEl.EnumerateArray())
+                    foreach (var el in tagsList)
                     {
-                        var val = el.GetString();
-                        if (!string.IsNullOrEmpty(val)) tags.Add(val!);
+                        if (el is string val && !string.IsNullOrEmpty(val))
+                        {
+                            tags.Add(val);
+                        }
                     }
                 }
 
-                if (root.TryGetProperty("layers", out var layersEl) && layersEl.ValueKind == JsonValueKind.Array)
+                if (root.TryGetValue("layers", out var layersRaw) && layersRaw is List<object?> layersList)
                 {
                     hasLayers = true;
-                    foreach (var el in layersEl.EnumerateArray())
+                    foreach (var el in layersList)
                     {
-                        if (el.ValueKind == JsonValueKind.String)
+                        if (el is string val && !string.IsNullOrEmpty(val))
                         {
-                            var val = el.GetString();
-                            if (!string.IsNullOrEmpty(val)) layers.Add(val!);
+                            layers.Add(val);
                         }
-                        else if (el.ValueKind == JsonValueKind.Object &&
-                                 el.TryGetProperty("name", out var nameEl))
+                        else if (el is Dictionary<string, object?> obj &&
+                                 obj.TryGetValue("name", out var nameObj) &&
+                                 nameObj is string nameStr &&
+                                 !string.IsNullOrEmpty(nameStr))
                         {
-                            var val = nameEl.GetString();
-                            if (!string.IsNullOrEmpty(val)) layers.Add(val!);
+                            layers.Add(nameStr);
                         }
                     }
                 }
 
-                if ((root.TryGetProperty("buildScenes", out var scenesEl) ||
-                     root.TryGetProperty("scenes", out scenesEl)) &&
-                    scenesEl.ValueKind == JsonValueKind.Array)
+                object? scenesRaw = null;
+                if ((root.TryGetValue("buildScenes", out scenesRaw) || root.TryGetValue("scenes", out scenesRaw)) &&
+                    scenesRaw is List<object?> scenesList)
                 {
                     hasScenes = true;
-                    foreach (var el in scenesEl.EnumerateArray())
+                    foreach (var el in scenesList)
                     {
-                        if (el.ValueKind == JsonValueKind.String)
+                        if (el is string s && !string.IsNullOrEmpty(s))
                         {
-                            var s = el.GetString();
-                            if (!string.IsNullOrEmpty(s)) enabledScenes.Add(s!.Replace('\\', '/'));
+                            AddSceneVariants(enabledScenes, s);
                             continue;
                         }
 
-                        if (el.ValueKind != JsonValueKind.Object) continue;
-                        bool enabled = !el.TryGetProperty("enabled", out var enEl) || enEl.ValueKind == JsonValueKind.True;
+                        if (el is not Dictionary<string, object?> obj) continue;
+                        bool enabled = !obj.TryGetValue("enabled", out var enVal) || enVal is true;
                         if (!enabled) continue;
 
-                        if (el.TryGetProperty("name", out var nameEl))
+                        if (obj.TryGetValue("name", out var nameVal) && nameVal is string nameStr && !string.IsNullOrEmpty(nameStr))
                         {
-                            var name = nameEl.GetString();
-                            if (!string.IsNullOrEmpty(name)) enabledScenes.Add(name!);
+                            enabledScenes.Add(nameStr);
                         }
 
-                        if (el.TryGetProperty("path", out var pathEl))
+                        if (obj.TryGetValue("path", out var pathVal) && pathVal is string p && !string.IsNullOrEmpty(p))
                         {
-                            var p = pathEl.GetString()?.Replace('\\', '/');
-                            if (!string.IsNullOrEmpty(p))
-                            {
-                                enabledScenes.Add(p!);
-                                if (p!.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    enabledScenes.Add(p.Substring(0, p.Length - ".unity".Length));
-                                }
-                            }
+                            AddSceneVariants(enabledScenes, p);
                         }
                     }
                 }

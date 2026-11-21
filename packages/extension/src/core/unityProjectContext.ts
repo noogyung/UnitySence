@@ -70,6 +70,20 @@ export class UnityProjectContextManager implements vscode.Disposable {
       }
     }
 
+    if (vscode.workspace.workspaceFolders) {
+      for (const folder of vscode.workspace.workspaceFolders) {
+        const folderPath = folder.uri.fsPath;
+        const foundSubtree = this.findUnityProjectInSubtree(folderPath, 3);
+        if (foundSubtree) {
+          return foundSubtree;
+        }
+        const foundUpward = this.findUnityProjectUpward(folderPath);
+        if (foundUpward) {
+          return foundUpward;
+        }
+      }
+    }
+
     const openPaths: string[] = [];
     const activeUri = vscode.window.activeTextEditor?.document?.uri;
     if (activeUri && activeUri.scheme === 'file' && activeUri.fsPath) {
@@ -84,20 +98,6 @@ export class UnityProjectContextManager implements vscode.Disposable {
       const found = this.findUnityProjectUpward(openPath);
       if (found) {
         return found;
-      }
-    }
-
-    if (vscode.workspace.workspaceFolders) {
-      for (const folder of vscode.workspace.workspaceFolders) {
-        const folderPath = folder.uri.fsPath;
-        const foundSubtree = this.findUnityProjectInSubtree(folderPath, 3);
-        if (foundSubtree) {
-          return foundSubtree;
-        }
-        const foundUpward = this.findUnityProjectUpward(folderPath);
-        if (foundUpward) {
-          return foundUpward;
-        }
       }
     }
 
@@ -272,14 +272,19 @@ export class UnityProjectContextManager implements vscode.Disposable {
     for (const root of secondaryRoots) {
       candidates.push(path.join(root, editorVersion, 'Editor'));
       candidates.push(path.join(root, editorVersion, 'Unity.app', 'Contents'));
+      candidates.push(path.join(root, editorVersion, 'Contents'));
       candidates.push(path.join(root, editorVersion));
     }
 
     if (process.platform === 'win32') {
-      candidates.push(`C:/Program Files/Unity/Hub/Editor/${editorVersion}/Editor`);
-      candidates.push(`C:/Program Files/Unity/Hub/Editor/${editorVersion}`);
+      const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+      candidates.push(path.join(programFiles, 'Unity', 'Hub', 'Editor', editorVersion, 'Editor'));
+      candidates.push(path.join(programFiles, 'Unity', 'Hub', 'Editor', editorVersion));
     } else if (process.platform === 'darwin') {
       candidates.push(`/Applications/Unity/Hub/Editor/${editorVersion}/Unity.app/Contents`);
+      candidates.push(`/Applications/Unity/Hub/Editor/${editorVersion}/Contents`);
+      candidates.push(`/Applications/Unity/Hub/Editor/${editorVersion}`);
+      candidates.push('/Applications/Unity/Unity.app/Contents');
     } else {
       try {
         candidates.push(path.join(os.homedir(), 'Unity', 'Hub', 'Editor', editorVersion, 'Editor'));

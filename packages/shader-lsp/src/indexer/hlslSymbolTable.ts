@@ -214,9 +214,48 @@ function offsetToLineCol(lineStarts: number[], offset: number): { line: number; 
 
 function findMatchingBrace(text: string, openBraceIndex: number): number {
   let depth = 0;
+  let inString = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
   for (let i = openBraceIndex; i < text.length; i++) {
-    if (text[i] === '{') depth++;
-    else if (text[i] === '}') {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (inLineComment) {
+      if (ch === '\n') inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (inString) {
+      if (ch === '\\') {
+        i++;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      inLineComment = true;
+      i++;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
       depth--;
       if (depth === 0) return i;
     }
@@ -228,8 +267,8 @@ function parseParameterList(paramStr: string): Array<{ name: string; type: strin
   const trimmed = paramStr.trim();
   if (!trimmed || trimmed === 'void') return [];
   const params: Array<{ name: string; type: string }> = [];
-  for (const part of trimmed.split(',')) {
-    const withoutDefault = part.split('=')[0].split(':')[0].trim();
+  for (const part of splitTopLevelCommas(trimmed)) {
+    const withoutDefault = part.segment.split('=')[0].split(':')[0].trim();
     const cleaned = withoutDefault
       .replace(/^(?:in|out|inout|uniform|const)\s+/g, '')
       .trim();
@@ -444,24 +483,28 @@ export function parseHlslSymbols(
   }
 
   // 3. Parse functions (definitions & declarations, including multi-line headers & attributes)
+  const blockContainerRanges = [...structRanges, ...cbufferRanges];
   const fnRegex =
-    /(?:^|\n)[ \t]*(?:\[[^\]]*\]\s*)*(?:(?:inline|static|extern)\s+)*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*(?::\s*[A-Za-z0-9_]+)?\s*(\{|;)/g;
+    /(?:^|\n)[ \t]*(?:\[[^\]]*\]\s*)*(?:(?:inline|static|extern)\s+)*([A-Za-z_][A-Za-z0-9_<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)\s*(?::\s*[A-Za-z0-9_]+)?\s*(\{|;)/g;
   const fnBodyRanges: Array<{ start: number; end: number }> = [];
   let fnMatch: RegExpExecArray | null;
   while ((fnMatch = fnRegex.exec(cleanNormalized)) !== null) {
     const returnType = fnMatch[1].trim();
     const fnName = fnMatch[2].trim();
-    const rawParams = fnMatch[3].trim();
+    const rawParamsText = fnMatch[3];
+    const rawParams = rawParamsText.trim();
     const terminator = fnMatch[4];
     if (CONTROL_KEYWORDS.has(returnType) || CONTROL_KEYWORDS.has(fnName)) continue;
 
     // Skip matches inside struct or cbuffer blocks
-    const inBlock = [...structRanges, ...cbufferRanges].some(
+    const inBlock = blockContainerRanges.some(
       (r) => fnMatch!.index >= r.start && fnMatch!.index <= r.end,
     );
     if (inBlock) continue;
 
-    const nameOffset = fnMatch.index + fnMatch[0].indexOf(fnName, fnMatch[0].indexOf(returnType) + returnType.length);
+    const returnInMatch = fnMatch[0].indexOf(returnType);
+    const nameInMatch = fnMatch[0].indexOf(fnName, returnInMatch + returnType.length);
+    const nameOffset = fnMatch.index + nameInMatch;
     const fnPos = offsetToLineCol(normStarts, nameOffset);
     const origLine = rawLines[fnPos.line] ?? '';
     const origCleanLine = cleanOrigLines[fnPos.line] ?? origLine;
@@ -493,13 +536,10 @@ export function parseHlslSymbols(
       const scopeVars = new Map<string, string>();
       const scopeDecls = new Map<string, LocalVarDeclaration>();
 
-      const openParenOffset = fnMatch.index + fnMatch[0].indexOf('(');
-      const closeParenOffset = fnMatch.index + fnMatch[0].indexOf(')', fnMatch[0].indexOf('('));
-      const paramSlice = cleanNormalized.slice(openParenOffset + 1, closeParenOffset);
-      let segOffset = 0;
-      for (const rawPart of paramSlice.split(',')) {
-        const partStart = openParenOffset + 1 + segOffset;
-        segOffset += rawPart.length + 1;
+      const openParenInMatch = fnMatch[0].indexOf('(', nameInMatch + fnName.length);
+      const openParenOffset = fnMatch.index + openParenInMatch;
+      for (const { segment: rawPart, offset: relPartOffset } of splitTopLevelCommas(rawParamsText)) {
+        const partStart = openParenOffset + 1 + relPartOffset;
         const withoutDefault = rawPart.split('=')[0].split(':')[0];
         const cleaned = withoutDefault
           .trim()
@@ -586,9 +626,10 @@ export function parseHlslSymbols(
   }
 
   // 4. Parse top-level global variables outside structs/cbuffers/functions
+  const allContainerRanges = [...structRanges, ...cbufferRanges, ...fnBodyRanges];
   for (let lineIdx = 0; lineIdx < cleanNormLines.length; lineIdx++) {
     const lineStart = normStarts[lineIdx];
-    const inAnyContainer = [...structRanges, ...cbufferRanges, ...fnBodyRanges].some(
+    const inAnyContainer = allContainerRanges.some(
       (r) => lineStart >= r.start && lineStart <= r.end,
     );
     if (inAnyContainer) continue;

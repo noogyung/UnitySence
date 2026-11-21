@@ -7,7 +7,12 @@ import type {
   ShaderSymbolIndex,
   UnityProjectContext,
 } from '../../../extension/src/contracts/index.ts';
-import { UnityVirtualPathResolver } from '../vfs/virtualPathResolver.ts';
+import {
+  isShaderFilePath,
+  isShaderHeaderPath,
+  normalizePathKey,
+  UnityVirtualPathResolver,
+} from '../vfs/virtualPathResolver.ts';
 import { UnityHlslMacroPrepass } from '../parser/unityHlslMacroPrepass.ts';
 import {
   findBlockIndexAtLine,
@@ -74,6 +79,8 @@ export class IncludeDependencyGraph {
   private readonly diskCache = new Map<string, CacheRecord>();
   private readonly memoryOverrides = new Map<string, { content: string; parsed: ParsedHlslFile }>();
   private readonly reverseDependencies = new Map<string, Set<string>>();
+  private readonly forwardDependencies = new Map<string, Set<string>>();
+  private readonly canonicalPaths = new Map<string, string>();
   private reverseIndexBuilt = false;
 
   constructor(context: UnityProjectContext) {
@@ -95,14 +102,30 @@ export class IncludeDependencyGraph {
     this.diskCache.clear();
     this.memoryOverrides.clear();
     this.reverseDependencies.clear();
+    this.forwardDependencies.clear();
+    this.canonicalPaths.clear();
     this.reverseIndexBuilt = false;
   }
 
   public normalizeFilePath(uriOrPath: string): string {
     if (uriOrPath.startsWith('file://')) {
-      return path.resolve(fileURLToPath(uriOrPath));
+      try {
+        return path.resolve(fileURLToPath(uriOrPath));
+      } catch {
+        const stripped = uriOrPath.replace(/^file:\/\//i, '');
+        const clean = /^\/[A-Za-z]:/.test(stripped) ? stripped.slice(1) : stripped;
+        try {
+          return path.resolve(decodeURIComponent(clean));
+        } catch {
+          return path.resolve(clean);
+        }
+      }
     }
     return path.resolve(uriOrPath);
+  }
+
+  private pathKey(uriOrPath: string): string {
+    return normalizePathKey(uriOrPath);
   }
 
   public toUri(filePath: string): string {
@@ -111,26 +134,43 @@ export class IncludeDependencyGraph {
 
   public setOpenDocumentContent(uriOrPath: string, content: string): ParsedHlslFile {
     const norm = this.normalizeFilePath(uriOrPath);
+    const key = this.pathKey(norm);
+    this.canonicalPaths.set(key, norm);
+    const existing = this.memoryOverrides.get(key);
+    if (existing && existing.content === content) {
+      return existing.parsed;
+    }
     const uri = uriOrPath.startsWith('file://') ? uriOrPath : this.toUri(norm);
     const parsed = parseHlslSymbols(content, norm, uri, this.prepass);
-    this.memoryOverrides.set(norm, { content, parsed });
+    this.memoryOverrides.set(key, { content, parsed });
     this.recordReverseEdges(norm, parsed);
     return parsed;
   }
 
   public closeOpenDocument(uriOrPath: string): void {
     const norm = this.normalizeFilePath(uriOrPath);
-    this.memoryOverrides.delete(norm);
+    const key = this.pathKey(norm);
+    this.memoryOverrides.delete(key);
+    this.pruneForwardEdges(key);
+    const diskParsed = this.getOrParseFile(norm);
+    if (diskParsed) {
+      this.recordReverseEdges(norm, diskParsed);
+    }
   }
 
   public invalidateFile(uriOrPath: string): void {
     const norm = this.normalizeFilePath(uriOrPath);
-    this.diskCache.delete(norm);
-    this.memoryOverrides.delete(norm);
+    const key = this.pathKey(norm);
+    this.diskCache.delete(key);
+    this.memoryOverrides.delete(key);
+    this.pruneForwardEdges(key);
     this.reverseIndexBuilt = false;
   }
 
+  private registeredWorkspaceFiles: string[] = [];
+
   public registerWorkspaceShaderFiles(shaderFilePaths: string[]): void {
+    this.registeredWorkspaceFiles = shaderFilePaths.map((p) => this.normalizeFilePath(p));
     for (const filePath of shaderFilePaths) {
       const parsed = this.getOrParseFile(filePath);
       if (parsed) {
@@ -140,21 +180,52 @@ export class IncludeDependencyGraph {
     this.reverseIndexBuilt = true;
   }
 
+  public getWorkspaceShaderFiles(): readonly string[] {
+    return this.registeredWorkspaceFiles;
+  }
+
+  private pruneForwardEdges(parentKey: string): void {
+    const prevChildren = this.forwardDependencies.get(parentKey);
+    if (!prevChildren) return;
+    for (const childKey of prevChildren) {
+      const parents = this.reverseDependencies.get(childKey);
+      if (parents) {
+        parents.delete(parentKey);
+        if (parents.size === 0) {
+          this.reverseDependencies.delete(childKey);
+        }
+      }
+    }
+    this.forwardDependencies.delete(parentKey);
+  }
+
   private recordReverseEdges(parentNorm: string, parsed: ParsedHlslFile): void {
+    const parentKey = this.pathKey(parentNorm);
+    this.canonicalPaths.set(parentKey, parentNorm);
+    this.pruneForwardEdges(parentKey);
+
     if (parentNorm.replace(/\\/g, '/').toLowerCase().includes('/library/packagecache/')) {
       return;
     }
+
+    const nextChildren = new Set<string>();
     for (const inc of parsed.includes) {
       const mapped = this.resolver.resolve(inc.rawPath, parentNorm);
       if (mapped.physicalPath) {
         const childNorm = this.normalizeFilePath(mapped.physicalPath);
-        let parents = this.reverseDependencies.get(childNorm);
+        const childKey = this.pathKey(childNorm);
+        this.canonicalPaths.set(childKey, childNorm);
+        nextChildren.add(childKey);
+        let parents = this.reverseDependencies.get(childKey);
         if (!parents) {
           parents = new Set<string>();
-          this.reverseDependencies.set(childNorm, parents);
+          this.reverseDependencies.set(childKey, parents);
         }
-        parents.add(parentNorm);
+        parents.add(parentKey);
       }
+    }
+    if (nextChildren.size > 0) {
+      this.forwardDependencies.set(parentKey, nextChildren);
     }
   }
 
@@ -167,7 +238,6 @@ export class IncludeDependencyGraph {
       path.join(this.context.projectRoot, 'Packages'),
     ];
     const stack = scanRoots.filter((d) => fs.existsSync(d));
-    const shaderExts = new Set(['.shader', '.hlsl', '.cginc', '.hlsli', '.compute']);
     while (stack.length > 0) {
       const dir = stack.pop();
       if (!dir) continue;
@@ -182,7 +252,7 @@ export class IncludeDependencyGraph {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           stack.push(full);
-        } else if (entry.isFile() && shaderExts.has(path.extname(entry.name).toLowerCase())) {
+        } else if (entry.isFile() && isShaderFilePath(entry.name)) {
           const parsed = this.getOrParseFile(full);
           if (parsed) {
             this.recordReverseEdges(this.normalizeFilePath(full), parsed);
@@ -193,24 +263,25 @@ export class IncludeDependencyGraph {
   }
 
   public findParentIncludeFiles(entryUriOrPath: string): ParsedHlslFile[] {
-    const entryNorm = this.normalizeFilePath(entryUriOrPath);
+    const entryKey = this.pathKey(entryUriOrPath);
     this.ensureReverseIndexPopulated();
 
     const parentFiles: ParsedHlslFile[] = [];
     const seenParents = new Set<string>();
-    const queue = [entryNorm];
+    const queue = [entryKey];
     while (queue.length > 0) {
-      const current = queue.shift();
-      if (!current) continue;
-      const parents = this.reverseDependencies.get(current);
+      const currentKey = queue.shift();
+      if (!currentKey) continue;
+      const parents = this.reverseDependencies.get(currentKey);
       if (!parents) continue;
-      for (const parentNorm of parents) {
-        if (seenParents.has(parentNorm)) continue;
-        seenParents.add(parentNorm);
-        const parsed = this.getOrParseFile(parentNorm);
+      for (const parentKey of parents) {
+        if (seenParents.has(parentKey)) continue;
+        seenParents.add(parentKey);
+        const parentPath = this.canonicalPaths.get(parentKey) ?? parentKey;
+        const parsed = this.getOrParseFile(parentPath);
         if (parsed) {
           parentFiles.push(parsed);
-          queue.push(parentNorm);
+          queue.push(parentKey);
         }
       }
     }
@@ -219,25 +290,31 @@ export class IncludeDependencyGraph {
 
   public getOrParseFile(uriOrPath: string): ParsedHlslFile | null {
     const norm = this.normalizeFilePath(uriOrPath);
-    const override = this.memoryOverrides.get(norm);
+    const key = this.pathKey(norm);
+    const canon = this.canonicalPaths.get(key) ?? norm;
+    if (!this.canonicalPaths.has(key)) {
+      this.canonicalPaths.set(key, canon);
+    }
+
+    const override = this.memoryOverrides.get(key);
     if (override) {
       return override.parsed;
     }
 
-    if (!fs.existsSync(norm)) {
+    if (!fs.existsSync(canon)) {
       return null;
     }
 
-    const st = fs.statSync(norm);
-    const cached = this.diskCache.get(norm);
+    const st = fs.statSync(canon);
+    const cached = this.diskCache.get(key);
     if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
       return cached.parsed;
     }
 
-    const content = fs.readFileSync(norm, 'utf8');
-    const uri = this.toUri(norm);
-    const parsed = parseHlslSymbols(content, norm, uri, this.prepass);
-    this.diskCache.set(norm, {
+    const content = fs.readFileSync(canon, 'utf8');
+    const uri = this.toUri(canon);
+    const parsed = parseHlslSymbols(content, canon, uri, this.prepass);
+    this.diskCache.set(key, {
       mtimeMs: st.mtimeMs,
       size: st.size,
       parsed,
@@ -247,30 +324,32 @@ export class IncludeDependencyGraph {
 
   public collectReachableFiles(entryUriOrPath: string): IncludeGraphWalkResult {
     const entryNorm = this.normalizeFilePath(entryUriOrPath);
+    const entryKey = this.pathKey(entryNorm);
     const visited = new Set<string>();
     const files: ParsedHlslFile[] = [];
     const unresolvedIncludes: UnresolvedIncludeDiagnostic[] = [];
 
     const visit = (filePath: string, collectUnresolved: boolean) => {
       const norm = this.normalizeFilePath(filePath);
-      if (visited.has(norm)) return;
-      visited.add(norm);
+      const key = this.pathKey(norm);
+      if (visited.has(key)) return;
+      visited.add(key);
 
       const parsed = this.getOrParseFile(norm);
       if (!parsed) return;
       files.push(parsed);
-      this.recordReverseEdges(norm, parsed);
+      this.recordReverseEdges(parsed.filePath, parsed);
 
       for (const inc of parsed.includes) {
-        const mapped = this.resolver.resolve(inc.rawPath, norm);
+        const mapped = this.resolver.resolve(inc.rawPath, parsed.filePath);
         if (mapped.physicalPath) {
           visit(mapped.physicalPath, collectUnresolved);
         } else if (collectUnresolved) {
           const isInsidePackageCache = norm.replace(/\\/g, '/').toLowerCase().includes('/library/packagecache/');
-          if (norm === entryNorm || !isInsidePackageCache) {
+          if (key === entryKey || !isInsidePackageCache) {
             unresolvedIncludes.push({
               includePath: inc.rawPath,
-              fromFile: norm,
+              fromFile: parsed.filePath,
               fromUri: parsed.uri,
               line: inc.line,
               column: inc.column,
@@ -284,10 +363,9 @@ export class IncludeDependencyGraph {
 
     visit(entryNorm, true);
 
-    // Reverse include graph: when inspecting a standalone .hlsl/.cginc/.hlsli header,
+    // Reverse include graph: when inspecting a standalone header (.hlsl/.hlsli/.cginc/.cg/.hlslinc/.fxh),
     // inherit visible symbols from parent .shader / .hlsl files that #include this header.
-    const ext = path.extname(entryNorm).toLowerCase();
-    const isHeaderFile = ext === '.hlsl' || ext === '.cginc' || ext === '.hlsli';
+    const isHeaderFile = isShaderHeaderPath(entryNorm);
     const isInsidePackageCache = entryNorm.replace(/\\/g, '/').toLowerCase().includes('/library/packagecache/');
     if (isHeaderFile && !isInsidePackageCache) {
       const parentFiles = this.findParentIncludeFiles(entryNorm);
@@ -299,12 +377,11 @@ export class IncludeDependencyGraph {
     return { files, unresolvedIncludes };
   }
 
-  public findSymbolsVisibleFrom(
-    entryUriOrPath: string,
+  private findSymbolsVisibleInWalk(
+    files: readonly ParsedHlslFile[],
     symbolName: string,
     cursorLine?: number,
   ): HlslSymbolEntry[] {
-    const { files } = this.collectReachableFiles(entryUriOrPath);
     const current = files[0];
     const results: HlslSymbolEntry[] = [];
     const fallbackProps: HlslSymbolEntry[] = [];
@@ -327,6 +404,15 @@ export class IncludeDependencyGraph {
     }
 
     return [...results, ...fallbackProps, ...otherPassHits];
+  }
+
+  public findSymbolsVisibleFrom(
+    entryUriOrPath: string,
+    symbolName: string,
+    cursorLine?: number,
+  ): HlslSymbolEntry[] {
+    const { files } = this.collectReachableFiles(entryUriOrPath);
+    return this.findSymbolsVisibleInWalk(files, symbolName, cursorLine);
   }
 
   public findAllVisibleSymbols(entryUriOrPath: string, cursorLine?: number): HlslSymbolEntry[] {
@@ -354,12 +440,11 @@ export class IncludeDependencyGraph {
     return out;
   }
 
-  public findStructFields(
-    entryUriOrPath: string,
+  private findStructFieldsInWalk(
+    files: readonly ParsedHlslFile[],
     structName: string,
     cursorLine?: number,
   ): HlslSymbolEntry[] {
-    const { files } = this.collectReachableFiles(entryUriOrPath);
     const current = files[0];
     if (current && cursorLine !== undefined && current.scopedStructFields) {
       const groups = current.scopedStructFields.get(structName);
@@ -387,8 +472,20 @@ export class IncludeDependencyGraph {
     return [];
   }
 
-  public inferVariableType(entryUriOrPath: string, varName: string, line: number): string | null {
+  public findStructFields(
+    entryUriOrPath: string,
+    structName: string,
+    cursorLine?: number,
+  ): HlslSymbolEntry[] {
     const { files } = this.collectReachableFiles(entryUriOrPath);
+    return this.findStructFieldsInWalk(files, structName, cursorLine);
+  }
+
+  private inferVariableTypeInWalk(
+    files: readonly ParsedHlslFile[],
+    varName: string,
+    line: number,
+  ): string | null {
     const current = files[0];
     if (current) {
       for (const scope of current.localVarScopes) {
@@ -416,6 +513,11 @@ export class IncludeDependencyGraph {
     return null;
   }
 
+  public inferVariableType(entryUriOrPath: string, varName: string, line: number): string | null {
+    const { files } = this.collectReachableFiles(entryUriOrPath);
+    return this.inferVariableTypeInWalk(files, varName, line);
+  }
+
   public resolveExpressionChain(
     entryUriOrPath: string,
     expression: string,
@@ -429,8 +531,9 @@ export class IncludeDependencyGraph {
     const segments = this.splitChainSegments(expression.trim());
     if (segments.length === 0) return { type: null, field: null, ownerType: null, rootSymbol: null };
 
-    let currentType = this.resolveRootSegmentType(entryUriOrPath, segments[0], line);
-    const rootSymbol = this.resolveRootSymbol(entryUriOrPath, segments[0], line);
+    const { files } = this.collectReachableFiles(entryUriOrPath);
+    let currentType = this.resolveRootSegmentTypeInWalk(files, segments[0], line);
+    const rootSymbol = this.resolveRootSymbolInWalk(files, segments[0], line);
     let lastField: HlslSymbolEntry | null = null;
     let ownerType: string | null = null;
 
@@ -442,7 +545,7 @@ export class IncludeDependencyGraph {
       if (!memberName) return { type: null, field: null, ownerType: null, rootSymbol };
 
       const cleanOwner = this.unwrapContainerType(currentType, segments[i].includes('['));
-      const fields = this.findStructFields(entryUriOrPath, cleanOwner, line);
+      const fields = this.findStructFieldsInWalk(files, cleanOwner, line);
       const matched = fields.find((f) => f.name === memberName);
       if (matched) {
         ownerType = cleanOwner;
@@ -476,8 +579,8 @@ export class IncludeDependencyGraph {
     return { type: currentType, field: lastField, ownerType, rootSymbol };
   }
 
-  private resolveRootSymbol(
-    entryUriOrPath: string,
+  private resolveRootSymbolInWalk(
+    files: readonly ParsedHlslFile[],
     segment: string,
     line: number,
   ): HlslSymbolEntry | null {
@@ -487,11 +590,34 @@ export class IncludeDependencyGraph {
       ? fnCallMatch[1]
       : /^([A-Za-z_][A-Za-z0-9_]*)/.exec(trimmed)?.[1];
     if (!targetName) return null;
-    const hits = this.findSymbolsVisibleFrom(entryUriOrPath, targetName, line);
+
+    if (!fnCallMatch) {
+      const current = files[0];
+      if (current) {
+        for (const scope of current.localVarScopes) {
+          if (line >= scope.startLine && line <= scope.endLine) {
+            const decl = scope.declarations.get(targetName);
+            if (decl && line >= decl.line) {
+              return {
+                name: targetName,
+                kind: 'variable',
+                returnType: decl.type,
+                signature: decl.signature,
+                uri: current.uri,
+                line: decl.line,
+                column: decl.column,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    const hits = this.findSymbolsVisibleInWalk(files, targetName, line);
     if (fnCallMatch) {
       return hits.find((s) => s.kind === 'function') ?? hits[0] ?? null;
     }
-    return hits.find((s) => s.kind === 'variable' || s.kind === 'parameter') ?? hits[0] ?? null;
+    return hits.find((s) => s.kind === 'variable') ?? hits[0] ?? null;
   }
 
   private resolveBuiltinObjectMethodType(ownerType: string, methodName: string): string | null {
@@ -540,8 +666,8 @@ export class IncludeDependencyGraph {
     return out;
   }
 
-  private resolveRootSegmentType(
-    entryUriOrPath: string,
+  private resolveRootSegmentTypeInWalk(
+    files: readonly ParsedHlslFile[],
     segment: string,
     line: number,
   ): string | null {
@@ -551,7 +677,7 @@ export class IncludeDependencyGraph {
     if (fnCallMatch) {
       const fnName = fnCallMatch[1];
       const argsBody = fnCallMatch[2];
-      const hits = this.findSymbolsVisibleFrom(entryUriOrPath, fnName, line);
+      const hits = this.findSymbolsVisibleInWalk(files, fnName, line);
       const fn = hits.find((s) => s.kind === 'function' && s.returnType);
       if (fn?.returnType) return fn.returnType;
 
@@ -570,7 +696,7 @@ export class IncludeDependencyGraph {
         const propIdent =
           argParts.length >= 2 ? /^([A-Za-z_][A-Za-z0-9_]*)/.exec(argParts[1].trim())?.[1] : undefined;
         if (propIdent) {
-          const propHits = this.findSymbolsVisibleFrom(entryUriOrPath, propIdent, line);
+          const propHits = this.findSymbolsVisibleInWalk(files, propIdent, line);
           const varSym = propHits.find((s) => s.kind === 'variable' && s.returnType);
           if (varSym?.returnType) return varSym.returnType;
         }
@@ -584,7 +710,7 @@ export class IncludeDependencyGraph {
           return typeArgMatch[1];
         }
         if (propIdent) {
-          const propHits = this.findSymbolsVisibleFrom(entryUriOrPath, propIdent, line);
+          const propHits = this.findSymbolsVisibleInWalk(files, propIdent, line);
           const fallbackSym = propHits.find((s) => s.returnType);
           if (fallbackSym?.returnType) return fallbackSym.returnType;
         }
@@ -594,7 +720,7 @@ export class IncludeDependencyGraph {
 
     const identMatch = /^([A-Za-z_][A-Za-z0-9_]*)/.exec(trimmed);
     if (!identMatch) return null;
-    const rawType = this.inferVariableType(entryUriOrPath, identMatch[1], line);
+    const rawType = this.inferVariableTypeInWalk(files, identMatch[1], line);
     if (!rawType) return null;
     return hasIndex ? this.unwrapIndexedElementType(rawType) : rawType;
   }

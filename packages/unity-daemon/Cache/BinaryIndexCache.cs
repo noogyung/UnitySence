@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityBrain.Daemon.Indexing;
 
@@ -42,9 +43,10 @@ public sealed record IndexRebuildResultDto(
 public sealed class BinaryIndexCache
 {
     private const uint MagicHeader = 0x58494255; // "UBIX" little-endian
-    private const uint FormatVersion = 1;
+    private const uint FormatVersion = 2;
 
     private readonly object _stateLock = new();
+    private readonly SemaphoreSlim _rebuildLock = new(1, 1);
     private readonly MetaGuidMap _metaMap = new();
     private Dictionary<string, CachedAssetEntry> _assetEntries = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, CachedMetaEntry> _metaEntries = new(StringComparer.OrdinalIgnoreCase);
@@ -53,6 +55,7 @@ public sealed class BinaryIndexCache
     private Dictionary<string, List<(string TargetScriptGuid, string TargetTypeName, AssetUsageLocationDto Location)>> _callbacksByMethod = new(StringComparer.Ordinal);
     private Dictionary<string, List<SerializedFieldValueEntryDto>> _fieldsByScriptGuid = new(StringComparer.OrdinalIgnoreCase);
 
+    private bool _loadedFromDisk;
     private string _state = "idle";
     private double _lastBuildMs;
 
@@ -84,26 +87,39 @@ public sealed class BinaryIndexCache
     public IndexRebuildResultDto BuildOrUpdateIndex(string projectRoot, string cacheFilePath, bool forceRebuild = false)
     {
         var sw = Stopwatch.StartNew();
-
-        lock (_stateLock)
-        {
-            _state = "indexing";
-        }
-
+        _rebuildLock.Wait();
         try
         {
-            if (!forceRebuild && File.Exists(cacheFilePath))
+            lock (_stateLock)
             {
-                TryLoadFromBinary(cacheFilePath);
+                _state = "indexing";
             }
-            else if (forceRebuild)
+
+            Dictionary<string, CachedMetaEntry> prevMetas;
+            Dictionary<string, CachedAssetEntry> prevAssets;
+
+            if (forceRebuild)
+            {
+                prevMetas = new Dictionary<string, CachedMetaEntry>(StringComparer.OrdinalIgnoreCase);
+                prevAssets = new Dictionary<string, CachedAssetEntry>(StringComparer.OrdinalIgnoreCase);
+            }
+            else
             {
                 lock (_stateLock)
                 {
-                    _assetEntries.Clear();
-                    _metaEntries.Clear();
-                    _metaMap.Clear();
+                    prevMetas = new Dictionary<string, CachedMetaEntry>(_metaEntries, StringComparer.OrdinalIgnoreCase);
+                    prevAssets = new Dictionary<string, CachedAssetEntry>(_assetEntries, StringComparer.OrdinalIgnoreCase);
                 }
+
+                if (!_loadedFromDisk && prevAssets.Count == 0 && prevMetas.Count == 0 && File.Exists(cacheFilePath))
+                {
+                    if (TryLoadFromBinary(cacheFilePath, out var diskLoadedMetas, out var diskLoadedAssets))
+                    {
+                        prevMetas = diskLoadedMetas;
+                        prevAssets = diskLoadedAssets;
+                    }
+                }
+                _loadedFromDisk = true;
             }
 
             var diskMetas = new List<(string FullPath, string RelPath, long Ticks, long Length)>();
@@ -114,39 +130,34 @@ public sealed class BinaryIndexCache
                 Path.Combine(projectRoot, "Packages"),
             };
 
-            var opts = new EnumerationOptions
-            {
-                RecurseSubdirectories = true,
-                IgnoreInaccessible = true,
-                AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
-            };
-
             foreach (var scanDir in scanRoots)
             {
-                if (!Directory.Exists(scanDir)) continue;
-                var dirInfo = new DirectoryInfo(scanDir);
-                foreach (var fileInfo in dirInfo.EnumerateFiles("*", opts))
+                foreach (var fileInfo in MetaGuidMap.EnumerateFilesSafe(scanDir))
                 {
                     string name = fileInfo.Name;
+                    long ticks;
+                    long length;
+                    try
+                    {
+                        ticks = fileInfo.LastWriteTimeUtc.Ticks;
+                        length = fileInfo.Length;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        continue;
+                    }
+
                     if (name.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
                     {
                         string rel = Path.GetRelativePath(projectRoot, fileInfo.FullName).Replace('\\', '/');
-                        diskMetas.Add((fileInfo.FullName, rel, fileInfo.LastWriteTimeUtc.Ticks, fileInfo.Length));
+                        diskMetas.Add((fileInfo.FullName, rel, ticks, length));
                     }
                     else if (IsIndexableYamlAsset(name))
                     {
                         string rel = Path.GetRelativePath(projectRoot, fileInfo.FullName).Replace('\\', '/');
-                        diskAssets.Add((fileInfo.FullName, rel, fileInfo.LastWriteTimeUtc.Ticks, fileInfo.Length));
+                        diskAssets.Add((fileInfo.FullName, rel, ticks, length));
                     }
                 }
-            }
-
-            Dictionary<string, CachedMetaEntry> prevMetas;
-            Dictionary<string, CachedAssetEntry> prevAssets;
-            lock (_stateLock)
-            {
-                prevMetas = new Dictionary<string, CachedMetaEntry>(_metaEntries, StringComparer.OrdinalIgnoreCase);
-                prevAssets = new Dictionary<string, CachedAssetEntry>(_assetEntries, StringComparer.OrdinalIgnoreCase);
             }
 
             // 1. Incremental .meta update
@@ -187,10 +198,10 @@ public sealed class BinaryIndexCache
                 }
             }
 
-            _metaMap.Clear();
+            var pathToGuidLookup = new Dictionary<string, string>(nextMetas.Count, StringComparer.OrdinalIgnoreCase);
             foreach (var me in nextMetas.Values)
             {
-                _metaMap.SetMapping(me.Guid, me.AssetRelPath, me.MetaRelPath, new FileStamp(me.LastWriteUtcTicks, me.Length));
+                pathToGuidLookup[me.AssetRelPath] = me.Guid;
             }
 
             // 2. Incremental YAML asset update
@@ -199,7 +210,7 @@ public sealed class BinaryIndexCache
 
             foreach (var a in diskAssets)
             {
-                string assetGuid = _metaMap.TryGetGuid(a.RelPath, out var g) ? g : string.Empty;
+                string assetGuid = pathToGuidLookup.TryGetValue(a.RelPath, out var g) ? g : string.Empty;
                 if (!forceRebuild &&
                     prevAssets.TryGetValue(a.RelPath, out var cachedAsset) &&
                     cachedAsset.LastWriteUtcTicks == a.Ticks &&
@@ -219,8 +230,15 @@ public sealed class BinaryIndexCache
                 var parsedDocs = new ConcurrentBag<CachedAssetEntry>();
                 Parallel.ForEach(dirtyAssets, a =>
                 {
-                    var doc = UnityYamlStreamParser.ParseFile(a.FullPath, a.RelPath, a.Guid);
-                    parsedDocs.Add(new CachedAssetEntry(a.RelPath, a.Ticks, a.Length, doc));
+                    try
+                    {
+                        var doc = UnityYamlStreamParser.ParseFile(a.FullPath, a.RelPath, a.Guid);
+                        parsedDocs.Add(new CachedAssetEntry(a.RelPath, a.Ticks, a.Length, doc));
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        // Skip transiently locked or vanished files without failing the entire index
+                    }
                 });
 
                 foreach (var pd in parsedDocs)
@@ -235,12 +253,20 @@ public sealed class BinaryIndexCache
                               nextAssets.Count != prevAssets.Count ||
                               !File.Exists(cacheFilePath);
 
-            // 3. Build fast lookup tables + persist binary cache when dirty
-            BuildLookupTables(nextAssets, nextMetas, sw.Elapsed.TotalMilliseconds);
+            // 3. Build fast lookup tables + atomic swap + persist binary cache when dirty
+            BuildLookupTablesAndSwap(nextAssets, nextMetas, sw.Elapsed.TotalMilliseconds);
+            _loadedFromDisk = true;
 
             if (cacheDirty)
             {
-                SaveToBinary(cacheFilePath, nextMetas, nextAssets);
+                try
+                {
+                    SaveToBinary(cacheFilePath, nextMetas, nextAssets);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Persistence failure should not discard valid in-memory index
+                }
             }
 
             sw.Stop();
@@ -259,6 +285,10 @@ public sealed class BinaryIndexCache
                 _state = "error";
             }
             throw;
+        }
+        finally
+        {
+            _rebuildLock.Release();
         }
     }
 
@@ -333,7 +363,7 @@ public sealed class BinaryIndexCache
         }
     }
 
-    private void BuildLookupTables(
+    private void BuildLookupTablesAndSwap(
         Dictionary<string, CachedAssetEntry> nextAssets,
         Dictionary<string, CachedMetaEntry> nextMetas,
         double elapsedMs)
@@ -342,8 +372,6 @@ public sealed class BinaryIndexCache
         var callbacksByMethod = new Dictionary<string, List<(string, string, AssetUsageLocationDto)>>(StringComparer.Ordinal);
         var fieldsByGuid = new Dictionary<string, List<SerializedFieldValueEntryDto>>(StringComparer.OrdinalIgnoreCase);
 
-        // Pass 1: Build cross-asset lookup table (TargetAssetGuid, ComponentFileId) -> C# ScriptGuid
-        // or parent Prefab GUID so multi-hop Prefab Variant m_Modifications resolve to the script GUID.
         var componentScriptMap = new Dictionary<(string AssetGuid, string FileId), string>();
         foreach (var entry in nextAssets.Values)
         {
@@ -437,6 +465,10 @@ public sealed class BinaryIndexCache
                     callbacksByMethod[cb.MethodName] = list;
                 }
 
+                string effectiveTargetGuid = !string.IsNullOrEmpty(cb.TargetFileId)
+                    ? ResolveOverrideScriptGuid(cb.TargetScriptGuid, cb.TargetFileId)
+                    : cb.TargetScriptGuid;
+
                 var loc = new AssetUsageLocationDto(
                     doc.AssetPath,
                     doc.AssetType,
@@ -447,7 +479,7 @@ public sealed class BinaryIndexCache
                     "unityEventCallback",
                     cb.MethodName,
                     null);
-                list.Add((cb.TargetScriptGuid, cb.TargetTypeName, loc));
+                list.Add((effectiveTargetGuid, cb.TargetTypeName, loc));
             }
 
             foreach (var sv in doc.SerializedValues)
@@ -475,6 +507,12 @@ public sealed class BinaryIndexCache
             }
         }
 
+        _metaMap.Clear();
+        foreach (var me in nextMetas.Values)
+        {
+            _metaMap.SetMapping(me.Guid, me.AssetRelPath, me.MetaRelPath, new FileStamp(me.LastWriteUtcTicks, me.Length));
+        }
+
         lock (_stateLock)
         {
             _assetEntries = nextAssets;
@@ -486,7 +524,7 @@ public sealed class BinaryIndexCache
         }
     }
 
-    private void SaveToBinary(
+    private static void SaveToBinary(
         string cacheFilePath,
         Dictionary<string, CachedMetaEntry> metas,
         Dictionary<string, CachedAssetEntry> assets)
@@ -497,88 +535,115 @@ public sealed class BinaryIndexCache
             Directory.CreateDirectory(dir);
         }
 
-        string tempPath = cacheFilePath + ".tmp";
-        using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536))
-        using (var writer = new BinaryWriter(fs))
+        string tempPath = $"{cacheFilePath}.{Guid.NewGuid():N}.tmp";
+        try
         {
-            writer.Write(MagicHeader);
-            writer.Write(FormatVersion);
-
-            writer.Write(metas.Count);
-            foreach (var m in metas.Values)
+            using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536))
+            using (var writer = new BinaryWriter(fs))
             {
-                writer.Write(m.MetaRelPath);
-                writer.Write(m.LastWriteUtcTicks);
-                writer.Write(m.Length);
-                writer.Write(m.Guid);
-                writer.Write(m.AssetRelPath);
-            }
+                writer.Write(MagicHeader);
+                writer.Write(FormatVersion);
 
-            writer.Write(assets.Count);
-            foreach (var a in assets.Values)
-            {
-                writer.Write(a.AssetPath);
-                writer.Write(a.LastWriteUtcTicks);
-                writer.Write(a.Length);
-                writer.Write(a.Document.AssetType);
-                writer.Write(a.Document.AssetGuid);
-
-                writer.Write(a.Document.ComponentUsages.Count);
-                foreach (var c in a.Document.ComponentUsages)
+                writer.Write(metas.Count);
+                foreach (var m in metas.Values)
                 {
-                    writer.Write(c.ScriptGuid);
-                    writer.Write(c.GameObjectPath);
-                    writer.Write(c.FileId);
-                    writer.Write(c.Line);
-                    writer.Write(c.UsageKind);
-                    writer.Write(c.SerializedValues.Count);
-                    foreach (var kvp in c.SerializedValues)
+                    writer.Write(m.MetaRelPath);
+                    writer.Write(m.LastWriteUtcTicks);
+                    writer.Write(m.Length);
+                    writer.Write(m.Guid);
+                    writer.Write(m.AssetRelPath);
+                }
+
+                writer.Write(assets.Count);
+                foreach (var a in assets.Values)
+                {
+                    writer.Write(a.AssetPath);
+                    writer.Write(a.LastWriteUtcTicks);
+                    writer.Write(a.Length);
+                    writer.Write(a.Document.AssetType);
+                    writer.Write(a.Document.AssetGuid);
+
+                    writer.Write(a.Document.ComponentUsages.Count);
+                    foreach (var c in a.Document.ComponentUsages)
                     {
-                        writer.Write(kvp.Key);
-                        writer.Write(kvp.Value);
+                        writer.Write(c.ScriptGuid);
+                        writer.Write(c.GameObjectPath);
+                        writer.Write(c.FileId);
+                        writer.Write(c.Line);
+                        writer.Write(c.UsageKind);
+                        writer.Write(c.SerializedValues.Count);
+                        foreach (var kvp in c.SerializedValues)
+                        {
+                            writer.Write(kvp.Key);
+                            writer.Write(kvp.Value);
+                        }
+                    }
+
+                    writer.Write(a.Document.EventCallbacks.Count);
+                    foreach (var cb in a.Document.EventCallbacks)
+                    {
+                        writer.Write(cb.TargetScriptGuid);
+                        writer.Write(cb.TargetTypeName);
+                        writer.Write(cb.MethodName);
+                        writer.Write(cb.GameObjectPath);
+                        writer.Write(cb.FileId);
+                        writer.Write(cb.Line);
+                        writer.Write(cb.TargetFileId);
+                    }
+
+                    writer.Write(a.Document.SerializedValues.Count);
+                    foreach (var sv in a.Document.SerializedValues)
+                    {
+                        writer.Write(sv.ScriptGuid);
+                        writer.Write(sv.FieldName);
+                        writer.Write(sv.Value);
+                        writer.Write(sv.GameObjectPath);
+                        writer.Write(sv.FileId);
+                        writer.Write(sv.Line);
                     }
                 }
+            }
 
-                writer.Write(a.Document.EventCallbacks.Count);
-                foreach (var cb in a.Document.EventCallbacks)
-                {
-                    writer.Write(cb.TargetScriptGuid);
-                    writer.Write(cb.TargetTypeName);
-                    writer.Write(cb.MethodName);
-                    writer.Write(cb.GameObjectPath);
-                    writer.Write(cb.FileId);
-                    writer.Write(cb.Line);
-                }
-
-                writer.Write(a.Document.SerializedValues.Count);
-                foreach (var sv in a.Document.SerializedValues)
-                {
-                    writer.Write(sv.ScriptGuid);
-                    writer.Write(sv.FieldName);
-                    writer.Write(sv.Value);
-                    writer.Write(sv.GameObjectPath);
-                    writer.Write(sv.FileId);
-                    writer.Write(sv.Line);
-                }
+            File.Move(tempPath, cacheFilePath, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempPath)) File.Delete(tempPath);
+            }
+            catch
+            {
+                // Ignore temp cleanup failure
             }
         }
-
-        File.Move(tempPath, cacheFilePath, overwrite: true);
     }
 
-    private bool TryLoadFromBinary(string cacheFilePath)
+    private static bool TryValidateCount(int count, long remainingBytes)
     {
+        return count >= 0 && count <= remainingBytes && count <= 5_000_000;
+    }
+
+    private static bool TryLoadFromBinary(
+        string cacheFilePath,
+        out Dictionary<string, CachedMetaEntry> metasOut,
+        out Dictionary<string, CachedAssetEntry> assetsOut)
+    {
+        metasOut = new Dictionary<string, CachedMetaEntry>(StringComparer.OrdinalIgnoreCase);
+        assetsOut = new Dictionary<string, CachedAssetEntry>(StringComparer.OrdinalIgnoreCase);
+
         try
         {
             using var fs = new FileStream(cacheFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.SequentialScan);
             using var reader = new BinaryReader(fs);
 
-            if (reader.ReadUInt32() != MagicHeader || reader.ReadUInt32() != FormatVersion)
+            if (fs.Length < 16 || reader.ReadUInt32() != MagicHeader || reader.ReadUInt32() != FormatVersion)
             {
                 return false;
             }
 
             int metaCount = reader.ReadInt32();
+            if (!TryValidateCount(metaCount, fs.Length - fs.Position)) return false;
             var metas = new Dictionary<string, CachedMetaEntry>(metaCount, StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < metaCount; i++)
             {
@@ -591,6 +656,7 @@ public sealed class BinaryIndexCache
             }
 
             int assetCount = reader.ReadInt32();
+            if (!TryValidateCount(assetCount, fs.Length - fs.Position)) return false;
             var assets = new Dictionary<string, CachedAssetEntry>(assetCount, StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < assetCount; i++)
             {
@@ -601,6 +667,7 @@ public sealed class BinaryIndexCache
                 string assetGuid = reader.ReadString();
 
                 int compCount = reader.ReadInt32();
+                if (!TryValidateCount(compCount, fs.Length - fs.Position)) return false;
                 var comps = new List<ComponentUsageRecord>(compCount);
                 for (int c = 0; c < compCount; c++)
                 {
@@ -610,6 +677,7 @@ public sealed class BinaryIndexCache
                     int line = reader.ReadInt32();
                     string usageKind = reader.ReadString();
                     int dictCount = reader.ReadInt32();
+                    if (!TryValidateCount(dictCount, fs.Length - fs.Position)) return false;
                     var dict = new Dictionary<string, string>(dictCount, StringComparer.Ordinal);
                     for (int d = 0; d < dictCount; d++)
                     {
@@ -621,6 +689,7 @@ public sealed class BinaryIndexCache
                 }
 
                 int cbCount = reader.ReadInt32();
+                if (!TryValidateCount(cbCount, fs.Length - fs.Position)) return false;
                 var cbs = new List<EventCallbackRecord>(cbCount);
                 for (int c = 0; c < cbCount; c++)
                 {
@@ -630,10 +699,12 @@ public sealed class BinaryIndexCache
                     string goPath = reader.ReadString();
                     string fileId = reader.ReadString();
                     int line = reader.ReadInt32();
-                    cbs.Add(new EventCallbackRecord(tGuid, tType, mName, goPath, fileId, line));
+                    string tFileId = reader.ReadString();
+                    cbs.Add(new EventCallbackRecord(tGuid, tType, mName, goPath, fileId, line, tFileId));
                 }
 
                 int svCount = reader.ReadInt32();
+                if (!TryValidateCount(svCount, fs.Length - fs.Position)) return false;
                 var svs = new List<SerializedValueRecord>(svCount);
                 for (int s = 0; s < svCount; s++)
                 {
@@ -653,11 +724,8 @@ public sealed class BinaryIndexCache
                     new AssetDocumentIndex(assetPath, assetType, assetGuid, comps, cbs, svs));
             }
 
-            lock (_stateLock)
-            {
-                _metaEntries = metas;
-                _assetEntries = assets;
-            }
+            metasOut = metas;
+            assetsOut = assets;
             return true;
         }
         catch

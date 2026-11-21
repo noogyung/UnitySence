@@ -136,6 +136,19 @@ function walkUiToolkitFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+function maskBlockCommentsPreservingNewlines(source: string): string {
+  return source.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, (block) =>
+    block.replace(/[^\n]/g, ' '),
+  );
+}
+
+function isInsideUnclosedBlockComment(source: string): boolean {
+  const lastOpen = source.lastIndexOf('/*');
+  if (lastOpen < 0) return false;
+  const lastClose = source.lastIndexOf('*/', source.length);
+  return lastClose < lastOpen;
+}
+
 export function collectUiToolkitElements(projectRoot: string): UiToolkitElementRef[] {
   const files = [
     ...walkUiToolkitFiles(path.join(projectRoot, 'Assets')),
@@ -152,9 +165,9 @@ export function collectUiToolkitElements(projectRoot: string): UiToolkitElementR
       continue;
     }
     const lower = filePath.toLowerCase();
-    const lines = text.split(/\r?\n/);
 
     if (lower.endsWith('.uxml')) {
+      const lines = text.split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const nameRe = /\bname\s*=\s*"([^"]+)"/g;
@@ -170,11 +183,13 @@ export function collectUiToolkitElements(projectRoot: string): UiToolkitElementR
         }
       }
     } else if (lower.endsWith('.uss')) {
+      const lines = maskBlockCommentsPreservingNewlines(text).split(/\r?\n/);
       let depth = 0;
       for (let i = 0; i < lines.length; i++) {
-        const cleaned = lines[i].replace(/\/\*[\s\S]*?\*\//g, '');
+        const cleaned = lines[i];
+        const strippedAtImport = cleaned.replace(/@(?:import|charset|namespace)\b[^;\n]*(?:;|$)/gi, '');
         if (depth === 0) {
-          const selPart = cleaned.split('{')[0];
+          const selPart = strippedAtImport.split('{')[0];
           const classSelRe = /\.([A-Za-z_][A-Za-z0-9_-]*)/g;
           let m: RegExpExecArray | null;
           while ((m = classSelRe.exec(selPart)) !== null) {
@@ -185,7 +200,7 @@ export function collectUiToolkitElements(projectRoot: string): UiToolkitElementR
             results.push({ name: m[1], assetPath: filePath, line: i });
           }
         }
-        for (const ch of cleaned) {
+        for (const ch of strippedAtImport) {
           if (ch === '{') depth++;
           else if (ch === '}') depth = Math.max(0, depth - 1);
         }
@@ -207,15 +222,24 @@ export class UnityUssCompletionProvider implements vscode.CompletionItemProvider
     doc: vscode.TextDocument,
     position: vscode.Position,
   ): vscode.CompletionItem[] | undefined {
-    if (!doc.fileName.toLowerCase().endsWith('.uss')) return undefined;
+    const fileName = doc.fileName || doc.uri.fsPath || '';
+    if (doc.languageId !== 'uss' && !fileName.toLowerCase().endsWith('.uss')) return undefined;
     const lineBefore = doc.lineAt(position.line).text.slice(0, position.character);
 
     const textBefore = doc.getText(new vscode.Range(new vscode.Position(0, 0), position));
-    const cleanedBefore = textBefore.replace(/\/\*[\s\S]*?\*\//g, '');
+    if (isInsideUnclosedBlockComment(textBefore)) return undefined;
+    const cleanedBefore = maskBlockCommentsPreservingNewlines(textBefore).replace(
+      /@(?:import|charset|namespace)\b[^;\n]*(?:;|$)/gi,
+      '',
+    );
     let braceDepth = 0;
     for (const ch of cleanedBefore) {
       if (ch === '{') braceDepth++;
       else if (ch === '}') braceDepth = Math.max(0, braceDepth - 1);
+    }
+
+    if (/^\s*@(?:import|charset|namespace)\b/i.test(lineBefore)) {
+      return undefined;
     }
 
     // 1. Pseudo-states after `:` at selector level (outside declaration `{}`)
@@ -247,7 +271,10 @@ export class UnityUssCompletionProvider implements vscode.CompletionItemProvider
       return items;
     }
 
-    // 3. USS property names (skip when cursor is already on the value side after `:`)
+    // 3. USS property names only inside `{ ... }` rule blocks (skip value side after `:`)
+    if (braceDepth <= 0) {
+      return undefined;
+    }
     const declChunk = lineBefore.slice(
       Math.max(lineBefore.lastIndexOf('{'), lineBefore.lastIndexOf(';')) + 1,
     );

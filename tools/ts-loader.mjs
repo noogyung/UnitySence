@@ -55,7 +55,13 @@ registerHooks({
   },
 
   load(url, context, nextLoad) {
-    if (url.endsWith('.ts') || url.endsWith('.mts')) {
+    let pathname = url;
+    try {
+      pathname = new URL(url).pathname;
+    } catch {
+      pathname = url.split('?')[0].split('#')[0];
+    }
+    if (pathname.endsWith('.ts') || pathname.endsWith('.mts')) {
       const filePath = fileURLToPath(url);
       const rawSource = fs.readFileSync(filePath, 'utf8');
       const transformed = stripTypeScriptTypes(rawSource, {

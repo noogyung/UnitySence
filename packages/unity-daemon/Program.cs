@@ -10,6 +10,11 @@ public static class DaemonEntry
 {
     public static async Task<int> Main(string[] args)
     {
+        using var stdin = Console.OpenStandardInput();
+        using var stdout = Console.OpenStandardOutput();
+        // Ensure no accidental Console.WriteLine corrupts stdio JSON-RPC framing
+        Console.SetOut(Console.Error);
+
         string projectRoot = Directory.GetCurrentDirectory();
         string? cacheDir = null;
         bool oneShotIndex = false;
@@ -35,7 +40,18 @@ public static class DaemonEntry
         string cacheFilePath = Path.Combine(cacheDir, "asset-index.bin");
 
         var cache = new BinaryIndexCache();
-        cache.BuildOrUpdateIndex(projectRoot, cacheFilePath, forceRebuild: false);
+        try
+        {
+            cache.BuildOrUpdateIndex(projectRoot, cacheFilePath, forceRebuild: false);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UnityBrain.Daemon] Initial index error: {ex.Message}");
+            if (oneShotIndex)
+            {
+                return 1;
+            }
+        }
 
         if (oneShotIndex)
         {
@@ -50,8 +66,6 @@ public static class DaemonEntry
         };
 
         var server = new RpcServer(cache, projectRoot, cacheFilePath);
-        using var stdin = Console.OpenStandardInput();
-        using var stdout = Console.OpenStandardOutput();
         await server.RunAsync(stdin, stdout, cts.Token).ConfigureAwait(false);
         return 0;
     }

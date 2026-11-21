@@ -1,0 +1,54 @@
+{
+  "Unity Compute Shader": {
+    "prefix": "compute-shader",
+    "body": [
+      "#pragma kernel ${1:CSMain}",
+      "",
+      "RWTexture2D<float4> ${2:Result};",
+      "",
+      "[numthreads(${3:8}, ${4:8}, 1)]",
+      "void ${1:CSMain}(uint3 id : SV_DispatchThreadID)",
+      "{",
+      "\t$0",
+      "\t${2:Result}[id.xy] = float4(id.x & id.y, (id.x & 15) / 15.0, (id.y & 15) / 15.0, 0.0);",
+      "}"
+    ],
+    "description": "[UnityBrain] Unity Compute Shader 기본 커널 템플릿"
+  },
+  "Unity CBUFFER_START UnityPerMaterial": {
+    "prefix": "cbuffer-unity",
+    "body": [
+      "CBUFFER_START(${1:UnityPerMaterial})",
+      "\t$0",
+      "CBUFFER_END"
+    ],
+    "description": "[UnityBrain] SRP Batcher 호환 UnityPerMaterial CBUFFER 블록"
+  },
+  "Unity Texture2D & Sampler Pair": {
+    "prefix": "tex2d-pair",
+    "body": [
+      "TEXTURE2D(${1:_BaseMap});",
+      "SAMPLER(sampler${1:_BaseMap});"
+    ],
+    "description": "[UnityBrain] SRP 호환 TEXTURE2D + SAMPLER 쌍 선언"
+  },
+  "HLSL Attributes & Varyings Structs": {
+    "prefix": "hlsl-structs",
+    "body": [
+      "struct Attributes",
+      "{",
+      "\tfloat4 positionOS : POSITION;",
+      "\tfloat3 normalOS : NORMAL;",
+      "\tfloat2 uv : TEXCOORD0;",
+      "};",
+      "",
+      "struct Varyings",
+      "{",
+      "\tfloat4 positionHCS : SV_POSITION;",
+      "\tfloat3 normalWS : TEXCOORD1;",
+      "\tfloat2 uv : TEXCOORD0;",
+      "};"
+    ],
+    "description": "[UnityBrain] URP 표준 Attributes / Varyings 구조체 쌍"
+  }
+}

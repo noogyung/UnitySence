@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-19T11:46:34.859Z",
+  "generatedAt": "2026-11-21T04:46:04.123Z",
   "types": [
     {
       "fullName": "UnityEngine.MonoBehaviour",
@@ -806,6 +806,20 @@
           "supportsCoroutine": false,
           "description": "Called before the Transform parent changes.",
           "parameters": []
+        },
+        {
+          "name": "IsActive",
+          "returnType": "bool",
+          "supportsCoroutine": false,
+          "description": "Returns true if the GameObject and the Component are active.",
+          "parameters": []
+        },
+        {
+          "name": "IsDestroyed",
+          "returnType": "bool",
+          "supportsCoroutine": false,
+          "description": "Returns true if the native representation of the behaviour has been destroyed.",
+          "parameters": []
         }
       ],
       "minimumUnityVersion": "2020.3"
@@ -1231,104 +1245,6 @@
         }
       ],
       "minimumUnityVersion": "2021.3"
-    },
-    {
-      "fullName": "UnityEngine.EventSystems.UIBehaviour",
-      "kind": "class",
-      "events": [
-        {
-          "name": "Awake",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "Awake is called when an enabled UIBehaviour script instance is being loaded.",
-          "parameters": []
-        },
-        {
-          "name": "OnEnable",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "This function is called when the UI object becomes enabled and active.",
-          "parameters": []
-        },
-        {
-          "name": "Start",
-          "returnType": "void",
-          "supportsCoroutine": true,
-          "description": "Start is called on the frame when a UI script is enabled just before any of the Update methods are called the first time.",
-          "parameters": []
-        },
-        {
-          "name": "OnDisable",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "This function is called when the UI behaviour becomes disabled or inactive.",
-          "parameters": []
-        },
-        {
-          "name": "OnDestroy",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "Destroying the attached UIBehaviour will result in receiving OnDestroy.",
-          "parameters": []
-        },
-        {
-          "name": "OnRectTransformDimensionsChange",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "This callback is called if the associated RectTransform has its dimensions changed.",
-          "parameters": []
-        },
-        {
-          "name": "OnBeforeTransformParentChanged",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "This callback is called before the parent of the Transform changes.",
-          "parameters": []
-        },
-        {
-          "name": "OnTransformParentChanged",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "This callback is called when the parent property of the transform of the GameObject has changed.",
-          "parameters": []
-        },
-        {
-          "name": "OnDidApplyAnimationProperties",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "Callback for when properties have been changed by animation.",
-          "parameters": []
-        },
-        {
-          "name": "OnCanvasGroupChanged",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "Callback for when a CanvasGroup has changed.",
-          "parameters": []
-        },
-        {
-          "name": "OnCanvasHierarchyChanged",
-          "returnType": "void",
-          "supportsCoroutine": false,
-          "description": "Called when the state of a parent Canvas is changed.",
-          "parameters": []
-        },
-        {
-          "name": "IsActive",
-          "returnType": "bool",
-          "supportsCoroutine": false,
-          "description": "Returns true if the GameObject and the Component are active.",
-          "parameters": []
-        },
-        {
-          "name": "IsDestroyed",
-          "returnType": "bool",
-          "supportsCoroutine": false,
-          "description": "Returns true if the native representation of the behaviour has been destroyed.",
-          "parameters": []
-        }
-      ],
-      "minimumUnityVersion": "2020.3"
     }
   ],
   "sourceCommit": "resharper-unity-snapshot"

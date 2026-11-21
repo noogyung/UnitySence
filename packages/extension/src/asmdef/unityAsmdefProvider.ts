@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as vscode from 'vscode';
+import { normalizePathKey } from '../../../shader-lsp/src/vfs/virtualPathResolver.ts';
 
 export interface AsmdefRecord {
   name: string;
@@ -83,12 +84,15 @@ function readMetaGuid(assetPath: string): string | null {
   }
 }
 
-export class UnityAsmdefProvider {
+export class UnityAsmdefProvider implements vscode.Disposable {
   private readonly projectRoot: string;
   private byName = new Map<string, AsmdefRecord>();
   private byGuid = new Map<string, AsmdefRecord>();
   private byPath = new Map<string, AsmdefRecord>();
   private dirty = true;
+  private readonly onDidChangeInlayHintsEmitter = new vscode.EventEmitter<void>();
+  public readonly onDidChangeInlayHints: vscode.Event<void> =
+    this.onDidChangeInlayHintsEmitter.event;
 
   constructor(projectRoot: string) {
     this.projectRoot = path.resolve(projectRoot);
@@ -96,6 +100,11 @@ export class UnityAsmdefProvider {
 
   public invalidate(): void {
     this.dirty = true;
+    this.onDidChangeInlayHintsEmitter.fire();
+  }
+
+  public dispose(): void {
+    this.onDidChangeInlayHintsEmitter.dispose();
   }
 
   private ensureIndex(): void {
@@ -156,13 +165,21 @@ export class UnityAsmdefProvider {
     this.dirty = false;
   }
 
-  public resolveReference(refValue: string): AsmdefRecord | undefined {
+  public resolveReference(refValue: string, overrideRecord?: AsmdefRecord): AsmdefRecord | undefined {
     this.ensureIndex();
-    const guidMatch = /^GUID:([0-9a-fA-F]{32})$/i.exec(refValue.trim());
+    const trimmed = refValue.trim();
+    const guidMatch = /^GUID:([0-9a-fA-F]{32})$/i.exec(trimmed);
     if (guidMatch) {
-      return this.byGuid.get(guidMatch[1].toLowerCase());
+      const targetGuid = guidMatch[1].toLowerCase();
+      if (overrideRecord?.guid && overrideRecord.guid.toLowerCase() === targetGuid) {
+        return overrideRecord;
+      }
+      return this.byGuid.get(targetGuid);
     }
-    return this.byName.get(refValue.trim());
+    if (overrideRecord && overrideRecord.name === trimmed) {
+      return overrideRecord;
+    }
+    return this.byName.get(trimmed);
   }
 
   public provideInlayHints(doc: vscode.TextDocument): vscode.InlayHint[] {
@@ -272,8 +289,14 @@ export class UnityAsmdefProvider {
     const formatJsonItem = (item: vscode.CompletionItem) => {
       const label = String(item.label);
       if (!inString) {
+        const unquotedLower = unquotedPrefix.toLowerCase();
+        const matchesUnquoted =
+          unquotedLower.length > 0 && label.toLowerCase().includes(unquotedLower);
         item.insertText = `"${label}"`;
-        item.filterText = unquotedPrefix ? `${unquotedPrefix} "${label}" ${label}` : `"${label}" ${label}`;
+        item.filterText =
+          unquotedPrefix && matchesUnquoted
+            ? `${unquotedPrefix} "${label}" ${label}`
+            : `"${label}" ${label}`;
       } else if (!hasClosingQuote) {
         item.insertText = `${label}"`;
         item.filterText = label;
@@ -285,9 +308,10 @@ export class UnityAsmdefProvider {
     };
 
     if (key === 'references' || key === 'reference') {
+      const currentDocKey = normalizePathKey(doc.fileName);
       const items: vscode.CompletionItem[] = [];
       for (const rec of this.byName.values()) {
-        if (path.resolve(rec.filePath) === path.resolve(doc.fileName)) continue;
+        if (normalizePathKey(rec.filePath) === currentDocKey) continue;
         const rel = path.relative(this.projectRoot, rec.filePath).replace(/\\/g, '/');
         const nameItem = new vscode.CompletionItem(rec.name, vscode.CompletionItemKind.Module);
         nameItem.detail = `[UnityBrain] 어셈블리 참조 (${rel})`;
@@ -318,7 +342,6 @@ export class UnityAsmdefProvider {
 
   public validateDocument(doc: vscode.TextDocument): vscode.Diagnostic[] {
     if (!/\.(?:asmdef|asmref)$/i.test(doc.fileName)) return [];
-    this.invalidate();
     this.ensureIndex();
 
     const diags: vscode.Diagnostic[] = [];
@@ -336,6 +359,20 @@ export class UnityAsmdefProvider {
         ? [parsed.reference]
         : [];
 
+    const isAsmref = doc.fileName.toLowerCase().endsWith('.asmref');
+    const selfName = parsed.name ?? path.basename(doc.fileName, path.extname(doc.fileName));
+    const existingByPath = this.byPath.get(normalizePathKey(doc.fileName)) ?? this.byPath.get(path.resolve(doc.fileName).toLowerCase());
+    const overrideRec: AsmdefRecord | undefined =
+      !isAsmref && parsed.name
+        ? {
+            name: selfName,
+            guid: existingByPath?.guid ?? readMetaGuid(doc.fileName),
+            filePath: doc.fileName,
+            isAsmref: false,
+            references: refs.filter((r): r is string => typeof r === 'string'),
+          }
+        : undefined;
+
     const findRefRange = (refStr: string): vscode.Range => {
       const idx = text.indexOf(`"${refStr}"`);
       if (idx < 0) return new vscode.Range(0, 0, 0, 1);
@@ -344,7 +381,7 @@ export class UnityAsmdefProvider {
 
     for (const refStr of refs) {
       if (typeof refStr !== 'string') continue;
-      if (/^GUID:/i.test(refStr) && !this.resolveReference(refStr)) {
+      if (/^GUID:/i.test(refStr) && !this.resolveReference(refStr, overrideRec)) {
         diags.push(
           new vscode.Diagnostic(
             findRefRange(refStr),
@@ -355,12 +392,19 @@ export class UnityAsmdefProvider {
       }
     }
 
-    // Check cycle starting from this assembly (override its in-memory references with current doc)
-    const selfName = parsed.name ?? path.basename(doc.fileName, path.extname(doc.fileName));
-    if (!doc.fileName.toLowerCase().endsWith('.asmref') && parsed.name) {
-      const currentCycle = this.detectCycle(selfName, refs);
+    // Check cycle starting from this assembly with in-memory dirty JSON overlay
+    if (overrideRec) {
+      const currentCycle = this.detectCycle(selfName, overrideRec);
       if (currentCycle) {
-        const offendingRef = refs[0] ?? '';
+        const firstHopName = currentCycle[1];
+        const offendingRef =
+          refs.find(
+            (r) =>
+              typeof r === 'string' &&
+              this.resolveReference(r, overrideRec)?.name === firstHopName,
+          ) ??
+          refs[0] ??
+          '';
         diags.push(
           new vscode.Diagnostic(
             findRefRange(offendingRef),
@@ -374,23 +418,24 @@ export class UnityAsmdefProvider {
     return diags;
   }
 
-  private detectCycle(startName: string, overrideStartRefs: string[]): string[] | null {
+  private detectCycle(startName: string, overrideRec: AsmdefRecord): string[] | null {
     const stack: string[] = [startName];
     const visiting = new Set<string>([startName]);
+    const completed = new Set<string>();
 
     const getRefsFor = (name: string): string[] => {
-      if (name === startName) return overrideStartRefs;
+      if (name === overrideRec.name) return overrideRec.references;
       return this.byName.get(name)?.references ?? [];
     };
 
     const dfs = (current: string): string[] | null => {
       for (const ref of getRefsFor(current)) {
-        const target = this.resolveReference(ref);
+        const target = this.resolveReference(ref, overrideRec);
         if (!target) continue;
         if (target.name === startName) {
           return [...stack, target.name];
         }
-        if (visiting.has(target.name)) continue;
+        if (visiting.has(target.name) || completed.has(target.name)) continue;
         visiting.add(target.name);
         stack.push(target.name);
         const found = dfs(target.name);
@@ -398,6 +443,7 @@ export class UnityAsmdefProvider {
         stack.pop();
         visiting.delete(target.name);
       }
+      completed.add(current);
       return null;
     };
 

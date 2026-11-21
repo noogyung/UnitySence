@@ -380,4 +380,36 @@ PrefabInstance:
             }
         }
     }
+
+    [Fact]
+    public async Task ReadsBackToBackPipelinedFramesOverSingleStreamWithoutOverread()
+    {
+        byte[] frame1 = RpcServer.EncodeFrame(new { jsonrpc = "2.0", id = 101, method = "index/status" });
+        byte[] frame2 = RpcServer.EncodeFrame(new { jsonrpc = "2.0", id = 102, method = "shutdown", tag = "second-frame" });
+        const string body3 = "{\"jsonrpc\":\"2.0\",\"id\":103,\"ok\":1}";
+        byte[] frame3LfOnly = Encoding.UTF8.GetBytes($"content-length: {Encoding.UTF8.GetByteCount(body3)}\n\n{body3}");
+
+        using var stream = new MemoryStream();
+        stream.Write(frame1, 0, frame1.Length);
+        stream.Write(frame2, 0, frame2.Length);
+        stream.Write(frame3LfOnly, 0, frame3LfOnly.Length);
+        stream.Position = 0;
+
+        byte[]? read1 = await RpcServer.ReadFrameAsync(stream, default).ConfigureAwait(false);
+        byte[]? read2 = await RpcServer.ReadFrameAsync(stream, default).ConfigureAwait(false);
+        byte[]? read3 = await RpcServer.ReadFrameAsync(stream, default).ConfigureAwait(false);
+        byte[]? eof = await RpcServer.ReadFrameAsync(stream, default).ConfigureAwait(false);
+
+        AssertEx.True(read1 != null);
+        AssertEx.True(read2 != null);
+        AssertEx.True(read3 != null);
+        AssertEx.True(eof == null);
+
+        using var doc1 = JsonDocument.Parse(read1!);
+        using var doc2 = JsonDocument.Parse(read2!);
+        using var doc3 = JsonDocument.Parse(read3!);
+        AssertEx.Equal(101, doc1.RootElement.GetProperty("id").GetInt32());
+        AssertEx.Equal("second-frame", doc2.RootElement.GetProperty("tag").GetString());
+        AssertEx.Equal(103, doc3.RootElement.GetProperty("id").GetInt32());
+    }
 }

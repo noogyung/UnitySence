@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { blankShaderCommentsPreservingLayout } from '../../../shader-lsp/src/parser/shaderLabVirtualDoc.ts';
+import { isShaderFilePath, SHADER_LANGUAGE_IDS } from '../../../shader-lsp/src/vfs/virtualPathResolver.ts';
 
 export interface PragmaDirectiveInfo {
   line: number;
@@ -19,20 +21,29 @@ export interface ShaderVariantAnalysis {
   allKeywords: string[];
 }
 
+export type ResolveIncludeTextResult = string | { text: string; resolvedPath?: string } | undefined;
+export type ResolveIncludeTextFn = (includePath: string, fromUri?: string) => ResolveIncludeTextResult;
+export type DocResolveIncludeTextFn = (
+  docUri: vscode.Uri,
+  includePath: string,
+  fromUri?: string,
+) => ResolveIncludeTextResult;
+
 const SPECIAL_PRAGMA_SHORTCUTS: Record<string, string[]> = {
   multi_compile_fog: ['_', 'FOG_EXP2'],
   multi_compile_instancing: ['_', 'INSTANCING_ON'],
   multi_compile_fwdbase: ['_', 'DIRECTIONAL', 'LIGHTMAP_ON'],
+  multi_compile_fwdbase_fullshadows: ['_', 'DIRECTIONAL', 'LIGHTMAP_ON', 'SHADOWS_SCREEN'],
   multi_compile_fwdadd: ['_', 'POINT', 'SPOT'],
   multi_compile_shadowcaster: ['_', 'SHADOWS_DEPTH'],
 };
 
-const SHADER_LANG_IDS = new Set(['unity-shaderlab', 'shaderlab', 'hlsl']);
+const SHADER_LANG_IDS = new Set<string>(SHADER_LANGUAGE_IDS);
 
 export function isShaderDocument(doc: vscode.TextDocument | undefined): boolean {
   if (!doc) return false;
   if (SHADER_LANG_IDS.has(doc.languageId)) return true;
-  return /\.(shader|hlsl|hlsli|cginc|cg|compute)$/i.test(doc.fileName);
+  return isShaderFilePath(doc.fileName);
 }
 
 export function parsePragmaDirectiveLine(rawLine: string, lineNumber: number): PragmaDirectiveInfo | null {
@@ -58,11 +69,11 @@ export function parsePragmaDirectiveLine(rawLine: string, lineNumber: number): P
   }
 
   let kind: 'multi_compile' | 'shader_feature' | null = null;
-  if (/^multi_compile(?:_local)?(?:_vertex|_fragment)?$/.test(directive)) {
+  if (/^multi_compile(?:_local)?(?:_vertex|_fragment|_hull|_domain|_geometry|_raytracing)*$/.test(directive)) {
     kind = 'multi_compile';
   } else if (
-    /^shader_feature(?:_local)?(?:_vertex|_fragment)?$/.test(directive) ||
-    /^dynamic_branch(?:_local)?(?:_vertex|_fragment)?$/.test(directive)
+    /^shader_feature(?:_local)?(?:_vertex|_fragment|_hull|_domain|_geometry|_raytracing)*$/.test(directive) ||
+    /^dynamic_branch(?:_local)?(?:_vertex|_fragment|_hull|_domain|_geometry|_raytracing)*$/.test(directive)
   ) {
     kind = 'shader_feature';
   }
@@ -90,29 +101,46 @@ export function parsePragmaDirectiveLine(rawLine: string, lineNumber: number): P
 }
 
 export interface AnalyzeShaderVariantsOptions {
-  resolveIncludeText?: (includePath: string, fromUri?: string) => string | undefined;
+  resolveIncludeText?: ResolveIncludeTextFn;
+}
+
+function normalizeResolvedInclude(res: ResolveIncludeTextResult): { text: string; resolvedPath?: string } | null {
+  if (!res) return null;
+  if (typeof res === 'string') return { text: res };
+  if (typeof res.text === 'string') return { text: res.text, resolvedPath: res.resolvedPath };
+  return null;
 }
 
 function collectIncludeWithPragmas(
   text: string,
-  resolveIncludeText: (includePath: string, fromUri?: string) => string | undefined,
+  resolveIncludeText: ResolveIncludeTextFn,
   fromUri: string | undefined,
   anchorLine: number,
   visited: Set<string>,
   out: PragmaDirectiveInfo[],
 ): void {
-  const lines = text.split(/\r?\n/);
+  const cleanText = blankShaderCommentsPreservingLayout(text);
+  const lines = cleanText.split(/\r?\n/);
   for (const line of lines) {
-    const trimmed = line.replace(/\/\/.*$/, '').trim();
+    const trimmed = line.trim();
     if (!trimmed) continue;
     const incMatch = /^\s*#include_with_pragmas\s+"([^"]+)"/.exec(trimmed);
     if (incMatch) {
       const incPath = incMatch[1];
       if (!visited.has(incPath)) {
         visited.add(incPath);
-        const incText = resolveIncludeText(incPath, fromUri);
-        if (incText) {
-          collectIncludeWithPragmas(incText, resolveIncludeText, incPath, anchorLine, visited, out);
+        const incResolved = normalizeResolvedInclude(resolveIncludeText(incPath, fromUri));
+        if (incResolved) {
+          const nextFrom = incResolved.resolvedPath ?? incPath;
+          visited.add(nextFrom);
+          collectIncludeWithPragmas(
+            incResolved.text,
+            resolveIncludeText,
+            nextFrom,
+            anchorLine,
+            visited,
+            out,
+          );
         }
       }
       continue;
@@ -128,20 +156,39 @@ export function analyzeShaderVariants(
   text: string,
   options?: AnalyzeShaderVariantsOptions,
 ): ShaderVariantAnalysis {
-  const lines = text.split(/\r?\n/);
-  const sharedIncludePragmas: PragmaDirectiveInfo[] = [];
-  const programBlocks: Array<{ anchorLine: number; pragmas: PragmaDirectiveInfo[] }> = [];
-  const standalonePragmas: PragmaDirectiveInfo[] = [];
-  const visitedIncludes = new Set<string>();
+  const cleanText = blankShaderCommentsPreservingLayout(text);
+  const lines = cleanText.split(/\r?\n/);
+  const rootIncludePragmas: PragmaDirectiveInfo[] = [];
+  const rootVisitedIncludes = new Set<string>();
+  let subShaderIncludePragmas: PragmaDirectiveInfo[] = [];
+  let subShaderVisitedIncludes = new Set<string>();
 
+  const programBlocks: Array<{
+    anchorLine: number;
+    inheritedPragmas: PragmaDirectiveInfo[];
+    pragmas: PragmaDirectiveInfo[];
+  }> = [];
+  const standalonePragmas: PragmaDirectiveInfo[] = [];
+
+  let braceDepth = 0;
   let inInclude = false;
+  let includeIsRootLevel = true;
   let inProgram = false;
-  let currentProgram: { anchorLine: number; pragmas: PragmaDirectiveInfo[] } | null = null;
+  let passVisitedIncludes = new Set<string>();
+  let currentProgram: {
+    anchorLine: number;
+    inheritedPragmas: PragmaDirectiveInfo[];
+    pragmas: PragmaDirectiveInfo[];
+  } | null = null;
 
   const pushPragmas = (pragmas: PragmaDirectiveInfo[]) => {
     for (const pragma of pragmas) {
       if (inInclude) {
-        sharedIncludePragmas.push(pragma);
+        if (includeIsRootLevel) {
+          rootIncludePragmas.push(pragma);
+        } else {
+          subShaderIncludePragmas.push(pragma);
+        }
       } else if (inProgram && currentProgram) {
         currentProgram.pragmas.push(pragma);
       } else {
@@ -151,11 +198,12 @@ export function analyzeShaderVariants(
   };
 
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].replace(/\/\/.*$/, '').trim();
+    const trimmed = lines[i].trim();
     if (!trimmed) continue;
 
     if (/^(HLSLINCLUDE|CGINCLUDE)\b/.test(trimmed)) {
       inInclude = true;
+      includeIsRootLevel = braceDepth <= 1;
       continue;
     }
     if (/^(ENDHLSL|ENDCG)\b/.test(trimmed)) {
@@ -169,19 +217,57 @@ export function analyzeShaderVariants(
     }
     if (/^(HLSLPROGRAM|CGPROGRAM)\b/.test(trimmed)) {
       inProgram = true;
-      currentProgram = { anchorLine: i, pragmas: [] };
+      passVisitedIncludes = new Set([...rootVisitedIncludes, ...subShaderVisitedIncludes]);
+      currentProgram = {
+        anchorLine: i,
+        inheritedPragmas: [...rootIncludePragmas, ...subShaderIncludePragmas],
+        pragmas: [],
+      };
       continue;
+    }
+
+    if (!inInclude && !inProgram) {
+      let inStr = false;
+      for (let c = 0; c < trimmed.length; c++) {
+        const ch = trimmed[c];
+        if (inStr) {
+          if (ch === '\\') c++;
+          else if (ch === '"') inStr = false;
+          continue;
+        }
+        if (ch === '"') inStr = true;
+        else if (ch === '{') braceDepth++;
+        else if (ch === '}') {
+          braceDepth = Math.max(0, braceDepth - 1);
+          if (braceDepth <= 1) {
+            subShaderIncludePragmas = [];
+            subShaderVisitedIncludes = new Set<string>();
+          }
+        }
+      }
     }
 
     const incWithPragmasMatch = /^\s*#include_with_pragmas\s+"([^"]+)"/.exec(trimmed);
     if (incWithPragmasMatch && options?.resolveIncludeText) {
       const incPath = incWithPragmasMatch[1];
-      if (!visitedIncludes.has(incPath)) {
-        visitedIncludes.add(incPath);
-        const incText = options.resolveIncludeText(incPath);
-        if (incText) {
+      const activeVisited = inInclude
+        ? (includeIsRootLevel ? rootVisitedIncludes : subShaderVisitedIncludes)
+        : passVisitedIncludes;
+      if (!activeVisited.has(incPath)) {
+        activeVisited.add(incPath);
+        const incResolved = normalizeResolvedInclude(options.resolveIncludeText(incPath));
+        if (incResolved) {
+          const nextFrom = incResolved.resolvedPath ?? incPath;
+          activeVisited.add(nextFrom);
           const collected: PragmaDirectiveInfo[] = [];
-          collectIncludeWithPragmas(incText, options.resolveIncludeText, incPath, i, visitedIncludes, collected);
+          collectIncludeWithPragmas(
+            incResolved.text,
+            options.resolveIncludeText,
+            nextFrom,
+            i,
+            activeVisited,
+            collected,
+          );
           pushPragmas(collected);
         }
       }
@@ -200,7 +286,7 @@ export function analyzeShaderVariants(
   const blocks: ShaderBlockVariantSummary[] = [];
   if (programBlocks.length > 0) {
     for (const blk of programBlocks) {
-      const combined = [...sharedIncludePragmas, ...blk.pragmas];
+      const combined = [...blk.inheritedPragmas, ...blk.pragmas];
       const variantCount = combined.reduce((acc, p) => acc * p.variantFactor, 1);
       blocks.push({
         anchorLine: blk.anchorLine,
@@ -208,8 +294,8 @@ export function analyzeShaderVariants(
         variantCount,
       });
     }
-  } else if (standalonePragmas.length > 0 || sharedIncludePragmas.length > 0) {
-    const combined = [...sharedIncludePragmas, ...standalonePragmas];
+  } else if (standalonePragmas.length > 0 || rootIncludePragmas.length > 0 || subShaderIncludePragmas.length > 0) {
+    const combined = [...rootIncludePragmas, ...subShaderIncludePragmas, ...standalonePragmas];
     const variantCount = combined.reduce((acc, p) => acc * p.variantFactor, 1);
     blocks.push({
       anchorLine: combined[0].line,
@@ -242,10 +328,10 @@ export function analyzeShaderVariants(
 export class ShaderVariantCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
   private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
   public readonly onDidChangeCodeLenses: vscode.Event<void> = this.onDidChangeEmitter.event;
-  private readonly resolveIncludeText?: (docUri: vscode.Uri, includePath: string, fromUri?: string) => string | undefined;
+  private readonly resolveIncludeText?: DocResolveIncludeTextFn;
 
   constructor(options?: {
-    resolveIncludeText?: (docUri: vscode.Uri, includePath: string, fromUri?: string) => string | undefined;
+    resolveIncludeText?: DocResolveIncludeTextFn;
   }) {
     this.resolveIncludeText = options?.resolveIncludeText;
   }
@@ -255,7 +341,12 @@ export class ShaderVariantCodeLensProvider implements vscode.CodeLensProvider, v
   }
 
   public provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
-    if (!isShaderDocument(document)) {
+    const getConfig = (vscode.workspace as unknown as {
+      getConfiguration?: (section?: string) => { get: <T>(key: string, def: T) => T };
+    }).getConfiguration;
+    const enabled =
+      typeof getConfig === 'function' ? getConfig('unityBrain')?.get<boolean>('codeLens.enabled', true) ?? true : true;
+    if (!enabled || !isShaderDocument(document)) {
       return [];
     }
 
@@ -289,48 +380,264 @@ export interface InactivePreprocessorRange {
   endLine: number;
 }
 
+interface PreprocEvalVal {
+  known: boolean;
+  value: number;
+}
+
+type PreprocToken =
+  | { kind: 'num'; value: number }
+  | { kind: 'ident'; value: string }
+  | { kind: 'op'; value: string };
+
+function tokenizePreprocessorExpr(input: string): PreprocToken[] | null {
+  const tokens: PreprocToken[] = [];
+  let i = 0;
+  while (i < input.length) {
+    const ch = input[i];
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+    const two = input.slice(i, i + 2);
+    if (
+      two === '||' ||
+      two === '&&' ||
+      two === '==' ||
+      two === '!=' ||
+      two === '<=' ||
+      two === '>=' ||
+      two === '<<' ||
+      two === '>>'
+    ) {
+      tokens.push({ kind: 'op', value: two });
+      i += 2;
+      continue;
+    }
+    if ('()!~+-*/%<>&|^'.includes(ch)) {
+      tokens.push({ kind: 'op', value: ch });
+      i++;
+      continue;
+    }
+    if (/[0-9]/.test(ch)) {
+      const m = /^(0[xX][0-9a-fA-F]+|[0-9]+)[uUlL]*/.exec(input.slice(i));
+      if (!m) return null;
+      const val = m[1].toLowerCase().startsWith('0x')
+        ? Number.parseInt(m[1].slice(2), 16)
+        : Number.parseInt(m[1], 10);
+      tokens.push({ kind: 'num', value: val });
+      i += m[0].length;
+      continue;
+    }
+    if (/[A-Za-z_]/.test(ch)) {
+      const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(input.slice(i));
+      if (!m) return null;
+      tokens.push({ kind: 'ident', value: m[0] });
+      i += m[0].length;
+      continue;
+    }
+    return null;
+  }
+  return tokens;
+}
+
 function evaluatePreprocessorCondition(
   expr: string,
   definedSet: ReadonlySet<string>,
   numericMacros: ReadonlyMap<string, number>,
 ): boolean | null {
-  const cleaned = expr.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '').trim();
+  const cleaned = blankShaderCommentsPreservingLayout(expr).trim();
   if (!cleaned) return null;
 
-  // Arithmetic comparisons with unknown identifiers remain indeterminate to avoid false dimming
-  if (/(<=|>=|==|!=|<|>)/.test(cleaned)) {
-    const tokens = cleaned.match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g) ?? [];
-    for (const tok of tokens) {
-      if (tok !== 'defined' && !numericMacros.has(tok)) {
-        return null;
+  const tokens = tokenizePreprocessorExpr(cleaned);
+  if (!tokens || tokens.length === 0) return null;
+
+  let pos = 0;
+  const peek = (): PreprocToken | undefined => tokens[pos];
+  const consume = (): PreprocToken | undefined => tokens[pos++];
+  const matchOp = (op: string): boolean => {
+    const t = peek();
+    if (t && t.kind === 'op' && t.value === op) {
+      pos++;
+      return true;
+    }
+    return false;
+  };
+
+  const combineBinary = (
+    left: PreprocEvalVal,
+    right: PreprocEvalVal,
+    fn: (a: number, b: number) => number,
+  ): PreprocEvalVal => {
+    if (!left.known || !right.known) return { known: false, value: 0 };
+    return { known: true, value: fn(left.value, right.value) };
+  };
+
+  const hasComparisonOrArith = /(?:<=|>=|==|!=|[<>+\-*/%])/.test(cleaned);
+
+  const parsePrimary = (): PreprocEvalVal => {
+    if (matchOp('(')) {
+      const val = parseLogicalOr();
+      if (!matchOp(')')) return { known: false, value: 0 };
+      return val;
+    }
+    const t = consume();
+    if (!t) return { known: false, value: 0 };
+    if (t.kind === 'num') {
+      return { known: true, value: t.value };
+    }
+    if (t.kind === 'ident') {
+      if (t.value === 'defined') {
+        const hasParen = matchOp('(');
+        const symTok = consume();
+        if (!symTok || symTok.kind !== 'ident') return { known: false, value: 0 };
+        if (hasParen && !matchOp(')')) return { known: false, value: 0 };
+        return { known: true, value: definedSet.has(symTok.value) ? 1 : 0 };
+      }
+      if (t.value === 'true') return { known: true, value: 1 };
+      if (t.value === 'false') return { known: true, value: 0 };
+      if (numericMacros.has(t.value)) {
+        return { known: true, value: numericMacros.get(t.value)! };
+      }
+      if (definedSet.has(t.value)) {
+        return { known: true, value: 1 };
+      }
+      return hasComparisonOrArith
+        ? { known: false, value: 0 }
+        : { known: true, value: 0 };
+    }
+    return { known: false, value: 0 };
+  };
+
+  const parseUnary = (): PreprocEvalVal => {
+    if (matchOp('!')) {
+      const v = parseUnary();
+      return v.known ? { known: true, value: v.value === 0 ? 1 : 0 } : { known: false, value: 0 };
+    }
+    if (matchOp('-')) {
+      const v = parseUnary();
+      return v.known ? { known: true, value: -v.value } : { known: false, value: 0 };
+    }
+    if (matchOp('+')) {
+      return parseUnary();
+    }
+    if (matchOp('~')) {
+      const v = parseUnary();
+      return v.known ? { known: true, value: ~v.value } : { known: false, value: 0 };
+    }
+    return parsePrimary();
+  };
+
+  const parseMultiplicative = (): PreprocEvalVal => {
+    let left = parseUnary();
+    while (true) {
+      if (matchOp('*')) left = combineBinary(left, parseUnary(), (a, b) => a * b);
+      else if (matchOp('/')) {
+        const right = parseUnary();
+        left = right.known && right.value === 0 ? { known: false, value: 0 } : combineBinary(left, right, (a, b) => Math.trunc(a / b));
+      } else if (matchOp('%')) {
+        const right = parseUnary();
+        left = right.known && right.value === 0 ? { known: false, value: 0 } : combineBinary(left, right, (a, b) => a % b);
+      } else break;
+    }
+    return left;
+  };
+
+  const parseAdditive = (): PreprocEvalVal => {
+    let left = parseMultiplicative();
+    while (true) {
+      if (matchOp('+')) left = combineBinary(left, parseMultiplicative(), (a, b) => a + b);
+      else if (matchOp('-')) left = combineBinary(left, parseMultiplicative(), (a, b) => a - b);
+      else break;
+    }
+    return left;
+  };
+
+  const parseShift = (): PreprocEvalVal => {
+    let left = parseAdditive();
+    while (true) {
+      if (matchOp('<<')) left = combineBinary(left, parseAdditive(), (a, b) => a << b);
+      else if (matchOp('>>')) left = combineBinary(left, parseAdditive(), (a, b) => a >> b);
+      else break;
+    }
+    return left;
+  };
+
+  const parseRelational = (): PreprocEvalVal => {
+    let left = parseShift();
+    while (true) {
+      if (matchOp('<=')) left = combineBinary(left, parseShift(), (a, b) => (a <= b ? 1 : 0));
+      else if (matchOp('>=')) left = combineBinary(left, parseShift(), (a, b) => (a >= b ? 1 : 0));
+      else if (matchOp('<')) left = combineBinary(left, parseShift(), (a, b) => (a < b ? 1 : 0));
+      else if (matchOp('>')) left = combineBinary(left, parseShift(), (a, b) => (a > b ? 1 : 0));
+      else break;
+    }
+    return left;
+  };
+
+  const parseEquality = (): PreprocEvalVal => {
+    let left = parseRelational();
+    while (true) {
+      if (matchOp('==')) left = combineBinary(left, parseRelational(), (a, b) => (a === b ? 1 : 0));
+      else if (matchOp('!=')) left = combineBinary(left, parseRelational(), (a, b) => (a !== b ? 1 : 0));
+      else break;
+    }
+    return left;
+  };
+
+  const parseBitAnd = (): PreprocEvalVal => {
+    let left = parseEquality();
+    while (matchOp('&')) left = combineBinary(left, parseEquality(), (a, b) => a & b);
+    return left;
+  };
+
+  const parseBitXor = (): PreprocEvalVal => {
+    let left = parseBitAnd();
+    while (matchOp('^')) left = combineBinary(left, parseBitAnd(), (a, b) => a ^ b);
+    return left;
+  };
+
+  const parseBitOr = (): PreprocEvalVal => {
+    let left = parseBitXor();
+    while (matchOp('|')) left = combineBinary(left, parseBitXor(), (a, b) => a | b);
+    return left;
+  };
+
+  const parseLogicalAnd = (): PreprocEvalVal => {
+    let left = parseBitOr();
+    while (matchOp('&&')) {
+      const right = parseBitOr();
+      if ((left.known && left.value === 0) || (right.known && right.value === 0)) {
+        left = { known: true, value: 0 };
+      } else if (left.known && right.known) {
+        left = { known: true, value: left.value !== 0 && right.value !== 0 ? 1 : 0 };
+      } else {
+        left = { known: false, value: 0 };
       }
     }
-  }
+    return left;
+  };
 
-  let jsExpr = cleaned
-    .replace(/\bdefined\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g, (_, name: string) =>
-      definedSet.has(name) ? '1' : '0',
-    )
-    .replace(/\bdefined\s+([A-Za-z_][A-Za-z0-9_]*)\b/g, (_, name: string) =>
-      definedSet.has(name) ? '1' : '0',
-    )
-    .replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/g, (ident: string) => {
-      if (ident === 'true') return '1';
-      if (ident === 'false') return '0';
-      if (numericMacros.has(ident)) return String(numericMacros.get(ident));
-      return definedSet.has(ident) ? '1' : '0';
-    });
+  const parseLogicalOr = (): PreprocEvalVal => {
+    let left = parseLogicalAnd();
+    while (matchOp('||')) {
+      const right = parseLogicalAnd();
+      if ((left.known && left.value !== 0) || (right.known && right.value !== 0)) {
+        left = { known: true, value: 1 };
+      } else if (left.known && right.known) {
+        left = { known: true, value: 0 };
+      } else {
+        left = { known: false, value: 0 };
+      }
+    }
+    return left;
+  };
 
-  if (!/^[0-9\s()!&|=<>+\-*/%]+$/.test(jsExpr)) {
+  const result = parseLogicalOr();
+  if (pos !== tokens.length || !result.known) {
     return null;
   }
-
-  try {
-    const value = Function(`"use strict"; return Boolean(${jsExpr});`)() as boolean;
-    return Boolean(value);
-  } catch {
-    return null;
-  }
+  return result.value !== 0;
 }
 
 export function evaluateInactivePreprocessorRanges(
@@ -338,7 +645,7 @@ export function evaluateInactivePreprocessorRanges(
   activeKeywords: ReadonlySet<string>,
   definedMacros?: ReadonlySet<string>,
 ): InactivePreprocessorRange[] {
-  const lines = text.split(/\r?\n/);
+  const lines = blankShaderCommentsPreservingLayout(text).split(/\r?\n/);
   const definedSet = new Set<string>(activeKeywords);
   if (definedMacros) {
     for (const m of definedMacros) definedSet.add(m);
@@ -627,6 +934,7 @@ export function extractPreprocessorDirectiveKeywordsAtPosition(
 export interface ShaderKeywordStatusBarOptions {
   onKeywordsChanged?: (uri: vscode.Uri | undefined, keywords: string[]) => void | Promise<void>;
   getDefinedMacros?: (uri: vscode.Uri) => ReadonlySet<string> | undefined;
+  resolveIncludeText?: DocResolveIncludeTextFn;
 }
 
 export class ShaderKeywordContextStatusBar implements vscode.Disposable {
@@ -637,12 +945,15 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
     keywords: string[],
   ) => void | Promise<void>;
   private readonly getDefinedMacros?: (uri: vscode.Uri) => ReadonlySet<string> | undefined;
+  private readonly resolveIncludeText?: DocResolveIncludeTextFn;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly keywordsByUri = new Map<string, string[]>();
+  private changeDebounceTimer?: ReturnType<typeof setTimeout>;
 
   constructor(options: ShaderKeywordStatusBarOptions = {}) {
     this.onKeywordsChanged = options.onKeywordsChanged;
     this.getDefinedMacros = options.getDefinedMacros;
+    this.resolveIncludeText = options.resolveIncludeText;
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     this.statusBarItem.command = 'unityBrain.switchShaderKeywords';
     this.inactiveDecorationType =
@@ -696,8 +1007,17 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
       }),
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (vscode.window.activeTextEditor?.document.uri.toString() === e.document.uri.toString()) {
-          this.updateForDocument(e.document);
-          this.applyInactiveDecorations(vscode.window.activeTextEditor);
+          if (this.changeDebounceTimer) {
+            clearTimeout(this.changeDebounceTimer);
+          }
+          this.changeDebounceTimer = setTimeout(() => {
+            this.changeDebounceTimer = undefined;
+            const activeEditor = vscode.window.activeTextEditor;
+            if (activeEditor?.document.uri.toString() === e.document.uri.toString()) {
+              this.updateForDocument(activeEditor.document);
+              this.applyInactiveDecorations(activeEditor);
+            }
+          }, 200);
         }
       }),
     );
@@ -762,12 +1082,24 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
     if (uri) {
       this.keywordsByUri.set(uri.toString(), cleaned);
     }
-    this.updateForDocument(vscode.window.activeTextEditor?.document, cleaned);
-    this.applyInactiveDecorations(vscode.window.activeTextEditor);
+    const activeEditor = vscode.window.activeTextEditor;
+    if (activeEditor && (!uri || activeEditor.document.uri.toString() === uri.toString())) {
+      this.updateForDocument(activeEditor.document, cleaned);
+      this.applyInactiveDecorations(activeEditor);
+    }
     if (this.onKeywordsChanged) {
       await this.onKeywordsChanged(uri, cleaned);
     }
     return cleaned;
+  }
+
+  private analyzeDocVariants(doc: vscode.TextDocument): ShaderVariantAnalysis {
+    return analyzeShaderVariants(
+      doc.getText(),
+      this.resolveIncludeText
+        ? { resolveIncludeText: (incPath, fromUri) => this.resolveIncludeText!(doc.uri, incPath, fromUri) }
+        : undefined,
+    );
   }
 
   public updateForDocument(doc: vscode.TextDocument | undefined, overrideKeywords?: string[]): void {
@@ -777,7 +1109,7 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
     }
 
     const active = overrideKeywords ?? this.getActiveKeywords(doc!.uri);
-    const analysis = analyzeShaderVariants(doc!.getText());
+    const analysis = this.analyzeDocVariants(doc!);
     const label = active.length > 0 ? active.join(', ') : '(기본값)';
     this.statusBarItem.text = `$(symbol-keyword) [UnityBrain] 셰이더 키워드: ${label}`;
     this.statusBarItem.tooltip = `[UnityBrain] 전체 배리언트 ${analysis.totalVariants}개 | 사용 가능 키워드: ${
@@ -793,7 +1125,7 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
       return this.setActiveKeywords(uri, explicitKeywords);
     }
 
-    const analysis = doc ? analyzeShaderVariants(doc.getText()) : { allKeywords: [], blocks: [], totalVariants: 0 };
+    const analysis = doc ? this.analyzeDocVariants(doc) : { allKeywords: [], blocks: [], totalVariants: 0 };
     if (analysis.allKeywords.length === 0) {
       await vscode.window.showInformationMessage(
         '[UnityBrain] 현재 셰이더에서 multi_compile 또는 shader_feature 키워드를 찾지 못했습니다.',
@@ -823,6 +1155,10 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
   }
 
   public dispose(): void {
+    if (this.changeDebounceTimer) {
+      clearTimeout(this.changeDebounceTimer);
+      this.changeDebounceTimer = undefined;
+    }
     while (this.disposables.length > 0) {
       this.disposables.pop()?.dispose();
     }

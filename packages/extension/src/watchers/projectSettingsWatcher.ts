@@ -243,19 +243,29 @@ export function parseAnimatorControllerYaml(
       if (paramSectionIdx !== -1) {
         const paramSlice = doc.slice(paramSectionIdx);
         const paramLines = paramSlice.split(/\r?\n/);
-        let pendingName: string | null = null;
-        for (const pLine of paramLines) {
-          const t = pLine.trim();
-          const nameM = /^-?\s*m_Name:\s*(.+)$/.exec(t);
-          if (nameM) {
-            pendingName = stripQuotes(nameM[1]);
-            continue;
-          }
-          const typeM = /^m_Type:\s*(\d+)/.exec(t);
-          if (typeM && pendingName) {
-            const pType = typeMap[Number.parseInt(typeM[1], 10)] ?? 'Float';
-            parameters.push({ name: pendingName, type: pType });
-            pendingName = null;
+        const firstLine = (paramLines[0] ?? '').trim();
+        if (!firstLine.endsWith('[]')) {
+          const sectionIndent = /^(\s*)/.exec(paramLines[0] ?? '')?.[1].length ?? 2;
+          let pendingName: string | null = null;
+          for (let i = 1; i < paramLines.length; i++) {
+            const pLine = paramLines[i];
+            const t = pLine.trim();
+            if (!t) continue;
+            const lineIndent = /^(\s*)/.exec(pLine)?.[1].length ?? 0;
+            if (!t.startsWith('-') && /^[A-Za-z_]/.test(t) && lineIndent <= sectionIndent) {
+              break;
+            }
+            const nameM = /^-?\s*m_Name:\s*(.+)$/.exec(t);
+            if (nameM) {
+              pendingName = stripQuotes(nameM[1]);
+              continue;
+            }
+            const typeM = /^m_Type:\s*(\d+)/.exec(t);
+            if (typeM && pendingName) {
+              const pType = typeMap[Number.parseInt(typeM[1], 10)] ?? 'Float';
+              parameters.push({ name: pendingName, type: pType });
+              pendingName = null;
+            }
           }
         }
       }
@@ -315,9 +325,19 @@ interface ScannedAssets {
   resourcePaths: string[];
 }
 
-function scanAssetsForSettings(dir: string, out: ScannedAssets = { controllerFiles: [], inputActionFiles: [], resourcePaths: [] }, inResourcesRoot?: string): ScannedAssets {
+function scanAssetsForSettings(
+  dir: string,
+  out: ScannedAssets = { controllerFiles: [], inputActionFiles: [], resourcePaths: [] },
+  inResourcesRoot?: string,
+): ScannedAssets {
   if (!fs.existsSync(dir)) return out;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
     if (entry.name.startsWith('.')) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -339,6 +359,34 @@ function scanAssetsForSettings(dir: string, out: ScannedAssets = { controllerFil
   return out;
 }
 
+function scanResourcePathsOnly(
+  dir: string,
+  out: string[] = [],
+  inResourcesRoot?: string,
+): string[] {
+  if (!fs.existsSync(dir)) return out;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const nextResourcesRoot =
+        inResourcesRoot ?? (entry.name.toLowerCase() === 'resources' ? full : undefined);
+      scanResourcePathsOnly(full, out, nextResourcesRoot);
+    } else if (entry.isFile() && inResourcesRoot && !entry.name.endsWith('.meta')) {
+      const rel = path.relative(inResourcesRoot, full).replace(/\\/g, '/');
+      const ext = path.extname(rel);
+      out.push(ext ? rel.slice(0, -ext.length) : rel);
+    }
+  }
+  return out;
+}
+
 export class ProjectSettingsWatcher implements vscode.Disposable {
   private context: UnityProjectContext;
   private cache: ProjectSettingsCache;
@@ -349,6 +397,7 @@ export class ProjectSettingsWatcher implements vscode.Disposable {
   private readonly _onDidUpdateCache = new vscode.EventEmitter<ProjectSettingsCache>();
   public readonly onDidUpdateCache = this._onDidUpdateCache.event;
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  private resourceDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(context: UnityProjectContext, options: { enableWatchers?: boolean } = {}) {
     this.context = context;
@@ -379,6 +428,10 @@ export class ProjectSettingsWatcher implements vscode.Disposable {
 
   public updateContext(newContext: UnityProjectContext): void {
     this.context = newContext;
+    this.disposeWatchers();
+    if (this.enableWatchers) {
+      this.setupWatchers();
+    }
   }
 
   public async start(): Promise<ProjectSettingsCache> {
@@ -387,6 +440,24 @@ export class ProjectSettingsWatcher implements vscode.Disposable {
       this.setupWatchers();
     }
     return result;
+  }
+
+  private safeReadFile(filePath: string): string | null {
+    try {
+      return fs.readFileSync(filePath, 'utf8');
+    } catch {
+      return null;
+    }
+  }
+
+  public rebuildResourcePaths(): string[] {
+    try {
+      const paths = scanResourcePathsOnly(path.join(this.context.projectRoot, 'Assets'));
+      this.resourcePaths = Array.from(new Set(paths));
+    } catch {
+      // Keep previous resourcePaths on scan failure
+    }
+    return this.resourcePaths;
   }
 
   public async rebuildCache(): Promise<ProjectSettingsCache> {
@@ -399,32 +470,36 @@ export class ProjectSettingsWatcher implements vscode.Disposable {
     let layers: Array<{ index: number; name: string }> = [];
     let sortingLayers: Array<{ id: number; name: string }> = [];
 
-    if (fs.existsSync(tagPath)) {
-      const parsed = parseTagManagerYaml(fs.readFileSync(tagPath, 'utf8'));
+    const tagContent = fs.existsSync(tagPath) ? this.safeReadFile(tagPath) : null;
+    if (tagContent !== null) {
+      const parsed = parseTagManagerYaml(tagContent);
       tags = parsed.tags;
       layers = parsed.layers;
       sortingLayers = parsed.sortingLayers;
     }
 
-    const inputAxes = fs.existsSync(inputPath)
-      ? parseInputManagerYaml(fs.readFileSync(inputPath, 'utf8'))
-      : [];
+    const inputContent = fs.existsSync(inputPath) ? this.safeReadFile(inputPath) : null;
+    const inputAxes = inputContent !== null ? parseInputManagerYaml(inputContent) : [];
 
-    const buildScenes = fs.existsSync(buildPath)
-      ? parseEditorBuildSettingsYaml(fs.readFileSync(buildPath, 'utf8'))
-      : [];
+    const buildContent = fs.existsSync(buildPath) ? this.safeReadFile(buildPath) : null;
+    const buildScenes = buildContent !== null ? parseEditorBuildSettingsYaml(buildContent) : [];
 
     const scanned = scanAssetsForSettings(path.join(this.context.projectRoot, 'Assets'));
-    const animatorControllers: AnimatorControllerIndex[] = scanned.controllerFiles.map((file) => {
+    const animatorControllers: AnimatorControllerIndex[] = [];
+    for (const file of scanned.controllerFiles) {
+      const content = this.safeReadFile(file);
+      if (content === null) continue;
       const relPath = path.relative(this.context.projectRoot, file).replace(/\\/g, '/');
       const guid = readMetaGuid(file);
-      return parseAnimatorControllerYaml(fs.readFileSync(file, 'utf8'), relPath, guid);
-    });
+      animatorControllers.push(parseAnimatorControllerYaml(content, relPath, guid));
+    }
 
     const inputActions: InputActionEntry[] = [];
     for (const file of scanned.inputActionFiles) {
+      const content = this.safeReadFile(file);
+      if (content === null) continue;
       const relPath = path.relative(this.context.projectRoot, file).replace(/\\/g, '/');
-      inputActions.push(...parseInputActionsJson(fs.readFileSync(file, 'utf8'), relPath));
+      inputActions.push(...parseInputActionsJson(content, relPath));
     }
     this.inputActions = inputActions;
     this.resourcePaths = Array.from(new Set(scanned.resourcePaths));
@@ -446,22 +521,22 @@ export class ProjectSettingsWatcher implements vscode.Disposable {
   }
 
   private setupWatchers(): void {
-    const patterns = [
+    const fullReloadPatterns = [
       'ProjectSettings/TagManager.asset',
       'ProjectSettings/InputManager.asset',
       'ProjectSettings/EditorBuildSettings.asset',
       'Assets/**/*.controller',
       'Assets/**/*.inputactions',
-      'Assets/**/Resources/**/*',
     ];
-    for (const pat of patterns) {
+    for (const pat of fullReloadPatterns) {
       const watcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(this.context.projectRoot, pat),
       );
       const trigger = () => {
         if (this.debounceTimer) clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
-          void this.rebuildCache();
+          this.debounceTimer = undefined;
+          void this.rebuildCache().catch(() => {});
         }, 300);
       };
       this.disposables.push(
@@ -471,16 +546,41 @@ export class ProjectSettingsWatcher implements vscode.Disposable {
         watcher.onDidDelete(trigger),
       );
     }
+
+    const resourcesWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(this.context.projectRoot, 'Assets/**/Resources/**/*'),
+    );
+    const triggerResources = () => {
+      if (this.resourceDebounceTimer) clearTimeout(this.resourceDebounceTimer);
+      this.resourceDebounceTimer = setTimeout(() => {
+        this.resourceDebounceTimer = undefined;
+        this.rebuildResourcePaths();
+      }, 300);
+    };
+    this.disposables.push(
+      resourcesWatcher,
+      resourcesWatcher.onDidChange(triggerResources),
+      resourcesWatcher.onDidCreate(triggerResources),
+      resourcesWatcher.onDidDelete(triggerResources),
+    );
   }
 
-  public dispose(): void {
+  private disposeWatchers(): void {
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = undefined;
     }
+    if (this.resourceDebounceTimer) {
+      clearTimeout(this.resourceDebounceTimer);
+      this.resourceDebounceTimer = undefined;
+    }
     while (this.disposables.length > 0) {
       this.disposables.pop()?.dispose();
     }
+  }
+
+  public dispose(): void {
+    this.disposeWatchers();
     this._onDidUpdateCache.dispose();
   }
 }

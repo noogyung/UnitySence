@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Composition;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
@@ -9,6 +11,7 @@ using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Formatting;
 
 namespace UnityBrain.Analyzers.CodeFixes;
 
@@ -22,6 +25,8 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
 
     public override async Task RegisterCodeFixesAsync(CodeFixContext context)
     {
+        if (context.Diagnostics.IsEmpty) return;
+
         var root = await context.Document.GetSyntaxRootAsync(context.CancellationToken).ConfigureAwait(false);
         if (root == null) return;
 
@@ -31,7 +36,7 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
         if (invocation == null) return;
 
         var typeArg = ExtractGenericTypeArgument(invocation);
-        if (typeArg == null) return;
+        if (typeArg == null || string.IsNullOrWhiteSpace(typeArg.ToString())) return;
 
         context.RegisterCodeFix(
             CodeAction.Create(
@@ -63,74 +68,152 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
         CancellationToken ct)
     {
         var root = await document.GetSyntaxRootAsync(ct).ConfigureAwait(false);
+        var semanticModel = await document.GetSemanticModelAsync(ct).ConfigureAwait(false);
         if (root == null) return document;
 
         var classDecl = invocation.FirstAncestorOrSelf<ClassDeclarationSyntax>();
         if (classDecl == null) return document;
 
-        var fieldName = GenerateUniqueFieldName(classDecl, typeArg.ToString());
+        var classSymbol = semanticModel?.GetDeclaredSymbol(classDecl, ct);
+        var enclosingMethod = invocation.FirstAncestorOrSelf<MethodDeclarationSyntax>();
+        var fieldName = GenerateUniqueFieldName(classDecl, classSymbol, enclosingMethod, typeArg);
         var fieldIdentifier = SyntaxFactory.IdentifierName(fieldName);
 
-        // 1. Track invocation and replace GetComponent<T>() with _cachedField
         var newClassDecl = classDecl.ReplaceNode(
             invocation,
             fieldIdentifier.WithTriviaFrom(invocation));
 
-        // 2. Build field declaration: private T _fieldName;
         var fieldDecl = SyntaxFactory.FieldDeclaration(
             SyntaxFactory.VariableDeclaration(
                 typeArg.WithoutTrivia(),
                 SyntaxFactory.SingletonSeparatedList(
                     SyntaxFactory.VariableDeclarator(SyntaxFactory.Identifier(fieldName)))))
             .WithModifiers(SyntaxFactory.TokenList(SyntaxFactory.Token(SyntaxKind.PrivateKeyword)))
-            .WithAdditionalAnnotations(Microsoft.CodeAnalysis.Formatting.Formatter.Annotation);
+            .WithAdditionalAnnotations(Formatter.Annotation);
 
-        // 3. Insert assignment into existing Awake() or create a new Awake()
-        var assignStmt = SyntaxFactory.ParseStatement($"{fieldName} = {invocation.WithoutTrivia().ToFullString()};\n")
-            .WithAdditionalAnnotations(Microsoft.CodeAnalysis.Formatting.Formatter.Annotation);
+        var assignStmt = SyntaxFactory.ParseStatement($"{fieldName} = {invocation.WithoutTrivia().ToFullString()};")
+            .WithAdditionalAnnotations(Formatter.Annotation);
 
         var existingAwake = newClassDecl.Members
             .OfType<MethodDeclarationSyntax>()
-            .FirstOrDefault(m => m.Identifier.ValueText == "Awake" && m.Body != null);
+            .FirstOrDefault(m => m.Identifier.ValueText == "Awake" && m.ParameterList.Parameters.Count == 0);
 
-        if (existingAwake != null && existingAwake.Body != null)
+        if (existingAwake != null)
         {
-            var updatedBody = existingAwake.Body.WithStatements(
-                existingAwake.Body.Statements.Insert(0, assignStmt));
-            newClassDecl = newClassDecl.ReplaceNode(existingAwake, existingAwake.WithBody(updatedBody));
-            newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
+            if (existingAwake.Body != null)
+            {
+                var updatedBody = existingAwake.Body.WithStatements(
+                    existingAwake.Body.Statements.Insert(0, assignStmt));
+                newClassDecl = newClassDecl.ReplaceNode(existingAwake, existingAwake.WithBody(updatedBody));
+                newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
+            }
+            else if (existingAwake.ExpressionBody != null)
+            {
+                var exprStmt = SyntaxFactory.ExpressionStatement(existingAwake.ExpressionBody.Expression)
+                    .WithAdditionalAnnotations(Formatter.Annotation);
+                var convertedAwake = existingAwake
+                    .WithExpressionBody(null)
+                    .WithSemicolonToken(default)
+                    .WithBody(SyntaxFactory.Block(assignStmt, exprStmt))
+                    .WithAdditionalAnnotations(Formatter.Annotation);
+                newClassDecl = newClassDecl.ReplaceNode(existingAwake, convertedAwake);
+                newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
+            }
+            else
+            {
+                newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
+            }
         }
         else
         {
-            var awakeMethod = SyntaxFactory.MethodDeclaration(
-                SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.VoidKeyword)),
-                SyntaxFactory.Identifier("Awake"))
-                .WithModifiers(SyntaxFactory.TokenList(SyntaxFactory.Token(SyntaxKind.PrivateKeyword)))
-                .WithBody(SyntaxFactory.Block(assignStmt))
-                .WithAdditionalAnnotations(Microsoft.CodeAnalysis.Formatting.Formatter.Annotation);
+            bool hasPartialAwake = classSymbol != null &&
+                classSymbol.GetMembers("Awake").OfType<IMethodSymbol>().Any(m => m.Parameters.Length == 0);
 
-            newClassDecl = newClassDecl.WithMembers(
-                newClassDecl.Members.Insert(0, awakeMethod).Insert(0, fieldDecl));
+            if (hasPartialAwake)
+            {
+                newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
+            }
+            else
+            {
+                var awakeMethod = SyntaxFactory.MethodDeclaration(
+                    SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.VoidKeyword)),
+                    SyntaxFactory.Identifier("Awake"))
+                    .WithModifiers(SyntaxFactory.TokenList(SyntaxFactory.Token(SyntaxKind.PrivateKeyword)))
+                    .WithBody(SyntaxFactory.Block(assignStmt))
+                    .WithAdditionalAnnotations(Formatter.Annotation);
+
+                newClassDecl = newClassDecl.WithMembers(
+                    newClassDecl.Members.Insert(0, awakeMethod).Insert(0, fieldDecl));
+            }
         }
 
         var updatedRoot = root.ReplaceNode(classDecl, newClassDecl);
-        var formatted = Microsoft.CodeAnalysis.Formatting.Formatter.Format(
-            updatedRoot,
-            document.Project.Solution.Workspace,
-            cancellationToken: ct);
-        return document.WithSyntaxRoot(formatted);
+        var updatedDoc = document.WithSyntaxRoot(updatedRoot);
+        return await Formatter.FormatAsync(updatedDoc, Formatter.Annotation, cancellationToken: ct).ConfigureAwait(false);
     }
 
-    private static string GenerateUniqueFieldName(ClassDeclarationSyntax classDecl, string typeName)
+    private static string ExtractCleanTypeIdentifier(TypeSyntax typeArg)
     {
-        var shortName = typeName.Contains('.') ? typeName.Substring(typeName.LastIndexOf('.') + 1) : typeName;
+        switch (typeArg)
+        {
+            case QualifiedNameSyntax qn:
+                return ExtractCleanTypeIdentifier(qn.Right);
+            case AliasQualifiedNameSyntax aq:
+                return ExtractCleanTypeIdentifier(aq.Name);
+            case SimpleNameSyntax sn:
+                return sn.Identifier.ValueText;
+            default:
+                var sb = new StringBuilder();
+                foreach (var ch in typeArg.ToString())
+                {
+                    if (char.IsLetterOrDigit(ch) || ch == '_') sb.Append(ch);
+                }
+                return sb.ToString();
+        }
+    }
+
+    private static string GenerateUniqueFieldName(
+        ClassDeclarationSyntax classDecl,
+        INamedTypeSymbol? classSymbol,
+        MethodDeclarationSyntax? enclosingMethod,
+        TypeSyntax typeArg)
+    {
+        var shortName = ExtractCleanTypeIdentifier(typeArg);
+        if (string.IsNullOrEmpty(shortName))
+        {
+            shortName = "Component";
+        }
         var cleanBase = "_" + char.ToLowerInvariant(shortName[0]) + shortName.Substring(1);
 
-        var existing = classDecl.Members
-            .OfType<FieldDeclarationSyntax>()
-            .SelectMany(f => f.Declaration.Variables)
-            .Select(v => v.Identifier.ValueText)
-            .ToHashSet(StringComparer.Ordinal);
+        var existing = new HashSet<string>(
+            classDecl.Members
+                .SelectMany(m => m switch
+                {
+                    FieldDeclarationSyntax f => f.Declaration.Variables.Select(v => v.Identifier.ValueText),
+                    PropertyDeclarationSyntax p => new[] { p.Identifier.ValueText },
+                    MethodDeclarationSyntax md => new[] { md.Identifier.ValueText },
+                    _ => Array.Empty<string>(),
+                }),
+            StringComparer.Ordinal);
+
+        for (var cur = classSymbol; cur != null; cur = cur.BaseType)
+        {
+            foreach (var m in cur.GetMembers())
+            {
+                existing.Add(m.Name);
+            }
+        }
+        if (enclosingMethod != null)
+        {
+            foreach (var param in enclosingMethod.ParameterList.Parameters)
+            {
+                existing.Add(param.Identifier.ValueText);
+            }
+            foreach (var v in enclosingMethod.DescendantNodes().OfType<VariableDeclaratorSyntax>())
+            {
+                existing.Add(v.Identifier.ValueText);
+            }
+        }
 
         if (!existing.Contains(cleanBase)) return cleanBase;
         for (int i = 2; i < 100; i++)

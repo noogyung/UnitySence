@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 
 namespace UnityBrain.Daemon.Indexing;
 
@@ -18,7 +19,8 @@ public sealed record EventCallbackRecord(
     string MethodName,
     string GameObjectPath,
     string FileId,
-    int Line);
+    int Line,
+    string TargetFileId = "");
 
 public sealed record SerializedValueRecord(
     string ScriptGuid,
@@ -48,6 +50,9 @@ public static class UnityYamlStreamParser
 
     public static AssetDocumentIndex ParseFile(string fullPath, string assetRelativePath, string assetGuid)
     {
+        string normalizedAssetPath = assetRelativePath.Replace('\\', '/');
+        string assetType = ClassifyAssetType(normalizedAssetPath);
+
         using var stream = new FileStream(
             fullPath,
             FileMode.Open,
@@ -55,8 +60,47 @@ public static class UnityYamlStreamParser
             FileShare.ReadWrite,
             bufferSize: 16384,
             options: FileOptions.SequentialScan);
-        using var reader = new StreamReader(stream);
+
+        if (!LooksLikeTextYamlHeader(stream))
+        {
+            return new AssetDocumentIndex(
+                normalizedAssetPath,
+                assetType,
+                assetGuid.ToLowerInvariant(),
+                new List<ComponentUsageRecord>(),
+                new List<EventCallbackRecord>(),
+                new List<SerializedValueRecord>());
+        }
+
+        stream.Position = 0;
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         return ParseReader(reader, assetRelativePath, assetGuid);
+    }
+
+    private static bool LooksLikeTextYamlHeader(Stream stream)
+    {
+        Span<byte> buf = stackalloc byte[64];
+        int read = stream.Read(buf);
+        if (read <= 0) return false;
+
+        int offset = 0;
+        if (read >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF)
+        {
+            offset = 3;
+        }
+        while (offset < read && (buf[offset] == (byte)' ' || buf[offset] == (byte)'\t' || buf[offset] == (byte)'\r' || buf[offset] == (byte)'\n'))
+        {
+            offset++;
+        }
+        if (offset >= read) return false;
+
+        for (int i = offset; i < read; i++)
+        {
+            if (buf[i] == 0) return false;
+        }
+
+        ReadOnlySpan<byte> tail = buf.Slice(offset, read - offset);
+        return tail.StartsWith("%YAML"u8) || tail.StartsWith("--- !u!"u8);
     }
 
     public static AssetDocumentIndex ParseText(string yamlContent, string assetRelativePath, string assetGuid)
@@ -96,6 +140,10 @@ public static class UnityYamlStreamParser
         {
             lineNumber++;
             ReadOnlySpan<char> span = line.AsSpan();
+            if (lineNumber == 1 && span.Length > 0 && span[0] == '\uFEFF')
+            {
+                span = span.Slice(1);
+            }
 
             if (!checkedHeader)
             {
@@ -104,7 +152,6 @@ public static class UnityYamlStreamParser
                 if (!span.StartsWith("%YAML", StringComparison.Ordinal) &&
                     !span.StartsWith("--- !u!", StringComparison.Ordinal))
                 {
-                    // Binary serialized asset or unrecognized stream; skip without scanning.
                     break;
                 }
             }
@@ -279,7 +326,8 @@ public static class UnityYamlStreamParser
                     cb.MethodName,
                     goPath,
                     mb.FileId,
-                    cb.MethodLine));
+                    cb.MethodLine,
+                    cb.TargetFileId));
             }
         }
 
@@ -298,11 +346,12 @@ public static class UnityYamlStreamParser
                 var dict = new Dictionary<string, string>(StringComparer.Ordinal);
                 if (!string.IsNullOrEmpty(mod.PropertyPath))
                 {
-                    dict[mod.PropertyPath] = mod.Value;
+                    string effectiveValue = !string.IsNullOrEmpty(mod.Value) ? mod.Value : mod.ObjectReference;
+                    dict[mod.PropertyPath] = effectiveValue;
                     serializedValues.Add(new SerializedValueRecord(
                         mod.TargetGuid.ToLowerInvariant(),
                         mod.PropertyPath,
-                        mod.Value,
+                        effectiveValue,
                         modPath,
                         modTargetFileId,
                         mod.Line));
@@ -336,7 +385,11 @@ public static class UnityYamlStreamParser
         ref int persistentCallsIndent,
         ref PendingCallback? activeCallback)
     {
-        if (inPersistentCallsList && indent < persistentCallsIndent)
+        if (inPersistentCallsList &&
+            (indent < persistentCallsIndent ||
+             (indent == persistentCallsIndent &&
+              !trimmed.StartsWith("- ", StringComparison.Ordinal) &&
+              !trimmed.SequenceEqual("-"))))
         {
             FlushPendingCallback(mb, ref activeCallback);
             inPersistentCallsList = false;
@@ -361,6 +414,34 @@ public static class UnityYamlStreamParser
                 ApplyCallbackField(activeCallback, ck, cv, lineNumber);
             }
             return;
+        }
+
+        if (TrySplitKeyValue(trimmed, out var earlyKey, out var earlyVal))
+        {
+            if (earlyKey.SequenceEqual("m_PersistentCalls") && earlyVal.Length == 0)
+            {
+                if (mb.PendingListName != null)
+                {
+                    mb.PendingListName = null;
+                    mb.PendingListCount = 0;
+                    mb.PendingListItemIndent = -1;
+                    mb.HasPendingNestedFields = false;
+                }
+                return;
+            }
+            if (earlyKey.SequenceEqual("m_Calls") && earlyVal.Length == 0)
+            {
+                if (mb.PendingListName != null)
+                {
+                    mb.PendingListName = null;
+                    mb.PendingListCount = 0;
+                    mb.PendingListItemIndent = -1;
+                    mb.HasPendingNestedFields = false;
+                }
+                inPersistentCallsList = true;
+                persistentCallsIndent = indent;
+                return;
+            }
         }
 
         if (mb.PendingListName != null)
@@ -408,13 +489,6 @@ public static class UnityYamlStreamParser
 
         if (!TrySplitKeyValue(trimmed, out var key, out var val))
         {
-            return;
-        }
-
-        if (key.SequenceEqual("m_Calls") && val.Length == 0)
-        {
-            inPersistentCallsList = true;
-            persistentCallsIndent = indent;
             return;
         }
 
@@ -516,7 +590,11 @@ public static class UnityYamlStreamParser
         ref int modificationsIndent,
         ref PendingMod? activeMod)
     {
-        if (inModificationsList && indent < modificationsIndent)
+        if (inModificationsList &&
+            (indent < modificationsIndent ||
+             (indent == modificationsIndent &&
+              !trimmed.StartsWith("- ", StringComparison.Ordinal) &&
+              !trimmed.SequenceEqual("-"))))
         {
             FlushPendingMod(prefab, ref activeMod);
             inModificationsList = false;
@@ -577,6 +655,14 @@ public static class UnityYamlStreamParser
         else if (key.SequenceEqual("value"))
         {
             mod.Value = UnquoteYamlScalar(val);
+        }
+        else if (key.SequenceEqual("objectReference"))
+        {
+            var raw = val.Trim().ToString();
+            if (!string.IsNullOrEmpty(raw) && !raw.Contains("fileID: 0}", StringComparison.Ordinal))
+            {
+                mod.ObjectReference = raw;
+            }
         }
     }
 
@@ -823,6 +909,8 @@ public static class UnityYamlStreamParser
         if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
         int comma = raw.IndexOf(',');
         string typePart = (comma >= 0 ? raw.Substring(0, comma) : raw).Trim();
+        int plus = typePart.LastIndexOf('+');
+        if (plus >= 0) return typePart.Substring(plus + 1);
         int dot = typePart.LastIndexOf('.');
         return dot >= 0 ? typePart.Substring(dot + 1) : typePart;
     }
@@ -881,6 +969,7 @@ public static class UnityYamlStreamParser
         public string TargetGuid { get; set; } = string.Empty;
         public string PropertyPath { get; set; } = string.Empty;
         public string Value { get; set; } = string.Empty;
+        public string ObjectReference { get; set; } = string.Empty;
         public int Line { get; set; }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -23,7 +24,8 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
         context.RegisterCompilationStartAction(startCtx =>
         {
             var roots = UnityCallGraphHelper.LoadPerformanceCriticalRootNames(
-                startCtx.Options.AdditionalFiles);
+                startCtx.Options.AdditionalFiles,
+                startCtx.CancellationToken);
 
             startCtx.RegisterSymbolAction(symbolCtx =>
             {
@@ -37,7 +39,8 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
                 var criticalMap = UnityCallGraphHelper.BuildCriticalMethodMap(
                     typeSymbol,
                     symbolCtx.Compilation,
-                    roots);
+                    roots,
+                    symbolCtx.CancellationToken);
 
                 if (criticalMap.Count == 0) return;
 
@@ -54,88 +57,112 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
         CriticalMethodInfo info,
         Compilation compilation)
     {
+        var ct = symbolCtx.CancellationToken;
         foreach (var syntaxRef in info.Method.DeclaringSyntaxReferences)
         {
-            var methodSyntax = syntaxRef.GetSyntax(symbolCtx.CancellationToken);
+            var methodSyntax = syntaxRef.GetSyntax(ct);
+            if (methodSyntax is TypeDeclarationSyntax) continue;
             var model = compilation.GetSemanticModel(methodSyntax.SyntaxTree);
 
-            // 1. Invocations: GetComponent / TryGetComponent / Find* / Resources.Load*
-            foreach (var inv in methodSyntax.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var node in UnityCallGraphHelper.EnumerateDirectBodyNodes(methodSyntax))
             {
-                if (model.GetSymbolInfo(inv, symbolCtx.CancellationToken).Symbol is not IMethodSymbol called)
+                if (node is InvocationExpressionSyntax inv)
                 {
-                    continue;
-                }
+                    if (model.GetSymbolInfo(inv, ct).Symbol is not IMethodSymbol called)
+                    {
+                        continue;
+                    }
 
-                if (IsCacheableGetComponent(called, inv))
-                {
-                    symbolCtx.ReportDiagnostic(Diagnostic.Create(
-                        DiagnosticIds.UB1002Rule,
-                        inv.GetLocation(),
-                        called.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-                        info.CallChain));
+                    if (IsCacheableGetComponent(called, inv, model, ct))
+                    {
+                        symbolCtx.ReportDiagnostic(Diagnostic.Create(
+                            DiagnosticIds.UB1002Rule,
+                            inv.GetLocation(),
+                            called.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+                            info.CallChain));
 
-                    if (!info.IsRoot)
+                        if (!info.IsRoot)
+                        {
+                            symbolCtx.ReportDiagnostic(Diagnostic.Create(
+                                DiagnosticIds.UB1001Rule,
+                                inv.GetLocation(),
+                                called.Name,
+                                info.CallChain));
+                        }
+                        continue;
+                    }
+
+                    if ((!info.IsRoot && IsGetOrTryGetComponent(called)) || IsExpensiveUnityLookup(called))
                     {
                         symbolCtx.ReportDiagnostic(Diagnostic.Create(
                             DiagnosticIds.UB1001Rule,
                             inv.GetLocation(),
-                            called.Name,
+                            IsGetOrTryGetComponent(called) ? called.Name : $"{called.ContainingType.Name}.{called.Name}",
                             info.CallChain));
                     }
-                    continue;
                 }
-
-                if ((!info.IsRoot && IsGetOrTryGetComponent(called)) || IsExpensiveUnityLookup(called))
+                else if (node is MemberAccessExpressionSyntax memberAccess)
                 {
-                    symbolCtx.ReportDiagnostic(Diagnostic.Create(
-                        DiagnosticIds.UB1001Rule,
-                        inv.GetLocation(),
-                        IsGetOrTryGetComponent(called) ? called.Name : $"{called.ContainingType.Name}.{called.Name}",
-                        info.CallChain));
+                    if (model.GetSymbolInfo(memberAccess, ct).Symbol is IPropertySymbol prop &&
+                        prop.Name == "main" &&
+                        prop.ContainingType.ToDisplayString() == "UnityEngine.Camera")
+                    {
+                        symbolCtx.ReportDiagnostic(Diagnostic.Create(
+                            DiagnosticIds.UB1001Rule,
+                            memberAccess.GetLocation(),
+                            "Camera.main",
+                            info.CallChain));
+                    }
                 }
-            }
-
-            // 2. Member access: Camera.main in critical method or indirect helper
-            foreach (var memberAccess in methodSyntax.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
-            {
-                if (model.GetSymbolInfo(memberAccess, symbolCtx.CancellationToken).Symbol is IPropertySymbol prop &&
-                    prop.Name == "main" &&
-                    prop.ContainingType.ToDisplayString() == "UnityEngine.Camera")
+                else if (node is BaseObjectCreationExpressionSyntax objCreation)
                 {
-                    symbolCtx.ReportDiagnostic(Diagnostic.Create(
-                        DiagnosticIds.UB1001Rule,
-                        memberAccess.GetLocation(),
-                        "Camera.main",
-                        info.CallChain));
-                }
-            }
-
-            // 3. Allocation: new WaitForSeconds(...)
-            foreach (var objCreation in methodSyntax.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
-            {
-                var typeInfo = model.GetTypeInfo(objCreation, symbolCtx.CancellationToken).Type;
-                if (typeInfo?.ToDisplayString() == "UnityEngine.WaitForSeconds")
-                {
-                    symbolCtx.ReportDiagnostic(Diagnostic.Create(
-                        DiagnosticIds.UB1001Rule,
-                        objCreation.GetLocation(),
-                        "new WaitForSeconds",
-                        info.CallChain));
+                    var typeInfo = model.GetTypeInfo(objCreation, ct).Type;
+                    if (typeInfo?.ToDisplayString() == "UnityEngine.WaitForSeconds")
+                    {
+                        symbolCtx.ReportDiagnostic(Diagnostic.Create(
+                            DiagnosticIds.UB1001Rule,
+                            objCreation.GetLocation(),
+                            "new WaitForSeconds",
+                            info.CallChain));
+                    }
                 }
             }
         }
     }
 
-    private static bool IsCacheableGetComponent(IMethodSymbol method, InvocationExpressionSyntax inv)
+    private static bool IsCacheableGetComponent(
+        IMethodSymbol method,
+        InvocationExpressionSyntax inv,
+        SemanticModel model,
+        CancellationToken ct)
     {
-        if (method.Name == "TryGetComponent" || !IsGetOrTryGetComponent(method))
+        // Only single-component generic lookups (not GetComponents* array/list or TryGetComponent)
+        // can be safely cached into a single `_field = GetComponent...<T>();` inside Awake().
+        if (method.Name != "GetComponent" &&
+            method.Name != "GetComponentInChildren" &&
+            method.Name != "GetComponentInParent")
+        {
+            return false;
+        }
+        if (method.TypeArguments.Length != 1)
+        {
+            return false;
+        }
+        var ns = method.ContainingNamespace?.ToDisplayString() ?? string.Empty;
+        if (!ns.StartsWith("UnityEngine", StringComparison.Ordinal))
         {
             return false;
         }
 
-        // Only GetComponent*() targeting `this`, `this.gameObject`, `this.transform`, `gameObject`, or `transform`
-        // can be safely cached in `this.Awake()`; external receivers like `other.GetComponent<T>()` cannot.
+        // Arguments must be 0 or compile-time constants (never local variables out of Awake scope).
+        foreach (var arg in inv.ArgumentList.Arguments)
+        {
+            if (!model.GetConstantValue(arg.Expression, ct).HasValue)
+            {
+                return false;
+            }
+        }
+
         if (inv.Expression is GenericNameSyntax || inv.Expression is IdentifierNameSyntax)
         {
             return true;
@@ -147,19 +174,35 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
             {
                 return true;
             }
-            if (ma.Expression is IdentifierNameSyntax id &&
-                (id.Identifier.Text == "gameObject" || id.Identifier.Text == "transform"))
+            if (IsUnitySelfComponentOrGameObject(ma.Expression, model, ct))
             {
                 return true;
             }
             if (ma.Expression is MemberAccessExpressionSyntax inner &&
                 inner.Expression is ThisExpressionSyntax &&
-                (inner.Name.Identifier.Text == "gameObject" || inner.Name.Identifier.Text == "transform"))
+                IsUnitySelfComponentOrGameObject(inner, model, ct))
             {
                 return true;
             }
         }
 
+        return false;
+    }
+
+    private static bool IsUnitySelfComponentOrGameObject(
+        ExpressionSyntax expr,
+        SemanticModel model,
+        CancellationToken ct)
+    {
+        if (model.GetSymbolInfo(expr, ct).Symbol is IPropertySymbol prop &&
+            (prop.Name == "gameObject" || prop.Name == "transform"))
+        {
+            var owner = prop.ContainingType.ToDisplayString();
+            return owner == "UnityEngine.Component" ||
+                   owner == "UnityEngine.MonoBehaviour" ||
+                   owner == "UnityEngine.Behaviour" ||
+                   owner == "UnityEngine.GameObject";
+        }
         return false;
     }
 
@@ -183,7 +226,10 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
     {
         var containing = method.ContainingType.ToDisplayString();
         if (containing == "UnityEngine.GameObject" &&
-            (method.Name == "Find" || method.Name == "FindWithTag" || method.Name == "FindGameObjectsWithTag"))
+            (method.Name == "Find" ||
+             method.Name == "FindWithTag" ||
+             method.Name == "FindGameObjectWithTag" ||
+             method.Name == "FindGameObjectsWithTag"))
         {
             return true;
         }
@@ -197,7 +243,8 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
             return true;
         }
         if (containing == "UnityEngine.Resources" &&
-            method.Name.StartsWith("Load", StringComparison.Ordinal))
+            (method.Name.StartsWith("Load", StringComparison.Ordinal) ||
+             method.Name == "FindObjectsOfTypeAll"))
         {
             return true;
         }

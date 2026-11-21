@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type {
   PackageResolutionSource,
   ResolvedPackageEntry,
@@ -28,15 +29,93 @@ interface PackagesLockJson {
   >;
 }
 
-const SHADER_EXTENSIONS = new Set([
+export const SHADER_FILE_EXTENSIONS = [
   '.shader',
+  '.urtshader',
   '.hlsl',
   '.hlsli',
   '.cginc',
+  '.cg',
   '.compute',
-  '.urtshader',
   '.hlslinc',
-]);
+  '.raytrace',
+  '.fx',
+  '.fxh',
+] as const;
+
+export const SHADER_HEADER_EXTENSIONS = [
+  '.hlsl',
+  '.hlsli',
+  '.cginc',
+  '.cg',
+  '.hlslinc',
+  '.fxh',
+] as const;
+
+export const SHADER_LANGUAGE_IDS = [
+  'unity-shaderlab',
+  'shaderlab',
+  'hlsl',
+  'cg',
+] as const;
+
+const SHADER_EXTENSIONS = new Set<string>(SHADER_FILE_EXTENSIONS);
+const SHADER_HEADER_EXTENSION_SET = new Set<string>(SHADER_HEADER_EXTENSIONS);
+
+export function isShaderFilePath(filePath: string): boolean {
+  return SHADER_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+export function isShaderHeaderPath(filePath: string): boolean {
+  return SHADER_HEADER_EXTENSION_SET.has(path.extname(filePath).toLowerCase());
+}
+
+export function normalizePathKey(filePathOrUri: string): string {
+  let fsPath = filePathOrUri;
+  if (filePathOrUri.startsWith('file://')) {
+    try {
+      fsPath = fileURLToPath(filePathOrUri);
+    } catch {
+      const stripped = filePathOrUri.replace(/^file:\/\//i, '');
+      try {
+        fsPath = decodeURIComponent(
+          /^\/[A-Za-z]:/.test(stripped) ? stripped.slice(1) : stripped,
+        );
+      } catch {
+        fsPath = /^\/[A-Za-z]:/.test(stripped) ? stripped.slice(1) : stripped;
+      }
+    }
+  }
+  const resolved = path.resolve(fsPath);
+  return process.platform === 'win32' || process.platform === 'darwin'
+    ? resolved.toLowerCase()
+    : resolved;
+}
+
+function compareSemverDesc(a: string, b: string): number {
+  const parse = (ver: string) => {
+    const [core, pre = ''] = ver.split('-', 2);
+    const nums = core.split('.').map((part) => {
+      const n = Number.parseInt(part, 10);
+      return Number.isFinite(n) ? n : -1;
+    });
+    return { nums, pre };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  const len = Math.max(pa.nums.length, pb.nums.length);
+  for (let i = 0; i < len; i++) {
+    const va = pa.nums[i] ?? 0;
+    const vb = pb.nums[i] ?? 0;
+    if (va !== vb) return vb - va;
+  }
+  // Stable release outranks prerelease
+  if (pa.pre === '' && pb.pre !== '') return -1;
+  if (pa.pre !== '' && pb.pre === '') return 1;
+  return pb.pre.localeCompare(pa.pre);
+}
+
+const PACKAGE_MAP_TTL_MS = 1500;
 
 export class UnityVirtualPathResolver {
   private context: UnityProjectContext;
@@ -44,6 +123,7 @@ export class UnityVirtualPathResolver {
   private manifestSignature = '';
   private lockSignature = '';
   private packageCacheSignature = '';
+  private lastPackageMapCheckAt = 0;
   private embeddedFolderByPkgName: Map<string, string> = new Map();
 
   constructor(context: UnityProjectContext) {
@@ -61,6 +141,7 @@ export class UnityVirtualPathResolver {
     this.manifestSignature = '';
     this.lockSignature = '';
     this.packageCacheSignature = '';
+    this.lastPackageMapCheckAt = 0;
     this.packageMap.clear();
     this.embeddedFolderByPkgName.clear();
   }
@@ -107,13 +188,47 @@ export class UnityVirtualPathResolver {
     return null;
   }
 
+  private isDirentDirectory(dirPath: string, entry: fs.Dirent): boolean {
+    if (entry.isDirectory()) return true;
+    if (entry.isSymbolicLink()) {
+      try {
+        return fs.statSync(path.join(dirPath, entry.name)).isDirectory();
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  private isDirentFile(dirPath: string, entry: fs.Dirent): boolean {
+    if (entry.isFile()) return true;
+    if (entry.isSymbolicLink()) {
+      try {
+        return fs.statSync(path.join(dirPath, entry.name)).isFile();
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
   public refreshPackageMap(force = false): Map<string, ResolvedPackageEntry> {
+    const now = Date.now();
     const lockPath = this.detectLockPath();
     const curManifestSig = this.getFileSignature(this.context.manifestPath);
     const curLockSig = this.getFileSignature(lockPath);
-    const curCacheSig = this.getDirectorySignature(
-      path.join(this.context.projectRoot, 'Library', 'PackageCache'),
-    );
+    const shouldCheckCacheDir =
+      force ||
+      this.lastPackageMapCheckAt === 0 ||
+      now - this.lastPackageMapCheckAt >= PACKAGE_MAP_TTL_MS;
+    const curCacheSig = shouldCheckCacheDir
+      ? this.getDirectorySignature(
+          path.join(this.context.projectRoot, 'Library', 'PackageCache'),
+        )
+      : this.packageCacheSignature;
+    if (shouldCheckCacheDir) {
+      this.lastPackageMapCheckAt = now;
+    }
 
     if (
       !force &&
@@ -188,7 +303,7 @@ export class UnityVirtualPathResolver {
     if (!fs.existsSync(packagesDir)) return;
     try {
       for (const entry of fs.readdirSync(packagesDir, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
+        if (!this.isDirentDirectory(packagesDir, entry)) continue;
         const candidateDir = path.join(packagesDir, entry.name);
         const pkgJsonPath = path.join(candidateDir, 'package.json');
         let pkgName = entry.name;
@@ -297,10 +412,9 @@ export class UnityVirtualPathResolver {
     try {
       const entries = fs.readdirSync(cacheRoot, { withFileTypes: true });
       const matches = entries
-        .filter((e) => e.isDirectory() && e.name.startsWith(prefix))
+        .filter((e) => this.isDirentDirectory(cacheRoot, e) && e.name.startsWith(prefix))
         .map((e) => e.name)
-        .sort()
-        .reverse();
+        .sort((a, b) => compareSemverDesc(a.slice(prefix.length), b.slice(prefix.length)));
       if (matches.length > 0) {
         return path.join(cacheRoot, matches[0]);
       }
@@ -321,9 +435,7 @@ export class UnityVirtualPathResolver {
     }
 
     if (cleaned.startsWith('Assets/')) {
-      const physical = path.join(this.context.projectRoot, cleaned.slice('Assets/'.length));
       const fullAssetPath = path.join(this.context.projectRoot, cleaned);
-      void physical;
       if (this.isExistingPath(fullAssetPath)) {
         return { virtualPath: cleaned, physicalPath: path.resolve(fullAssetPath), resolvedVia: 'projectAssets' };
       }
@@ -490,14 +602,14 @@ export class UnityVirtualPathResolver {
     try {
       for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
         if (entry.name.endsWith('.meta')) continue;
-        if (entry.isDirectory()) {
+        if (this.isDirentDirectory(dirPath, entry)) {
           out.push({
             name: entry.name,
             virtualPath: `${virtualBase}${entry.name}/`,
             isDirectory: true,
             physicalPath: path.join(dirPath, entry.name),
           });
-        } else if (entry.isFile() && SHADER_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+        } else if (this.isDirentFile(dirPath, entry) && SHADER_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
           out.push({
             name: entry.name,
             virtualPath: `${virtualBase}${entry.name}`,

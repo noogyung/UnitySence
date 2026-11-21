@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -37,8 +38,12 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
         }
 
         bool typeHasBurst = HasAttribute(typeSymbol, "BurstCompileAttribute", "BurstCompile");
+        // In Unity Burst, [BurstCompile] on a class (e.g. static class or MonoBehaviour) is only a
+        // marker container for `[BurstCompile] static` methods; instance fields and non-Burst methods
+        // on classes remain managed C#. Only structs inherit Burst compilation across all members.
+        bool isBurstStruct = typeSymbol.TypeKind == TypeKind.Struct && typeHasBurst;
 
-        if (typeHasBurst)
+        if (isBurstStruct)
         {
             foreach (var field in typeSymbol.GetMembers().OfType<IFieldSymbol>())
             {
@@ -65,7 +70,9 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
             if (method.IsImplicitlyDeclared) continue;
             if (HasAttribute(method, "BurstDiscardAttribute", "BurstDiscard")) continue;
 
-            bool methodHasBurst = typeHasBurst || HasAttribute(method, "BurstCompileAttribute", "BurstCompile");
+            bool methodExplicitBurst = HasAttribute(method, "BurstCompileAttribute", "BurstCompile");
+            bool methodHasBurst = isBurstStruct ||
+                                  (methodExplicitBurst && (typeSymbol.TypeKind != TypeKind.Class || method.IsStatic));
             if (!methodHasBurst) continue;
 
             AnalyzeBurstMethodSignature(context, method);
@@ -73,13 +80,18 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
             foreach (var syntaxRef in method.DeclaringSyntaxReferences)
             {
                 var methodSyntax = syntaxRef.GetSyntax(context.CancellationToken);
+                if (methodSyntax is TypeDeclarationSyntax) continue;
+
                 var model = context.Compilation.GetSemanticModel(methodSyntax.SyntaxTree);
                 var op = model.GetOperation(methodSyntax, context.CancellationToken);
 
-                AnalyzeMethodSyntaxExceptions(context, methodSyntax);
                 if (op != null)
                 {
-                    AnalyzeOperationTree(context, op);
+                    AnalyzeOperationTree(context, op, context.CancellationToken);
+                }
+                else
+                {
+                    AnalyzeMethodSyntaxExceptionsFallback(context, methodSyntax, model, context.CancellationToken);
                 }
             }
         }
@@ -87,6 +99,32 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
 
     private static void AnalyzeBurstMethodSignature(SymbolAnalysisContext context, IMethodSymbol method)
     {
+        if (!method.ReturnsVoid)
+        {
+            if (method.ReturnType.SpecialType == SpecialType.System_String)
+            {
+                var loc = method.Locations.FirstOrDefault();
+                if (loc != null)
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        DiagnosticIds.UB2003Rule,
+                        loc,
+                        "managed string return type"));
+                }
+            }
+            else if (method.ReturnType.IsReferenceType && method.ReturnType.TypeKind != TypeKind.TypeParameter)
+            {
+                var loc = method.Locations.FirstOrDefault();
+                if (loc != null)
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        DiagnosticIds.UB2001Rule,
+                        loc,
+                        method.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)));
+                }
+            }
+        }
+
         foreach (var param in method.Parameters)
         {
             if (param.Type.SpecialType == SpecialType.System_String)
@@ -114,10 +152,15 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    private static void AnalyzeMethodSyntaxExceptions(SymbolAnalysisContext context, SyntaxNode methodSyntax)
+    private static void AnalyzeMethodSyntaxExceptionsFallback(
+        SymbolAnalysisContext context,
+        SyntaxNode methodSyntax,
+        SemanticModel model,
+        CancellationToken ct)
     {
         foreach (var tryStmt in methodSyntax.DescendantNodes().OfType<TryStatementSyntax>())
         {
+            if (IsSyntaxInsideBurstDiscard(tryStmt, model, ct)) continue;
             if (tryStmt.Catches.Count > 0)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
@@ -125,17 +168,11 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
                     tryStmt.TryKeyword.GetLocation(),
                     "try/catch"));
             }
-            else if (tryStmt.Finally != null)
-            {
-                context.ReportDiagnostic(Diagnostic.Create(
-                    DiagnosticIds.UB2004Rule,
-                    tryStmt.TryKeyword.GetLocation(),
-                    "try/finally"));
-            }
         }
 
         foreach (var throwStmt in methodSyntax.DescendantNodes().OfType<ThrowStatementSyntax>())
         {
+            if (IsSyntaxInsideBurstDiscard(throwStmt, model, ct)) continue;
             context.ReportDiagnostic(Diagnostic.Create(
                 DiagnosticIds.UB2004Rule,
                 throwStmt.ThrowKeyword.GetLocation(),
@@ -144,6 +181,7 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
 
         foreach (var throwExpr in methodSyntax.DescendantNodes().OfType<ThrowExpressionSyntax>())
         {
+            if (IsSyntaxInsideBurstDiscard(throwExpr, model, ct)) continue;
             context.ReportDiagnostic(Diagnostic.Create(
                 DiagnosticIds.UB2004Rule,
                 throwExpr.ThrowKeyword.GetLocation(),
@@ -151,10 +189,33 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    private static void AnalyzeOperationTree(SymbolAnalysisContext context, IOperation rootOp)
+    private static bool IsSyntaxInsideBurstDiscard(SyntaxNode node, SemanticModel model, CancellationToken ct)
+    {
+        for (var cur = node.Parent; cur != null; cur = cur.Parent)
+        {
+            if (cur is LocalFunctionStatementSyntax localFn)
+            {
+                var sym = model.GetDeclaredSymbol(localFn, ct);
+                if (HasAttribute(sym, "BurstDiscardAttribute", "BurstDiscard"))
+                {
+                    return true;
+                }
+            }
+            else if (cur is InvocationExpressionSyntax inv &&
+                     model.GetSymbolInfo(inv, ct).Symbol is IMethodSymbol target &&
+                     HasAttribute(target, "BurstDiscardAttribute", "BurstDiscard"))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void AnalyzeOperationTree(SymbolAnalysisContext context, IOperation rootOp, CancellationToken ct)
     {
         foreach (var op in rootOp.DescendantsAndSelf())
         {
+            ct.ThrowIfCancellationRequested();
             if (IsInsideBurstDiscardCall(op))
             {
                 continue;
@@ -172,6 +233,20 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
                     }
                     break;
 
+                case IAnonymousObjectCreationOperation anonCreate:
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        DiagnosticIds.UB2001Rule,
+                        anonCreate.Syntax.GetLocation(),
+                        "anonymous type"));
+                    break;
+
+                case IDelegateCreationOperation delCreate:
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        DiagnosticIds.UB2001Rule,
+                        delCreate.Syntax.GetLocation(),
+                        delCreate.Type?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat) ?? "delegate"));
+                    break;
+
                 case IArrayCreationOperation arrCreate:
                     context.ReportDiagnostic(Diagnostic.Create(
                         DiagnosticIds.UB2001Rule,
@@ -185,7 +260,10 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
                         varType.SpecialType != SpecialType.System_String &&
                         varType.TypeKind != TypeKind.TypeParameter &&
                         varDecl.Initializer?.Value is not IObjectCreationOperation &&
-                        varDecl.Initializer?.Value is not IArrayCreationOperation)
+                        varDecl.Initializer?.Value is not IArrayCreationOperation &&
+                        varDecl.Initializer?.Value is not IAnonymousObjectCreationOperation &&
+                        varDecl.Initializer?.Value is not IDelegateCreationOperation &&
+                        !(varDecl.Initializer?.Value is IConversionOperation convInit && IsForbiddenBoxing(convInit)))
                     {
                         context.ReportDiagnostic(Diagnostic.Create(
                             DiagnosticIds.UB2001Rule,
@@ -204,6 +282,34 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
                             conv.Type!.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)));
                     }
                     break;
+
+                case ITryOperation tryOp:
+                    if (tryOp.Catches.Length > 0)
+                    {
+                        var loc = tryOp.Syntax is TryStatementSyntax ts
+                            ? ts.TryKeyword.GetLocation()
+                            : tryOp.Syntax.GetLocation();
+                        context.ReportDiagnostic(Diagnostic.Create(
+                            DiagnosticIds.UB2004Rule,
+                            loc,
+                            "try/catch"));
+                    }
+                    break;
+
+                case IThrowOperation throwOp:
+                {
+                    var loc = throwOp.Syntax switch
+                    {
+                        ThrowStatementSyntax ts => ts.ThrowKeyword.GetLocation(),
+                        ThrowExpressionSyntax te => te.ThrowKeyword.GetLocation(),
+                        _ => throwOp.Syntax.GetLocation(),
+                    };
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        DiagnosticIds.UB2004Rule,
+                        loc,
+                        "throw"));
+                    break;
+                }
 
                 case IInterpolatedStringOperation interp:
                     context.ReportDiagnostic(Diagnostic.Create(
@@ -247,7 +353,6 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
         }
 
         if (method.Name == "ToString" &&
-            method.Parameters.Length == 0 &&
             method.ReturnType.SpecialType == SpecialType.System_String)
         {
             context.ReportDiagnostic(Diagnostic.Create(

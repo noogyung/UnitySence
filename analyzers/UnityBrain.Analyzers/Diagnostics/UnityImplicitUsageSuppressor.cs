@@ -11,7 +11,7 @@ namespace UnityBrain.Analyzers.Diagnostics;
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class UnityImplicitUsageSuppressor : DiagnosticSuppressor
 {
-    private static readonly HashSet<string> UnityEventMethodNames = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> MonoBehaviourEvents = new(StringComparer.Ordinal)
     {
         "Awake", "Start", "Update", "FixedUpdate", "LateUpdate",
         "OnEnable", "OnDisable", "OnDestroy", "OnGUI", "OnValidate", "Reset",
@@ -30,16 +30,34 @@ public sealed class UnityImplicitUsageSuppressor : DiagnosticSuppressor
         "OnTransformChildrenChanged", "OnTransformParentChanged",
         "OnRectTransformDimensionsChange", "OnBeforeTransformParentChanged",
         "OnDidApplyAnimationProperties", "OnCanvasGroupChanged", "OnCanvasHierarchyChanged",
+        "OnNetworkSpawn", "OnNetworkDespawn", "OnGainedOwnership", "OnLostOwnership",
+    };
+
+    private static readonly HashSet<string> ScriptableObjectEvents = new(StringComparer.Ordinal)
+    {
+        "Awake", "OnEnable", "OnDisable", "OnDestroy", "OnValidate", "Reset",
+    };
+
+    private static readonly HashSet<string> StateMachineBehaviourEvents = new(StringComparer.Ordinal)
+    {
         "OnStateEnter", "OnStateUpdate", "OnStateExit", "OnStateMove", "OnStateIK",
         "OnStateMachineEnter", "OnStateMachineExit",
+    };
+
+    private static readonly HashSet<string> EditorEvents = new(StringComparer.Ordinal)
+    {
+        "Awake", "OnEnable", "OnDisable", "OnDestroy", "OnValidate", "Reset",
         "OnInspectorGUI", "CreateInspectorGUI", "OnSceneGUI", "HasPreviewGUI",
         "OnPreviewGUI", "OnInteractivePreviewGUI", "RequiresConstantRepaint",
         "OnGUI", "GetPropertyHeight", "CreatePropertyGUI",
         "CreateGUI", "OnSelectionChange", "OnFocus", "OnLostFocus", "OnHierarchyChange", "OnProjectChange",
+        "OnImportAsset",
+    };
+
+    private static readonly HashSet<string> AssetPostprocessorEvents = new(StringComparer.Ordinal)
+    {
         "OnPreprocessTexture", "OnPostprocessTexture", "OnPreprocessModel", "OnPostprocessModel",
         "OnPreprocessAudio", "OnPostprocessAudio", "OnPreprocessAsset", "OnPostprocessAllAssets",
-        "OnImportAsset",
-        "OnNetworkSpawn", "OnNetworkDespawn", "OnGainedOwnership", "OnLostOwnership",
     };
 
     public override ImmutableArray<SuppressionDescriptor> SupportedSuppressions { get; } = ImmutableArray.Create(
@@ -103,7 +121,15 @@ public sealed class UnityImplicitUsageSuppressor : DiagnosticSuppressor
     {
         if (symbol is IFieldSymbol field)
         {
-            if (field.ContainingType == null) return false;
+            if (field.ContainingType == null || field.IsStatic || field.IsConst || field.IsReadOnly)
+            {
+                return false;
+            }
+            if (HasAttribute(field, "System.NonSerialized"))
+            {
+                return false;
+            }
+
             bool isUnityOrSerializableContainer =
                 UnityCallGraphHelper.DerivesFromUnityBehaviour(field.ContainingType) ||
                 HasAttribute(field.ContainingType, "System.Serializable");
@@ -124,9 +150,7 @@ public sealed class UnityImplicitUsageSuppressor : DiagnosticSuppressor
                 return true;
             }
 
-            if (method.ContainingType != null &&
-                UnityCallGraphHelper.DerivesFromUnityBehaviour(method.ContainingType) &&
-                UnityEventMethodNames.Contains(method.Name))
+            if (method.ContainingType != null && IsValidUnityEventForType(method.ContainingType, method))
             {
                 return true;
             }
@@ -135,17 +159,39 @@ public sealed class UnityImplicitUsageSuppressor : DiagnosticSuppressor
         return false;
     }
 
+    private static bool IsValidUnityEventForType(INamedTypeSymbol type, IMethodSymbol method)
+    {
+        for (var cur = type.BaseType; cur != null; cur = cur.BaseType)
+        {
+            var fullName = cur.ToDisplayString();
+            switch (fullName)
+            {
+                case "UnityEngine.MonoBehaviour":
+                case "UnityEngine.Behaviour":
+                case "Unity.Netcode.NetworkBehaviour":
+                case "UnityEngine.EventSystems.UIBehaviour":
+                    return !method.IsStatic && MonoBehaviourEvents.Contains(method.Name);
+                case "UnityEngine.ScriptableObject":
+                    return !method.IsStatic && ScriptableObjectEvents.Contains(method.Name);
+                case "UnityEngine.StateMachineBehaviour":
+                    return !method.IsStatic && StateMachineBehaviourEvents.Contains(method.Name);
+                case "UnityEditor.Editor":
+                case "UnityEditor.EditorWindow":
+                case "UnityEditor.PropertyDrawer":
+                case "UnityEditor.AssetImporters.ScriptedImporter":
+                    return !method.IsStatic && EditorEvents.Contains(method.Name);
+                case "UnityEditor.AssetPostprocessor":
+                    return AssetPostprocessorEvents.Contains(method.Name);
+            }
+        }
+        return false;
+    }
+
     private static bool HasAttribute(ISymbol symbol, string metadataBaseName)
     {
         string withAttr = metadataBaseName.EndsWith("Attribute", StringComparison.Ordinal)
             ? metadataBaseName
             : metadataBaseName + "Attribute";
-        string shortNoAttr = metadataBaseName.Contains('.')
-            ? metadataBaseName[(metadataBaseName.LastIndexOf('.') + 1)..]
-            : metadataBaseName;
-        string shortWithAttr = shortNoAttr.EndsWith("Attribute", StringComparison.Ordinal)
-            ? shortNoAttr
-            : shortNoAttr + "Attribute";
 
         foreach (var attr in symbol.GetAttributes())
         {
@@ -153,9 +199,7 @@ public sealed class UnityImplicitUsageSuppressor : DiagnosticSuppressor
             if (cls == null) continue;
             var fullName = cls.ToDisplayString();
             if (string.Equals(fullName, metadataBaseName, StringComparison.Ordinal) ||
-                string.Equals(fullName, withAttr, StringComparison.Ordinal) ||
-                string.Equals(cls.Name, shortNoAttr, StringComparison.Ordinal) ||
-                string.Equals(cls.Name, shortWithAttr, StringComparison.Ordinal))
+                string.Equals(fullName, withAttr, StringComparison.Ordinal))
             {
                 return true;
             }

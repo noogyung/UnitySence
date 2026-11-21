@@ -14,7 +14,7 @@ export interface ShaderCodeBlock {
 }
 
 export interface PragmaEntryPoint {
-  stage: 'vertex' | 'fragment' | 'kernel' | 'hull' | 'domain';
+  stage: 'vertex' | 'fragment' | 'kernel' | 'hull' | 'domain' | 'geometry';
   name: string;
   line: number;
   column: number;
@@ -89,8 +89,58 @@ function matchKeywordAt(text: string, idx: number, kw: string): boolean {
   return true;
 }
 
+export function blankShaderCommentsPreservingLayout(sourceText: string): string {
+  const chars = Array.from(sourceText);
+  let i = 0;
+  let inString = false;
+  while (i < sourceText.length) {
+    const ch = sourceText[i];
+    const next = sourceText[i + 1];
+    if (inString) {
+      if (ch === '\\' && i + 1 < sourceText.length) {
+        i += 2;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      i++;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      while (i < sourceText.length && sourceText[i] !== '\n') {
+        if (sourceText[i] !== '\r') chars[i] = ' ';
+        i++;
+      }
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      chars[i] = ' ';
+      chars[i + 1] = ' ';
+      i += 2;
+      while (i < sourceText.length) {
+        if (sourceText[i] === '*' && sourceText[i + 1] === '/') {
+          chars[i] = ' ';
+          chars[i + 1] = ' ';
+          i += 2;
+          break;
+        }
+        if (sourceText[i] !== '\n' && sourceText[i] !== '\r') chars[i] = ' ';
+        i++;
+      }
+      continue;
+    }
+    i++;
+  }
+  return chars.join('');
+}
+
 export function extractShaderName(sourceText: string): string | null {
-  const m = /^\s*Shader\s+"([^"]+)"/m.exec(sourceText);
+  const cleanText = blankShaderCommentsPreservingLayout(sourceText);
+  const m = /^\s*Shader\s+"([^"]+)"/m.exec(cleanText);
   return m ? m[1] : null;
 }
 
@@ -98,48 +148,25 @@ export function parseShaderProperties(
   sourceText: string,
   shaderFile = '',
 ): ShaderPropertyEntry[] {
-  const propHeaderMatch = /\bProperties\s*\{/g.exec(sourceText);
+  const cleanSource = blankShaderCommentsPreservingLayout(sourceText);
+  const propHeaderMatch = /\bProperties\s*\{/g.exec(cleanSource);
   if (!propHeaderMatch) return [];
 
   const shaderName = extractShaderName(sourceText) ?? undefined;
   const lineStarts = computeLineStarts(sourceText);
   const blockStart = propHeaderMatch.index + propHeaderMatch[0].length;
   let depth = 1;
-  let blockEnd = sourceText.length;
+  let blockEnd = cleanSource.length;
   let inString = false;
-  let inLineComment = false;
-  let inBlockComment = false;
 
-  for (let i = blockStart; i < sourceText.length; i++) {
-    const ch = sourceText[i];
-    const next = sourceText[i + 1];
-    if (inLineComment) {
-      if (ch === '\n') inLineComment = false;
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === '*' && next === '/') {
-        inBlockComment = false;
-        i++;
-      }
-      continue;
-    }
+  for (let i = blockStart; i < cleanSource.length; i++) {
+    const ch = cleanSource[i];
     if (inString) {
       if (ch === '\\') {
         i++;
       } else if (ch === '"') {
         inString = false;
       }
-      continue;
-    }
-    if (ch === '/' && next === '/') {
-      inLineComment = true;
-      i++;
-      continue;
-    }
-    if (ch === '/' && next === '*') {
-      inBlockComment = true;
-      i++;
       continue;
     }
     if (ch === '"') {
@@ -156,18 +183,22 @@ export function parseShaderProperties(
     }
   }
 
-  const body = sourceText.slice(blockStart, blockEnd);
+  const body = cleanSource.slice(blockStart, blockEnd);
   const propRegex =
-    /^[ \t]*(?:\[[^\]]*\]\s*)*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*"([^"]*)"\s*,\s*((?:[^()]+|\([^)]*\))+)\s*\)\s*=\s*([^\r\n]+)/gm;
+    /^[ \t]*((?:\[[^\]]*\]\s*)*)([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*"([^"]*)"\s*,\s*([^()]+(?:\([^()]*\)[^()]*)*)\s*\)\s*=\s*([^\r\n]+)/gm;
   const results: ShaderPropertyEntry[] = [];
   let match: RegExpExecArray | null;
 
   while ((match = propRegex.exec(body)) !== null) {
-    const name = match[1];
-    const displayName = match[2];
-    const type = match[3].trim();
-    const defaultValue = match[4].trim();
-    const nameOffset = blockStart + match.index + match[0].indexOf(name);
+    const attrPrefix = match[1] ?? '';
+    const name = match[2];
+    const displayName = match[3];
+    const type = match[4].trim();
+    const defaultValue = match[5].trim();
+    const leadWsMatch = /^[ \t]*/.exec(match[0]);
+    const searchFrom = (leadWsMatch ? leadWsMatch[0].length : 0) + attrPrefix.length;
+    const nameInMatch = match[0].indexOf(name, searchFrom);
+    const nameOffset = blockStart + match.index + (nameInMatch >= 0 ? nameInMatch : searchFrom);
     const pos = offsetToPosition(lineStarts, nameOffset);
     results.push({
       name,
@@ -187,11 +218,12 @@ export function parseShaderProperties(
 export function parseShaderPragmas(hlslText: string): ShaderPragmaInfo {
   const entryPoints: PragmaEntryPoint[] = [];
   const keywordGroups: PragmaKeywordGroup[] = [];
-  const lines = hlslText.split(/\r?\n/);
+  const cleanText = blankShaderCommentsPreservingLayout(hlslText);
+  const lines = cleanText.split(/\r?\n/);
 
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const line = lines[lineIdx];
-    const entryMatch = /^\s*#pragma\s+(vertex|fragment|kernel|hull|domain)\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(line);
+    const entryMatch = /^\s*#pragma\s+(vertex|fragment|kernel|hull|domain|geometry)\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(line);
     if (entryMatch) {
       const stage = entryMatch[1] as PragmaEntryPoint['stage'];
       const name = entryMatch[2];
@@ -206,7 +238,7 @@ export function parseShaderPragmas(hlslText: string): ShaderPragmaInfo {
     }
 
     const kwMatch =
-      /^\s*#pragma\s+((?:multi_compile|shader_feature)(?:_[a-zA-Z0-9]+)*|dynamic_branch(?:_local)?(?:_vertex|_fragment)?)\s+(.+?)(?:\/\/.*)?$/.exec(line);
+      /^\s*#pragma\s+((?:multi_compile|shader_feature)(?:_[a-zA-Z0-9]+)*|dynamic_branch(?:_local)?(?:_vertex|_fragment)?)\s+(.+?)\s*$/.exec(line);
     if (kwMatch) {
       const directive = kwMatch[1];
       const tokens = kwMatch[2]
@@ -230,14 +262,15 @@ export function extractVirtualHlslDocument(
   sourceText: string,
   shaderFile = '',
 ): VirtualHlslExtractionResult {
+  const cleanSource = blankShaderCommentsPreservingLayout(sourceText);
   const lineStarts = computeLineStarts(sourceText);
   const properties = parseShaderProperties(sourceText, shaderFile);
   const shaderName = extractShaderName(sourceText);
+  const hasBlocks = /\b(HLSLPROGRAM|HLSLINCLUDE|CGPROGRAM|CGINCLUDE)\b/.test(cleanSource);
   const isShaderLab =
-    /^\s*Shader\s+"/m.test(sourceText) ||
-    /\b(HLSLPROGRAM|HLSLINCLUDE|CGPROGRAM|CGINCLUDE)\b/.test(sourceText);
+    /^\s*Shader\s+"/m.test(cleanSource) || hasBlocks;
 
-  if (!/\b(HLSLPROGRAM|HLSLINCLUDE|CGPROGRAM|CGINCLUDE)\b/.test(sourceText)) {
+  if (!hasBlocks) {
     const pragmas = parseShaderPragmas(sourceText);
     return {
       virtualHlsl: sourceText,
