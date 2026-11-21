@@ -201,10 +201,10 @@ export class UnityCSharpDefinitionProvider
     if (ok) {
       const lowerPath = targetPath.toLowerCase();
       const message = lowerPath.endsWith('.unity')
-        ? `[UnityBrain] Unity Editor에서 씬 '${label}'을(를) 열도록 요청했습니다.`
+        ? `[UnitySense] Unity Editor에서 씬 '${label}'을(를) 열도록 요청했습니다.`
         : lowerPath.endsWith('.controller')
-          ? `[UnityBrain] Unity Editor에서 애니메이터 컨트롤러 '${label}'을(를) 열도록 요청했습니다.`
-          : `[UnityBrain] Unity Editor에서 에셋 '${label}'을(를) 열도록 요청했습니다.`;
+          ? `[UnitySense] Unity Editor에서 애니메이터 컨트롤러 '${label}'을(를) 열도록 요청했습니다.`
+          : `[UnitySense] Unity Editor에서 에셋 '${label}'을(를) 열도록 요청했습니다.`;
       void vscode.window.showInformationMessage(message);
     }
     return ok;
@@ -606,7 +606,7 @@ export class UnityCSharpDefinitionProvider
 export function registerCSharpGoToDefinitionCommand(
   provider: UnityCSharpDefinitionProvider,
 ): vscode.Disposable {
-  return vscode.commands.registerCommand('unityBrain.csharpGoToDefinition', async () => {
+  return vscode.commands.registerCommand('unitySense.csharpGoToDefinition', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'csharp') {
       await vscode.commands.executeCommand('editor.action.revealDefinition');

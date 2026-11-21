@@ -105,12 +105,12 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
       if (fsaAction) actions.push(fsaAction);
 
       const genEventAction = new vscode.CodeAction(
-        '[UnityBrain] 유니티 이벤트 함수 생성...',
+        '[UnitySense] 유니티 이벤트 함수 생성...',
         vscode.CodeActionKind.Source,
       );
       genEventAction.command = {
-        title: '[UnityBrain] 유니티 이벤트 함수 생성',
-        command: 'unityBrain.generateEventFunctions',
+        title: '[UnitySense] 유니티 이벤트 함수 생성',
+        command: 'unitySense.generateEventFunctions',
       };
       actions.push(genEventAction);
     }
@@ -156,7 +156,7 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
     });
 
     const action = new vscode.CodeAction(
-      `[UnityBrain] Awake()에 '${shortType}' 컴포넌트 캐싱 (${fieldName})`,
+      `[UnitySense] Awake()에 '${shortType}' 컴포넌트 캐싱 (${fieldName})`,
       vscode.CodeActionKind.QuickFix,
     );
     action.edit = edit;
@@ -212,7 +212,7 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
     });
 
     const action = new vscode.CodeAction(
-      `[UnityBrain] Awake()에 'Camera.main' 캐싱 (${fieldName})`,
+      `[UnitySense] Awake()에 'Camera.main' 캐싱 (${fieldName})`,
       vscode.CodeActionKind.QuickFix,
     );
     action.edit = edit;
@@ -567,7 +567,7 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
     );
 
     const action = new vscode.CodeAction(
-      `[UnityBrain] '${keyName}' 해시를 static readonly int ${fieldName} 필드로 추출`,
+      `[UnitySense] '${keyName}' 해시를 static readonly int ${fieldName} 필드로 추출`,
       vscode.CodeActionKind.QuickFix,
     );
     action.edit = edit;
@@ -654,7 +654,7 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
     );
 
     const act = new vscode.CodeAction(
-      `[UnityBrain] '${fieldName}'에 [FormerlySerializedAs("${fieldName}")] 추가`,
+      `[UnitySense] '${fieldName}'에 [FormerlySerializedAs("${fieldName}")] 추가`,
       vscode.CodeActionKind.Refactor,
     );
     act.edit = edit;

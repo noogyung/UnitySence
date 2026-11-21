@@ -175,7 +175,7 @@ function resolveShaderFormatOptions(options: vscode.FormattingOptions): ShaderFo
     getConfiguration?: (section?: string) => { get: <T>(key: string, def: T) => T };
   }).getConfiguration;
   const configuredSize =
-    typeof getConfig === 'function' ? getConfig('unityBrain')?.get<number>('shader.format.indentSize', 0) ?? 0 : 0;
+    typeof getConfig === 'function' ? getConfig('unitySense')?.get<number>('shader.format.indentSize', 0) ?? 0 : 0;
   const tabSize =
     typeof configuredSize === 'number' && Number.isFinite(configuredSize) && configuredSize > 0
       ? Math.floor(configuredSize)

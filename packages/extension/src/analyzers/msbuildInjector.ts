@@ -121,7 +121,7 @@ export class MsbuildAnalyzerInjector {
   public async ensureInjected(overrideEnabled?: boolean): Promise<InjectorResultStatus> {
     const enabled =
       overrideEnabled ??
-      vscode.workspace.getConfiguration('unityBrain').get<boolean>('analyzers.enabled', true);
+      vscode.workspace.getConfiguration('unitySense').get<boolean>('analyzers.enabled', true);
 
     if (!enabled) {
       return this.remove();

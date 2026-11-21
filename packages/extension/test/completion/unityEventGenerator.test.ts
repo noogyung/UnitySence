@@ -81,7 +81,7 @@ public class PlayerController : MonoBehaviour
     expect(items!.map((i) => i.label)).not.toContain('Start');
   });
 
-  it('inserts selected event and coroutine stubs via unityBrain.generateEventFunctions command', async () => {
+  it('inserts selected event and coroutine stubs via unitySense.generateEventFunctions command', async () => {
     fs.mkdirSync(TEMP_CS_DIR, { recursive: true });
     const csFile = path.join(TEMP_CS_DIR, 'TriggerZone.cs');
     const initial = `using UnityEngine;
@@ -101,7 +101,7 @@ public class TriggerZone : MonoBehaviour
     const disp = registerGenerateEventFunctionsCommand(provider);
 
     const insertedCount = await vscode.commands.executeCommand<number>(
-      'unityBrain.generateEventFunctions',
+      'unitySense.generateEventFunctions',
       ['OnTriggerEnter (Coroutine)', 'FixedUpdate'],
     );
     expect(insertedCount).toBe(2);
@@ -231,7 +231,7 @@ public class AsyncHero : MonoBehaviour
     const startAwaitable = blankItems?.find((i) => i.label === 'Start (Awaitable)');
     expect(startAwaitable).toBeDefined();
     expect(startAwaitable?.detail).toBe(
-      '[UnityBrain] Unity 6 Awaitable 비동기 이벤트 함수 — async Awaitable Start()',
+      '[UnitySense] Unity 6 Awaitable 비동기 이벤트 함수 — async Awaitable Start()',
     );
     expect((startAwaitable?.insertText as vscode.SnippetString).value).toContain(
       'private async Awaitable Start()',
@@ -243,7 +243,7 @@ public class AsyncHero : MonoBehaviour
 
     const triggerAwaitable = blankItems?.find((i) => i.label === 'OnTriggerEnter (Awaitable)');
     expect(triggerAwaitable?.detail).toBe(
-      '[UnityBrain] Unity 6 Awaitable 비동기 이벤트 함수 — async Awaitable OnTriggerEnter(Collider other)',
+      '[UnitySense] Unity 6 Awaitable 비동기 이벤트 함수 — async Awaitable OnTriggerEnter(Collider other)',
     );
 
     // 2. Typing `async Awaitable St` sorts and preselects Start (Awaitable) first
@@ -334,7 +334,7 @@ public class AsyncCmdHero : MonoBehaviour
     };
     const cmdDisp = registerGenerateEventFunctionsCommand(provider);
     const createdCount = await vscode.commands.executeCommand<number>(
-      'unityBrain.generateEventFunctions',
+      'unitySense.generateEventFunctions',
       ['Start (Awaitable)'],
     );
     expect(createdCount).toBe(1);

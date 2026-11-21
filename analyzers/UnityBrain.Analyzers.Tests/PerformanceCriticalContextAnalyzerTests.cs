@@ -51,6 +51,9 @@ public class EnemyMover : MonoBehaviour
 
         AssertEx.Equal(1, ub1002.Count, "Expected exactly 1 UB1002 diagnostic");
         AssertEx.Equal(1, ub1001.Count, "Expected exactly 1 UB1001 diagnostic");
+        AssertEx.Contains("[UnitySense]", ub1001[0].GetMessage());
+        AssertEx.Contains("[UnitySense]", ub1001[0].Descriptor.Title.ToString());
+        AssertEx.Contains("[UnitySense]", ub1002[0].GetMessage());
         AssertEx.Contains("Update() -> StepA() -> StepB()", ub1001[0].GetMessage());
         AssertEx.Contains("Update() -> StepA() -> StepB()", ub1002[0].GetMessage());
 

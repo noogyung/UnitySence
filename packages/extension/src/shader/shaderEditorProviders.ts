@@ -51,83 +51,83 @@ const SWIZZLE_RE = /^(?:[xyzw]{1,4}|[rgba]{1,4})$/;
 const SCALAR_OR_VECTOR_TYPE_RE = /^(?:float|half|real|min16float|fixed|int|uint|bool)[1234]?$/;
 
 const BUILTIN_HLSL_SIGNATURES: Record<string, Array<{ label: string; doc: string }>> = {
-  lerp: [{ label: 'T lerp(T x, T y, T s)', doc: '[UnityBrain] x와 y 사이를 s 비율로 선형 보간합니다.' }],
-  saturate: [{ label: 'T saturate(T x)', doc: '[UnityBrain] 값을 [0, 1] 범위로 클램프합니다.' }],
-  clamp: [{ label: 'T clamp(T x, T min, T max)', doc: '[UnityBrain] 값을 [min, max] 범위로 제한합니다.' }],
-  smoothstep: [{ label: 'T smoothstep(T min, T max, T x)', doc: '[UnityBrain] min~max 구간에서 부드러운 에르미트 보간을 수행합니다.' }],
-  step: [{ label: 'T step(T edge, T x)', doc: '[UnityBrain] x >= edge이면 1, 아니면 0을 반환합니다.' }],
-  dot: [{ label: 'scalar dot(vec a, vec b)', doc: '[UnityBrain] 두 벡터의 내적(dot product)을 계산합니다.' }],
-  cross: [{ label: 'float3 cross(float3 a, float3 b)', doc: '[UnityBrain] 두 3D 벡터의 외적(cross product)을 계산합니다.' }],
+  lerp: [{ label: 'T lerp(T x, T y, T s)', doc: '[UnitySense] x와 y 사이를 s 비율로 선형 보간합니다.' }],
+  saturate: [{ label: 'T saturate(T x)', doc: '[UnitySense] 값을 [0, 1] 범위로 클램프합니다.' }],
+  clamp: [{ label: 'T clamp(T x, T min, T max)', doc: '[UnitySense] 값을 [min, max] 범위로 제한합니다.' }],
+  smoothstep: [{ label: 'T smoothstep(T min, T max, T x)', doc: '[UnitySense] min~max 구간에서 부드러운 에르미트 보간을 수행합니다.' }],
+  step: [{ label: 'T step(T edge, T x)', doc: '[UnitySense] x >= edge이면 1, 아니면 0을 반환합니다.' }],
+  dot: [{ label: 'scalar dot(vec a, vec b)', doc: '[UnitySense] 두 벡터의 내적(dot product)을 계산합니다.' }],
+  cross: [{ label: 'float3 cross(float3 a, float3 b)', doc: '[UnitySense] 두 3D 벡터의 외적(cross product)을 계산합니다.' }],
   mul: [
-    { label: 'float4 mul(float4x4 m, float4 v)', doc: '[UnityBrain] 행렬과 벡터 또는 두 행렬을 곱합니다.' },
-    { label: 'float3 mul(float3x3 m, float3 v)', doc: '[UnityBrain] 3x3 회전/변환 행렬과 3D 벡터를 곱합니다.' },
+    { label: 'float4 mul(float4x4 m, float4 v)', doc: '[UnitySense] 행렬과 벡터 또는 두 행렬을 곱합니다.' },
+    { label: 'float3 mul(float3x3 m, float3 v)', doc: '[UnitySense] 3x3 회전/변환 행렬과 3D 벡터를 곱합니다.' },
   ],
-  normalize: [{ label: 'T normalize(T v)', doc: '[UnityBrain] 벡터를 단위 길이(1)로 정규화합니다.' }],
-  length: [{ label: 'float length(vec v)', doc: '[UnityBrain] 벡터의 유클리드 길이를 반환합니다.' }],
-  distance: [{ label: 'float distance(vec a, vec b)', doc: '[UnityBrain] 두 점 사이의 거리를 반환합니다.' }],
-  reflect: [{ label: 'T reflect(T i, T n)', doc: '[UnityBrain] 입사 벡터 i를 법선 n 기준으로 반사합니다.' }],
-  refract: [{ label: 'T refract(T i, T n, float eta)', doc: '[UnityBrain] 굴절률 eta를 적용하여 굴절 벡터를 계산합니다.' }],
-  pow: [{ label: 'T pow(T base, T exp)', doc: '[UnityBrain] 거듭제곱 base^exp를 계산합니다.' }],
-  max: [{ label: 'T max(T a, T b)', doc: '[UnityBrain] 두 값 중 큰 값을 반환합니다.' }],
-  min: [{ label: 'T min(T a, T b)', doc: '[UnityBrain] 두 값 중 작은 값을 반환합니다.' }],
-  tex2D: [{ label: 'float4 tex2D(sampler2D s, float2 uv)', doc: '[UnityBrain] 레거시 2D 텍스처 샘플링을 수행합니다.' }],
-  tex2Dlod: [{ label: 'float4 tex2Dlod(sampler2D s, float4 uv_lod)', doc: '[UnityBrain] 명시적 밉맵 LOD(.w)로 2D 텍스처를 샘플링합니다.' }],
-  SAMPLE_TEXTURE2D: [{ label: 'half4 SAMPLE_TEXTURE2D(Texture2D tex, SamplerState smp, float2 uv)', doc: '[UnityBrain] URP/SRP 표준 2D 텍스처를 샘플링합니다.' }],
-  SAMPLE_TEXTURE2D_LOD: [{ label: 'half4 SAMPLE_TEXTURE2D_LOD(Texture2D tex, SamplerState smp, float2 uv, float lod)', doc: '[UnityBrain] 지정된 mip 레벨(lod)로 2D 텍스처를 샘플링합니다.' }],
-  TEXTURE2D: [{ label: 'TEXTURE2D(textureName)', doc: '[UnityBrain] SRP 플랫폼 호환 Texture2D 변수를 선언합니다.' }],
-  SAMPLER: [{ label: 'SAMPLER(samplerName)', doc: '[UnityBrain] SRP 플랫폼 호환 SamplerState 변수를 선언합니다.' }],
-  TransformObjectToHClip: [{ label: 'float4 TransformObjectToHClip(float3 positionOS)', doc: '[UnityBrain] 오브젝트 공간 좌표를 동차 클립 공간으로 변환합니다.' }],
-  TransformObjectToWorld: [{ label: 'float3 TransformObjectToWorld(float3 positionOS)', doc: '[UnityBrain] 오브젝트 공간 좌표를 월드 공간으로 변환합니다.' }],
-  TransformObjectToWorldNormal: [{ label: 'float3 TransformObjectToWorldNormal(float3 normalOS, bool doNormalize)', doc: '[UnityBrain] 오브젝트 공간 법선을 월드 공간 법선으로 변환합니다.' }],
-  TransformWorldToHClip: [{ label: 'float4 TransformWorldToHClip(float3 positionWS)', doc: '[UnityBrain] 월드 공간 좌표를 클립 공간으로 변환합니다.' }],
-  GetVertexPositionInputs: [{ label: 'VertexPositionInputs GetVertexPositionInputs(float3 positionOS)', doc: '[UnityBrain] positionWS/VS/CS/NDC를 한 번에 계산합니다.' }],
-  GetVertexNormalInputs: [{ label: 'VertexNormalInputs GetVertexNormalInputs(float3 normalOS, float4 tangentOS)', doc: '[UnityBrain] TBN(tangentWS, bitangentWS, normalWS) 벡터를 계산합니다.' }],
+  normalize: [{ label: 'T normalize(T v)', doc: '[UnitySense] 벡터를 단위 길이(1)로 정규화합니다.' }],
+  length: [{ label: 'float length(vec v)', doc: '[UnitySense] 벡터의 유클리드 길이를 반환합니다.' }],
+  distance: [{ label: 'float distance(vec a, vec b)', doc: '[UnitySense] 두 점 사이의 거리를 반환합니다.' }],
+  reflect: [{ label: 'T reflect(T i, T n)', doc: '[UnitySense] 입사 벡터 i를 법선 n 기준으로 반사합니다.' }],
+  refract: [{ label: 'T refract(T i, T n, float eta)', doc: '[UnitySense] 굴절률 eta를 적용하여 굴절 벡터를 계산합니다.' }],
+  pow: [{ label: 'T pow(T base, T exp)', doc: '[UnitySense] 거듭제곱 base^exp를 계산합니다.' }],
+  max: [{ label: 'T max(T a, T b)', doc: '[UnitySense] 두 값 중 큰 값을 반환합니다.' }],
+  min: [{ label: 'T min(T a, T b)', doc: '[UnitySense] 두 값 중 작은 값을 반환합니다.' }],
+  tex2D: [{ label: 'float4 tex2D(sampler2D s, float2 uv)', doc: '[UnitySense] 레거시 2D 텍스처 샘플링을 수행합니다.' }],
+  tex2Dlod: [{ label: 'float4 tex2Dlod(sampler2D s, float4 uv_lod)', doc: '[UnitySense] 명시적 밉맵 LOD(.w)로 2D 텍스처를 샘플링합니다.' }],
+  SAMPLE_TEXTURE2D: [{ label: 'half4 SAMPLE_TEXTURE2D(Texture2D tex, SamplerState smp, float2 uv)', doc: '[UnitySense] URP/SRP 표준 2D 텍스처를 샘플링합니다.' }],
+  SAMPLE_TEXTURE2D_LOD: [{ label: 'half4 SAMPLE_TEXTURE2D_LOD(Texture2D tex, SamplerState smp, float2 uv, float lod)', doc: '[UnitySense] 지정된 mip 레벨(lod)로 2D 텍스처를 샘플링합니다.' }],
+  TEXTURE2D: [{ label: 'TEXTURE2D(textureName)', doc: '[UnitySense] SRP 플랫폼 호환 Texture2D 변수를 선언합니다.' }],
+  SAMPLER: [{ label: 'SAMPLER(samplerName)', doc: '[UnitySense] SRP 플랫폼 호환 SamplerState 변수를 선언합니다.' }],
+  TransformObjectToHClip: [{ label: 'float4 TransformObjectToHClip(float3 positionOS)', doc: '[UnitySense] 오브젝트 공간 좌표를 동차 클립 공간으로 변환합니다.' }],
+  TransformObjectToWorld: [{ label: 'float3 TransformObjectToWorld(float3 positionOS)', doc: '[UnitySense] 오브젝트 공간 좌표를 월드 공간으로 변환합니다.' }],
+  TransformObjectToWorldNormal: [{ label: 'float3 TransformObjectToWorldNormal(float3 normalOS, bool doNormalize)', doc: '[UnitySense] 오브젝트 공간 법선을 월드 공간 법선으로 변환합니다.' }],
+  TransformWorldToHClip: [{ label: 'float4 TransformWorldToHClip(float3 positionWS)', doc: '[UnitySense] 월드 공간 좌표를 클립 공간으로 변환합니다.' }],
+  GetVertexPositionInputs: [{ label: 'VertexPositionInputs GetVertexPositionInputs(float3 positionOS)', doc: '[UnitySense] positionWS/VS/CS/NDC를 한 번에 계산합니다.' }],
+  GetVertexNormalInputs: [{ label: 'VertexNormalInputs GetVertexNormalInputs(float3 normalOS, float4 tangentOS)', doc: '[UnitySense] TBN(tangentWS, bitangentWS, normalWS) 벡터를 계산합니다.' }],
   GetMainLight: [
-    { label: 'Light GetMainLight()', doc: '[UnityBrain] 메인 방향성 라이트 정보를 반환합니다.' },
-    { label: 'Light GetMainLight(float4 shadowCoord, float3 positionWS, half4 shadowMask)', doc: '[UnityBrain] 그림자 감쇠가 포함된 메인 라이트 정보를 반환합니다.' },
+    { label: 'Light GetMainLight()', doc: '[UnitySense] 메인 방향성 라이트 정보를 반환합니다.' },
+    { label: 'Light GetMainLight(float4 shadowCoord, float3 positionWS, half4 shadowMask)', doc: '[UnitySense] 그림자 감쇠가 포함된 메인 라이트 정보를 반환합니다.' },
   ],
-  GetAdditionalLight: [{ label: 'Light GetAdditionalLight(uint i, float3 positionWS)', doc: '[UnityBrain] 인덱스 i에 해당하는 추가 라이트(Point/Spot)를 반환합니다.' }],
-  UniversalFragmentPBR: [{ label: 'half4 UniversalFragmentPBR(InputData inputData, SurfaceData surfaceData)', doc: '[UnityBrain] URP PBR 라이팅 최종 색상을 계산합니다.' }],
-  MixFog: [{ label: 'half3 MixFog(half3 fragColor, float fogCoord)', doc: '[UnityBrain] 프래그먼트 색상에 씬 안개(Fog)를 혼합합니다.' }],
-  TraceRay: [{ label: 'void TraceRay(RaytracingAccelerationStructure AccelerationStructure, uint RayFlags, uint InstanceInclusionMask, uint RayContributionToHitGroupIndex, uint MultiplierForGeometryContributionToHitGroupIndex, uint MissShaderIndex, RayDesc Ray, inout payload_t Payload)', doc: '[UnityBrain] DXR / Unity RayTracing 가속 구조체에 대해 광선을 추적합니다.' }],
-  WaveActiveSum: [{ label: 'T WaveActiveSum(T expr)', doc: '[UnityBrain] SM 6.0 Wave 내 모든 활성 레인의 값 합계를 반환합니다.' }],
-  WaveReadLaneFirst: [{ label: 'T WaveReadLaneFirst(T expr)', doc: '[UnityBrain] SM 6.0 Wave의 첫 번째 활성 레인 값을 모든 레인에 브로드캐스트합니다.' }],
-  asfloat: [{ label: 'float asfloat(uint x)', doc: '[UnityBrain] 32비트 정수 비트를 IEEE 754 float로 재해석합니다.' }],
-  asuint: [{ label: 'uint asuint(float x)', doc: '[UnityBrain] IEEE 754 float 비트를 부호 없는 32비트 정수로 재해석합니다.' }],
-  f16tof32: [{ label: 'float f16tof32(uint value)', doc: '[UnityBrain] 하위 16비트 half 값을 32비트 float로 변환합니다.' }],
-  f32tof16: [{ label: 'uint f32tof16(float value)', doc: '[UnityBrain] 32비트 float 값을 하위 16비트 half 비트로 변환합니다.' }],
-  NonUniformResourceIndex: [{ label: 'uint NonUniformResourceIndex(uint index)', doc: '[UnityBrain] SM 5.1+/6.x 동적(비균일) 디스크립터 배열 인덱싱을 표시합니다.' }],
-  sin: [{ label: 'T sin(T x)', doc: '[UnityBrain] 라디안 각도 x의 사인 값을 계산합니다.' }],
-  cos: [{ label: 'T cos(T x)', doc: '[UnityBrain] 라디안 각도 x의 코사인 값을 계산합니다.' }],
-  tan: [{ label: 'T tan(T x)', doc: '[UnityBrain] 라디안 각도 x의 탄젠트 값을 계산합니다.' }],
-  asin: [{ label: 'T asin(T x)', doc: '[UnityBrain] [-1, 1] 범위 값의 아크사인을 계산합니다.' }],
-  acos: [{ label: 'T acos(T x)', doc: '[UnityBrain] [-1, 1] 범위 값의 아크코사인을 계산합니다.' }],
-  atan: [{ label: 'T atan(T x)', doc: '[UnityBrain] 값 x의 아크탄젠트를 계산합니다.' }],
-  atan2: [{ label: 'T atan2(T y, T x)', doc: '[UnityBrain] y/x의 아크탄젠트(사분면 보존)를 계산합니다.' }],
-  abs: [{ label: 'T abs(T x)', doc: '[UnityBrain] x의 절댓값을 반환합니다.' }],
-  sign: [{ label: 'T sign(T x)', doc: '[UnityBrain] x의 부호(-1, 0, 1)를 반환합니다.' }],
-  floor: [{ label: 'T floor(T x)', doc: '[UnityBrain] x보다 작거나 같은 최대 정수를 반환합니다.' }],
-  ceil: [{ label: 'T ceil(T x)', doc: '[UnityBrain] x보다 크거나 같은 최소 정수를 반환합니다.' }],
-  round: [{ label: 'T round(T x)', doc: '[UnityBrain] x를 가장 가까운 정수로 반올림합니다.' }],
-  frac: [{ label: 'T frac(T x)', doc: '[UnityBrain] x의 소수부(x - floor(x))를 반환합니다.' }],
-  fmod: [{ label: 'T fmod(T x, T y)', doc: '[UnityBrain] x를 y로 나눈 부동소수점 나머지를 반환합니다.' }],
-  sqrt: [{ label: 'T sqrt(T x)', doc: '[UnityBrain] x의 제곱근을 계산합니다.' }],
-  rsqrt: [{ label: 'T rsqrt(T x)', doc: '[UnityBrain] x의 역제곱근(1 / sqrt(x))을 계산합니다.' }],
-  exp: [{ label: 'T exp(T x)', doc: '[UnityBrain] 자연지수 e^x를 계산합니다.' }],
-  exp2: [{ label: 'T exp2(T x)', doc: '[UnityBrain] 2^x를 계산합니다.' }],
-  log: [{ label: 'T log(T x)', doc: '[UnityBrain] x의 자연로그 ln(x)를 계산합니다.' }],
-  log2: [{ label: 'T log2(T x)', doc: '[UnityBrain] x의 밑이 2인 로그를 계산합니다.' }],
-  ddx: [{ label: 'T ddx(T x)', doc: '[UnityBrain] 픽셀 셰이더에서 화면 X축 방향 편미분을 계산합니다.' }],
-  ddy: [{ label: 'T ddy(T x)', doc: '[UnityBrain] 픽셀 셰이더에서 화면 Y축 방향 편미분을 계산합니다.' }],
-  fwidth: [{ label: 'T fwidth(T x)', doc: '[UnityBrain] abs(ddx(x)) + abs(ddy(x))를 반환합니다.' }],
-  clip: [{ label: 'void clip(T x)', doc: '[UnityBrain] x의 어느 한 성분이라도 0 미만이면 현재 픽셀을 폐기합니다.' }],
-  all: [{ label: 'bool all(T x)', doc: '[UnityBrain] x의 모든 성분이 0이 아니면 true를 반환합니다.' }],
-  any: [{ label: 'bool any(T x)', doc: '[UnityBrain] x의 성분 중 하나라도 0이 아니면 true를 반환합니다.' }],
-  mad: [{ label: 'T mad(T mvalue, T avalue, T bvalue)', doc: '[UnityBrain] 곱셈-덧셈 융합 연산(mvalue * avalue + bvalue)을 수행합니다.' }],
-  rcp: [{ label: 'T rcp(T x)', doc: '[UnityBrain] x의 빠른 근사 역수(1 / x)를 계산합니다.' }],
-  sincos: [{ label: 'void sincos(T x, out T s, out T c)', doc: '[UnityBrain] x의 사인(s)과 코사인(c)을 동시에 계산합니다.' }],
-  tex2Dproj: [{ label: 'float4 tex2Dproj(sampler2D s, float4 t)', doc: '[UnityBrain] 투영 나눗셈(t.xy / t.w)을 적용해 2D 텍스처를 샘플링합니다.' }],
-  texCUBE: [{ label: 'float4 texCUBE(samplerCUBE s, float3 t)', doc: '[UnityBrain] 방향 벡터 t로 큐브맵 텍스처를 샘플링합니다.' }],
+  GetAdditionalLight: [{ label: 'Light GetAdditionalLight(uint i, float3 positionWS)', doc: '[UnitySense] 인덱스 i에 해당하는 추가 라이트(Point/Spot)를 반환합니다.' }],
+  UniversalFragmentPBR: [{ label: 'half4 UniversalFragmentPBR(InputData inputData, SurfaceData surfaceData)', doc: '[UnitySense] URP PBR 라이팅 최종 색상을 계산합니다.' }],
+  MixFog: [{ label: 'half3 MixFog(half3 fragColor, float fogCoord)', doc: '[UnitySense] 프래그먼트 색상에 씬 안개(Fog)를 혼합합니다.' }],
+  TraceRay: [{ label: 'void TraceRay(RaytracingAccelerationStructure AccelerationStructure, uint RayFlags, uint InstanceInclusionMask, uint RayContributionToHitGroupIndex, uint MultiplierForGeometryContributionToHitGroupIndex, uint MissShaderIndex, RayDesc Ray, inout payload_t Payload)', doc: '[UnitySense] DXR / Unity RayTracing 가속 구조체에 대해 광선을 추적합니다.' }],
+  WaveActiveSum: [{ label: 'T WaveActiveSum(T expr)', doc: '[UnitySense] SM 6.0 Wave 내 모든 활성 레인의 값 합계를 반환합니다.' }],
+  WaveReadLaneFirst: [{ label: 'T WaveReadLaneFirst(T expr)', doc: '[UnitySense] SM 6.0 Wave의 첫 번째 활성 레인 값을 모든 레인에 브로드캐스트합니다.' }],
+  asfloat: [{ label: 'float asfloat(uint x)', doc: '[UnitySense] 32비트 정수 비트를 IEEE 754 float로 재해석합니다.' }],
+  asuint: [{ label: 'uint asuint(float x)', doc: '[UnitySense] IEEE 754 float 비트를 부호 없는 32비트 정수로 재해석합니다.' }],
+  f16tof32: [{ label: 'float f16tof32(uint value)', doc: '[UnitySense] 하위 16비트 half 값을 32비트 float로 변환합니다.' }],
+  f32tof16: [{ label: 'uint f32tof16(float value)', doc: '[UnitySense] 32비트 float 값을 하위 16비트 half 비트로 변환합니다.' }],
+  NonUniformResourceIndex: [{ label: 'uint NonUniformResourceIndex(uint index)', doc: '[UnitySense] SM 5.1+/6.x 동적(비균일) 디스크립터 배열 인덱싱을 표시합니다.' }],
+  sin: [{ label: 'T sin(T x)', doc: '[UnitySense] 라디안 각도 x의 사인 값을 계산합니다.' }],
+  cos: [{ label: 'T cos(T x)', doc: '[UnitySense] 라디안 각도 x의 코사인 값을 계산합니다.' }],
+  tan: [{ label: 'T tan(T x)', doc: '[UnitySense] 라디안 각도 x의 탄젠트 값을 계산합니다.' }],
+  asin: [{ label: 'T asin(T x)', doc: '[UnitySense] [-1, 1] 범위 값의 아크사인을 계산합니다.' }],
+  acos: [{ label: 'T acos(T x)', doc: '[UnitySense] [-1, 1] 범위 값의 아크코사인을 계산합니다.' }],
+  atan: [{ label: 'T atan(T x)', doc: '[UnitySense] 값 x의 아크탄젠트를 계산합니다.' }],
+  atan2: [{ label: 'T atan2(T y, T x)', doc: '[UnitySense] y/x의 아크탄젠트(사분면 보존)를 계산합니다.' }],
+  abs: [{ label: 'T abs(T x)', doc: '[UnitySense] x의 절댓값을 반환합니다.' }],
+  sign: [{ label: 'T sign(T x)', doc: '[UnitySense] x의 부호(-1, 0, 1)를 반환합니다.' }],
+  floor: [{ label: 'T floor(T x)', doc: '[UnitySense] x보다 작거나 같은 최대 정수를 반환합니다.' }],
+  ceil: [{ label: 'T ceil(T x)', doc: '[UnitySense] x보다 크거나 같은 최소 정수를 반환합니다.' }],
+  round: [{ label: 'T round(T x)', doc: '[UnitySense] x를 가장 가까운 정수로 반올림합니다.' }],
+  frac: [{ label: 'T frac(T x)', doc: '[UnitySense] x의 소수부(x - floor(x))를 반환합니다.' }],
+  fmod: [{ label: 'T fmod(T x, T y)', doc: '[UnitySense] x를 y로 나눈 부동소수점 나머지를 반환합니다.' }],
+  sqrt: [{ label: 'T sqrt(T x)', doc: '[UnitySense] x의 제곱근을 계산합니다.' }],
+  rsqrt: [{ label: 'T rsqrt(T x)', doc: '[UnitySense] x의 역제곱근(1 / sqrt(x))을 계산합니다.' }],
+  exp: [{ label: 'T exp(T x)', doc: '[UnitySense] 자연지수 e^x를 계산합니다.' }],
+  exp2: [{ label: 'T exp2(T x)', doc: '[UnitySense] 2^x를 계산합니다.' }],
+  log: [{ label: 'T log(T x)', doc: '[UnitySense] x의 자연로그 ln(x)를 계산합니다.' }],
+  log2: [{ label: 'T log2(T x)', doc: '[UnitySense] x의 밑이 2인 로그를 계산합니다.' }],
+  ddx: [{ label: 'T ddx(T x)', doc: '[UnitySense] 픽셀 셰이더에서 화면 X축 방향 편미분을 계산합니다.' }],
+  ddy: [{ label: 'T ddy(T x)', doc: '[UnitySense] 픽셀 셰이더에서 화면 Y축 방향 편미분을 계산합니다.' }],
+  fwidth: [{ label: 'T fwidth(T x)', doc: '[UnitySense] abs(ddx(x)) + abs(ddy(x))를 반환합니다.' }],
+  clip: [{ label: 'void clip(T x)', doc: '[UnitySense] x의 어느 한 성분이라도 0 미만이면 현재 픽셀을 폐기합니다.' }],
+  all: [{ label: 'bool all(T x)', doc: '[UnitySense] x의 모든 성분이 0이 아니면 true를 반환합니다.' }],
+  any: [{ label: 'bool any(T x)', doc: '[UnitySense] x의 성분 중 하나라도 0이 아니면 true를 반환합니다.' }],
+  mad: [{ label: 'T mad(T mvalue, T avalue, T bvalue)', doc: '[UnitySense] 곱셈-덧셈 융합 연산(mvalue * avalue + bvalue)을 수행합니다.' }],
+  rcp: [{ label: 'T rcp(T x)', doc: '[UnitySense] x의 빠른 근사 역수(1 / x)를 계산합니다.' }],
+  sincos: [{ label: 'void sincos(T x, out T s, out T c)', doc: '[UnitySense] x의 사인(s)과 코사인(c)을 동시에 계산합니다.' }],
+  tex2Dproj: [{ label: 'float4 tex2Dproj(sampler2D s, float4 t)', doc: '[UnitySense] 투영 나눗셈(t.xy / t.w)을 적용해 2D 텍스처를 샘플링합니다.' }],
+  texCUBE: [{ label: 'float4 texCUBE(samplerCUBE s, float3 t)', doc: '[UnitySense] 방향 벡터 t로 큐브맵 텍스처를 샘플링합니다.' }],
 };
 
 export function stripCommentsAndStringsByLine(lines: readonly string[]): string[] {
@@ -651,7 +651,7 @@ export class ShaderSignatureHelpProvider {
         const params = this.extractParamList(sym.signature);
         candidates.push({
           label: sym.signature,
-          doc: `[UnityBrain] 선언 위치: ${formatReadableUriLocation(sym.uri)}:${sym.line + 1}`,
+          doc: `[UnitySense] 선언 위치: ${formatReadableUriLocation(sym.uri)}:${sym.line + 1}`,
           params,
         });
       }
@@ -1126,21 +1126,21 @@ export class ShaderRenameProvider {
   public prepareRename(doc: vscode.TextDocument, position: vscode.Position): vscode.Range {
     const filePath = this.shaderGraph.normalizeFilePath(doc.uri.toString());
     if (filePath.replace(/\\/g, '/').toLowerCase().includes('/library/packagecache/')) {
-      throw new Error('[UnityBrain] 읽기 전용 PackageCache 셰이더 파일의 심볼은 이름을 변경할 수 없습니다.');
+      throw new Error('[UnitySense] 읽기 전용 PackageCache 셰이더 파일의 심볼은 이름을 변경할 수 없습니다.');
     }
     const wordRange = doc.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
     if (!wordRange) {
-      throw new Error('[UnityBrain] 이름을 변경할 심볼 위에 커서를 두세요.');
+      throw new Error('[UnitySense] 이름을 변경할 심볼 위에 커서를 두세요.');
     }
     const word = doc.getText(wordRange);
     if (!word || SHADER_KEYWORDS_SKIP.has(word)) {
-      throw new Error('[UnityBrain] 셰이더 예약어는 이름을 변경할 수 없습니다.');
+      throw new Error('[UnitySense] 셰이더 예약어는 이름을 변경할 수 없습니다.');
     }
     if (isTokenInCommentOrString(doc, wordRange, word)) {
-      throw new Error('[UnityBrain] 주석 또는 문자열 리터럴 내부에서는 이름을 변경할 수 없습니다.');
+      throw new Error('[UnitySense] 주석 또는 문자열 리터럴 내부에서는 이름을 변경할 수 없습니다.');
     }
     if (isVectorSwizzleToken(doc, wordRange, word, this.shaderGraph)) {
-      throw new Error('[UnityBrain] 벡터 스위즐 컴포넌트(.xyz, .rgba)는 이름을 변경할 수 없습니다.');
+      throw new Error('[UnitySense] 벡터 스위즐 컴포넌트(.xyz, .rgba)는 이름을 변경할 수 없습니다.');
     }
     return wordRange;
   }
@@ -1152,7 +1152,7 @@ export class ShaderRenameProvider {
   ): vscode.WorkspaceEdit | undefined {
     const trimmedNewName = newName.trim();
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmedNewName) || SHADER_KEYWORDS_SKIP.has(trimmedNewName)) {
-      throw new Error(`[UnityBrain] '${newName}'은(는) 유효한 HLSL/ShaderLab 식별자 이름이 아닙니다.`);
+      throw new Error(`[UnitySense] '${newName}'은(는) 유효한 HLSL/ShaderLab 식별자 이름이 아닙니다.`);
     }
 
     const filePath = this.shaderGraph.normalizeFilePath(doc.uri.toString());
@@ -1355,8 +1355,8 @@ export function collectComputeAndShaderLabDiagnostics(
     if (!hasFnOrMacro) {
       const msg =
         ep.stage === 'kernel'
-          ? `[UnityBrain] Compute Shader 커널 함수 '${ep.name}'이(가) 정의되지 않았습니다.`
-          : `[UnityBrain] #pragma ${ep.stage} 엔트리 함수 '${ep.name}'이(가) 정의되지 않았습니다.`;
+          ? `[UnitySense] Compute Shader 커널 함수 '${ep.name}'이(가) 정의되지 않았습니다.`
+          : `[UnitySense] #pragma ${ep.stage} 엔트리 함수 '${ep.name}'이(가) 정의되지 않았습니다.`;
       diags.push(
         new vscode.Diagnostic(
           new vscode.Range(ep.line, ep.column, ep.line, ep.column + ep.name.length),
@@ -1392,7 +1392,7 @@ export function collectComputeAndShaderLabDiagnostics(
             diags.push(
               new vscode.Diagnostic(
                 new vscode.Range(i, bm.index, i, bm.index + tok.length),
-                `[UnityBrain] 대응하는 시작 블록 없이 '${tok}'이(가) 닫혔습니다.`,
+                `[UnitySense] 대응하는 시작 블록 없이 '${tok}'이(가) 닫혔습니다.`,
                 vscode.DiagnosticSeverity.Error,
               ),
             );
@@ -1400,7 +1400,7 @@ export function collectComputeAndShaderLabDiagnostics(
             diags.push(
               new vscode.Diagnostic(
                 new vscode.Range(i, bm.index, i, bm.index + tok.length),
-                `[UnityBrain] '${top.tag}' 블록은 '${top.expectedEnd}'로 닫아야 합니다 ('${tok}' 사용됨).`,
+                `[UnitySense] '${top.tag}' 블록은 '${top.expectedEnd}'로 닫아야 합니다 ('${tok}' 사용됨).`,
                 vscode.DiagnosticSeverity.Error,
               ),
             );
@@ -1452,7 +1452,7 @@ export function collectComputeAndShaderLabDiagnostics(
             diags.push(
               new vscode.Diagnostic(
                 new vscode.Range(i, c, i, c + 1),
-                '[UnityBrain] 여는 중괄호 "{" 없이 닫는 중괄호 "}"가 있습니다.',
+                '[UnitySense] 여는 중괄호 "{" 없이 닫는 중괄호 "}"가 있습니다.',
                 vscode.DiagnosticSeverity.Error,
               ),
             );
@@ -1467,7 +1467,7 @@ export function collectComputeAndShaderLabDiagnostics(
       diags.push(
         new vscode.Diagnostic(
           new vscode.Range(unclosed.line, unclosed.col, unclosed.line, unclosed.col + unclosed.tag.length),
-          `[UnityBrain] '${unclosed.tag}' 블록이 '${unclosed.expectedEnd}'로 닫히지 않았습니다.`,
+          `[UnitySense] '${unclosed.tag}' 블록이 '${unclosed.expectedEnd}'로 닫히지 않았습니다.`,
           vscode.DiagnosticSeverity.Error,
         ),
       );
@@ -1476,7 +1476,7 @@ export function collectComputeAndShaderLabDiagnostics(
       diags.push(
         new vscode.Diagnostic(
           new vscode.Range(unclosedBrace.line, unclosedBrace.col, unclosedBrace.line, unclosedBrace.col + 1),
-          '[UnityBrain] 닫히지 않은 여는 중괄호 "{"가 있습니다.',
+          '[UnitySense] 닫히지 않은 여는 중괄호 "{"가 있습니다.',
           vscode.DiagnosticSeverity.Error,
         ),
       );
@@ -1537,7 +1537,7 @@ export function collectComputeAndShaderLabDiagnostics(
           diags.push(
             new vscode.Diagnostic(
               new vscode.Range(propLine, propCol, propLine, propCol + prop.name.length),
-              `[UnityBrain] SRP Batcher: 프로퍼티 '${prop.name}'이(가) CBUFFER_START(UnityPerMaterial)에 선언되어 있지 않습니다.`,
+              `[UnitySense] SRP Batcher: 프로퍼티 '${prop.name}'이(가) CBUFFER_START(UnityPerMaterial)에 선언되어 있지 않습니다.`,
               vscode.DiagnosticSeverity.Warning,
             ),
           );
@@ -1569,7 +1569,7 @@ export function collectComputeAndShaderLabDiagnostics(
           diags.push(
             new vscode.Diagnostic(
               new vscode.Range(i, ntMatch.index, i, ntMatch.index + ntMatch[0].length),
-              `[UnityBrain] [numthreads(${ntMatch[1]}, ${ntMatch[2]}, ${ntMatch[3]})] 총 스레드 수(${total})가 1024 한도를 초과합니다.`,
+              `[UnitySense] [numthreads(${ntMatch[1]}, ${ntMatch[2]}, ${ntMatch[3]})] 총 스레드 수(${total})가 1024 한도를 초과합니다.`,
               vscode.DiagnosticSeverity.Error,
             ),
           );
@@ -1588,7 +1588,7 @@ export function collectComputeAndShaderLabDiagnostics(
       diags.push(
         new vscode.Diagnostic(
           new vscode.Range(i, col, i, col + cullM[1].length),
-          `[UnityBrain] 잘못된 ShaderLab Cull 값 '${cullM[1]}'입니다 (Back, Front, Off만 허용).`,
+          `[UnitySense] 잘못된 ShaderLab Cull 값 '${cullM[1]}'입니다 (Back, Front, Off만 허용).`,
           vscode.DiagnosticSeverity.Warning,
         ),
       );
@@ -1599,7 +1599,7 @@ export function collectComputeAndShaderLabDiagnostics(
       diags.push(
         new vscode.Diagnostic(
           new vscode.Range(i, col, i, col + zwM[1].length),
-          `[UnityBrain] 잘못된 ShaderLab ZWrite 값 '${zwM[1]}'입니다 (On, Off만 허용).`,
+          `[UnitySense] 잘못된 ShaderLab ZWrite 값 '${zwM[1]}'입니다 (On, Off만 허용).`,
           vscode.DiagnosticSeverity.Warning,
         ),
       );
@@ -1610,7 +1610,7 @@ export function collectComputeAndShaderLabDiagnostics(
       diags.push(
         new vscode.Diagnostic(
           new vscode.Range(i, col, i, col + ztM[1].length),
-          `[UnityBrain] 잘못된 ShaderLab ZTest 값 '${ztM[1]}'입니다.`,
+          `[UnitySense] 잘못된 ShaderLab ZTest 값 '${ztM[1]}'입니다.`,
           vscode.DiagnosticSeverity.Warning,
         ),
       );

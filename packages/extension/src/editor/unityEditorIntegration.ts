@@ -258,7 +258,7 @@ export function generateUnityLaunchConfig(projectRoot: string): {
   const editorInfo = readEditorInstance(projectRoot);
   fs.mkdirSync(vscodeDir, { recursive: true });
 
-  const configName = '[UnityBrain] Unity Editor 디버거 연결';
+  const configName = '[UnitySense] Unity Editor 디버거 연결';
   const unityConfig: Record<string, unknown> = {
     name: configName,
     type: 'vstuc',
@@ -291,7 +291,7 @@ export function generateUnityLaunchConfig(projectRoot: string): {
       };
     } catch {
       void vscode.window.showErrorMessage(
-        `[UnityBrain] 기존 '.vscode/launch.json' 파싱에 실패하여 사용자 설정 보호를 위해 덮어쓰지 않고 중단했습니다.`,
+        `[UnitySense] 기존 '.vscode/launch.json' 파싱에 실패하여 사용자 설정 보호를 위해 덮어쓰지 않고 중단했습니다.`,
       );
       return { filePath: launchPath, created: false, editorInfo, aborted: true };
     }
@@ -312,7 +312,7 @@ export function generateUnityLaunchConfig(projectRoot: string): {
 
 export function registerUnityEditorCommands(projectRoot: string): vscode.Disposable[] {
   return [
-    vscode.commands.registerCommand('unityBrain.generateDebugConfig', async () => {
+    vscode.commands.registerCommand('unitySense.generateDebugConfig', async () => {
       const res = generateUnityLaunchConfig(projectRoot);
       if (res.aborted) {
         return res;
@@ -321,7 +321,7 @@ export function registerUnityEditorCommands(projectRoot: string): vscode.Disposa
         ? `실행 중인 Unity ${res.editorInfo.version} (PID ${res.editorInfo.process_id})`
         : '현재 실행 중인 EditorInstance.json 미감지 (실행 시 자동 연결)';
       void vscode.window.showInformationMessage(
-        `[UnityBrain] 디버거 연결 설정을 '.vscode/launch.json'에 저장했습니다 (${status}).`,
+        `[UnitySense] 디버거 연결 설정을 '.vscode/launch.json'에 저장했습니다 (${status}).`,
       );
       try {
         const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(res.filePath));
@@ -332,11 +332,11 @@ export function registerUnityEditorCommands(projectRoot: string): vscode.Disposa
       return res;
     }),
 
-    vscode.commands.registerCommand('unityBrain.openUnityEditorLog', async () => {
+    vscode.commands.registerCommand('unitySense.openUnityEditorLog', async () => {
       const logPath = resolveUnityEditorLogPath(projectRoot);
       if (!fs.existsSync(logPath)) {
         void vscode.window.showInformationMessage(
-          `[UnityBrain] Unity Editor.log 파일을 찾을 수 없습니다: ${logPath}`,
+          `[UnitySense] Unity Editor.log 파일을 찾을 수 없습니다: ${logPath}`,
         );
         return null;
       }

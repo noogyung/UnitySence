@@ -75,7 +75,7 @@ describe('MsbuildAnalyzerInjector', () => {
     expect(afterInject).toContain(BEGIN_MARKER);
 
     // Disable analyzers via config -> cleanly remove managed block
-    await vscode.workspace.getConfiguration('unityBrain').update('analyzers.enabled', false);
+    await vscode.workspace.getConfiguration('unitySense').update('analyzers.enabled', false);
     const removeRes = await injector.ensureInjected();
     expect(removeRes).toBe('removed');
 

@@ -69,6 +69,11 @@ public class PlayerActor : BaseActor
 
         var ub3001 = diags.Where(d => d.Id == DiagnosticIds.UnresolvedInvokeOrCoroutineMethod).ToArray();
         AssertEx.Equal(3, ub3001.Length, $"Expected 3 UB3001 diagnostics, got {ub3001.Length}");
+        foreach (var d in ub3001)
+        {
+            AssertEx.Contains("[UnitySense]", d.GetMessage());
+        }
+        AssertEx.Contains("[UnitySense]", DiagnosticIds.SuppressCS0649Rule.Justification.ToString());
     }
 
     [Fact]

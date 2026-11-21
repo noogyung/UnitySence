@@ -63,7 +63,7 @@
       "\t}",
       "}"
     ],
-    "description": "[UnityBrain] URP 호환 Unlit Shader 전체 템플릿 (SRP Batcher 지원)"
+    "description": "[UnitySense] URP 호환 Unlit Shader 전체 템플릿 (SRP Batcher 지원)"
   },
   "ShaderLab Pass Block": {
     "prefix": "shader-pass",
@@ -80,7 +80,7 @@
       "\tENDHLSL",
       "}"
     ],
-    "description": "[UnityBrain] ShaderLab Pass + HLSLPROGRAM 블록"
+    "description": "[UnitySense] ShaderLab Pass + HLSLPROGRAM 블록"
   },
   "ShaderLab Stencil Block": {
     "prefix": "shader-stencil",
@@ -92,6 +92,6 @@
       "\tPass ${3|Keep,Replace,Zero|}",
       "}"
     ],
-    "description": "[UnityBrain] ShaderLab Stencil 테스트 블록"
+    "description": "[UnitySense] ShaderLab Stencil 테스트 블록"
   }
 }

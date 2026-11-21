@@ -26,8 +26,8 @@ public static class DiagnosticIds
 
     public static readonly DiagnosticDescriptor UB1001Rule = new(
         id: IndirectPerformanceCriticalInvocation,
-        title: "[UnityBrain] 성능 민감 경로 내 고비용 유니티 API 간접 호출 지양",
-        messageFormat: "[UnityBrain] 성능 민감 호출 경로({1})에서 고비용 유니티 API '{0}'이(가) 호출되었습니다.",
+        title: "[UnitySense] 성능 민감 경로 내 고비용 유니티 API 간접 호출 지양",
+        messageFormat: "[UnitySense] 성능 민감 호출 경로({1})에서 고비용 유니티 API '{0}'이(가) 호출되었습니다.",
         category: CategoryPerformance,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -35,8 +35,8 @@ public static class DiagnosticIds
 
     public static readonly DiagnosticDescriptor UB1002Rule = new(
         id: UncachedComponentLookup,
-        title: "[UnityBrain] 성능 민감 루프 밖에서 GetComponent/TryGetComponent 결과 캐싱 권장",
-        messageFormat: "[UnityBrain] 성능 민감 컨텍스트({1})에서 캐싱되지 않은 '{0}' 호출이 감지되었습니다. Awake()에서 컴포넌트 참조를 캐싱하세요.",
+        title: "[UnitySense] 성능 민감 루프 밖에서 GetComponent/TryGetComponent 결과 캐싱 권장",
+        messageFormat: "[UnitySense] 성능 민감 컨텍스트({1})에서 캐싱되지 않은 '{0}' 호출이 감지되었습니다. Awake()에서 컴포넌트 참조를 캐싱하세요.",
         category: CategoryPerformance,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -44,8 +44,8 @@ public static class DiagnosticIds
 
     public static readonly DiagnosticDescriptor UB1003Rule = new(
         id: UncachedShaderOrAnimatorPropertyId,
-        title: "[UnityBrain] 문자열 리터럴 대신 캐싱된 Shader.PropertyToID 또는 Animator.StringToHash 사용 권장",
-        messageFormat: "[UnityBrain] {1}에서 문자열 리터럴 \"{0}\"이(가) 사용되었습니다. {2}로 static readonly int 필드에 캐싱하세요.",
+        title: "[UnitySense] 문자열 리터럴 대신 캐싱된 Shader.PropertyToID 또는 Animator.StringToHash 사용 권장",
+        messageFormat: "[UnitySense] {1}에서 문자열 리터럴 \"{0}\"이(가) 사용되었습니다. {2}로 static readonly int 필드에 캐싱하세요.",
         category: CategoryPerformance,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -53,8 +53,8 @@ public static class DiagnosticIds
 
     public static readonly DiagnosticDescriptor UB2001Rule = new(
         id: BurstReferenceTypeForbidden,
-        title: "[UnityBrain] Burst 컴파일 코드에서 관리되는 참조 타입 사용 금지",
-        messageFormat: "[UnityBrain] [BurstCompile] 컨텍스트 내부에서 참조 타입 '{0}'은(는) 사용할 수 없습니다.",
+        title: "[UnitySense] Burst 컴파일 코드에서 관리되는 참조 타입 사용 금지",
+        messageFormat: "[UnitySense] [BurstCompile] 컨텍스트 내부에서 참조 타입 '{0}'은(는) 사용할 수 없습니다.",
         category: CategoryBurst,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
@@ -62,8 +62,8 @@ public static class DiagnosticIds
 
     public static readonly DiagnosticDescriptor UB2002Rule = new(
         id: BurstBoxingForbidden,
-        title: "[UnityBrain] Burst 컴파일 코드에서 값 타입 박싱(Boxing) 금지",
-        messageFormat: "[UnityBrain] [BurstCompile] 컨텍스트 내부에서 값 타입 '{0}'이(가) '{1}'(으)로 박싱됩니다.",
+        title: "[UnitySense] Burst 컴파일 코드에서 값 타입 박싱(Boxing) 금지",
+        messageFormat: "[UnitySense] [BurstCompile] 컨텍스트 내부에서 값 타입 '{0}'이(가) '{1}'(으)로 박싱됩니다.",
         category: CategoryBurst,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
@@ -71,8 +71,8 @@ public static class DiagnosticIds
 
     public static readonly DiagnosticDescriptor UB2003Rule = new(
         id: BurstManagedStringForbidden,
-        title: "[UnityBrain] Burst 컴파일 코드에서 관리 문자열 연산 금지",
-        messageFormat: "[UnityBrain] [BurstCompile] 컨텍스트 내부에서 관리 문자열 연산({0})은 허용되지 않습니다.",
+        title: "[UnitySense] Burst 컴파일 코드에서 관리 문자열 연산 금지",
+        messageFormat: "[UnitySense] [BurstCompile] 컨텍스트 내부에서 관리 문자열 연산({0})은 허용되지 않습니다.",
         category: CategoryBurst,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
@@ -80,8 +80,8 @@ public static class DiagnosticIds
 
     public static readonly DiagnosticDescriptor UB2004Rule = new(
         id: BurstExceptionHandlingForbidden,
-        title: "[UnityBrain] Burst 컴파일 코드에서 try/catch 및 throw 예외 처리 미지원",
-        messageFormat: "[UnityBrain] [BurstCompile] 컨텍스트 내부에서 예외 처리 구문 '{0}'은(는) 지원되지 않습니다.",
+        title: "[UnitySense] Burst 컴파일 코드에서 try/catch 및 throw 예외 처리 미지원",
+        messageFormat: "[UnitySense] [BurstCompile] 컨텍스트 내부에서 예외 처리 구문 '{0}'은(는) 지원되지 않습니다.",
         category: CategoryBurst,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -89,7 +89,7 @@ public static class DiagnosticIds
 
     public static readonly DiagnosticDescriptor UB3001Rule = new(
         id: UnresolvedInvokeOrCoroutineMethod,
-        title: "[UnityBrain] Invoke/StartCoroutine 대상 메서드 누락 또는 반환 타입 불일치",
+        title: "[UnitySense] Invoke/StartCoroutine 대상 메서드 누락 또는 반환 타입 불일치",
         messageFormat: "{0}",
         category: CategoryValidation,
         defaultSeverity: DiagnosticSeverity.Warning,
@@ -98,8 +98,8 @@ public static class DiagnosticIds
 
     public static readonly DiagnosticDescriptor UB3002Rule = new(
         id: UnknownUnityTagOrLayer,
-        title: "[UnityBrain] ProjectSettings에 등록되지 않은 유니티 태그/레이어 이름",
-        messageFormat: "[UnityBrain] {0} '{1}'은(는) ProjectSettings/TagManager.asset에 등록되어 있지 않습니다.",
+        title: "[UnitySense] ProjectSettings에 등록되지 않은 유니티 태그/레이어 이름",
+        messageFormat: "[UnitySense] {0} '{1}'은(는) ProjectSettings/TagManager.asset에 등록되어 있지 않습니다.",
         category: CategoryValidation,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -107,8 +107,8 @@ public static class DiagnosticIds
 
     public static readonly DiagnosticDescriptor UB3003Rule = new(
         id: SceneNotInBuildSettings,
-        title: "[UnityBrain] EditorBuildSettings에 활성화되지 않은 씬 이름 또는 경로",
-        messageFormat: "[UnityBrain] 씬 '{0}'은(는) EditorBuildSettings.asset의 활성화된 빌드 씬 목록에 없습니다.",
+        title: "[UnitySense] EditorBuildSettings에 활성화되지 않은 씬 이름 또는 경로",
+        messageFormat: "[UnitySense] 씬 '{0}'은(는) EditorBuildSettings.asset의 활성화된 빌드 씬 목록에 없습니다.",
         category: CategoryValidation,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -117,15 +117,15 @@ public static class DiagnosticIds
     public static readonly SuppressionDescriptor SuppressCS0649Rule = new(
         id: "UBSUP0001",
         suppressedDiagnosticId: "CS0649",
-        justification: "[UnityBrain] Unity 직렬화 필드([SerializeField]/[SerializeReference])는 인스펙터에서 할당됩니다.");
+        justification: "[UnitySense] Unity 직렬화 필드([SerializeField]/[SerializeReference])는 인스펙터에서 할당됩니다.");
 
     public static readonly SuppressionDescriptor SuppressCS0169Rule = new(
         id: "UBSUP0002",
         suppressedDiagnosticId: "CS0169",
-        justification: "[UnityBrain] Unity 직렬화 필드는 엔진에서 암시적으로 사용됩니다.");
+        justification: "[UnitySense] Unity 직렬화 필드는 엔진에서 암시적으로 사용됩니다.");
 
     public static readonly SuppressionDescriptor SuppressIDE0051Rule = new(
         id: "UBSUP0003",
         suppressedDiagnosticId: "IDE0051",
-        justification: "[UnityBrain] Unity 이벤트 함수 및 직렬화 필드는 엔진 런타임에서 호출/사용됩니다.");
+        justification: "[UnitySense] Unity 이벤트 함수 및 직렬화 필드는 엔진 런타임에서 호출/사용됩니다.");
 }

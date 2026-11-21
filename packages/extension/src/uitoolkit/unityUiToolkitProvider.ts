@@ -246,8 +246,8 @@ export class UnityUssCompletionProvider implements vscode.CompletionItemProvider
     if (braceDepth === 0 && /:([A-Za-z-]*)$/.test(lineBefore) && !lineBefore.includes(';')) {
       return UNITY_USS_PSEUDO_STATES.map((state) => {
         const item = new vscode.CompletionItem(state, vscode.CompletionItemKind.EnumMember);
-        item.detail = '[UnityBrain] UI Toolkit USS 의사 상태 (Pseudo-state)';
-        item.documentation = `[UnityBrain] ':${state}' 상태 선택자입니다.`;
+        item.detail = '[UnitySense] UI Toolkit USS 의사 상태 (Pseudo-state)';
+        item.documentation = `[UnitySense] ':${state}' 상태 선택자입니다.`;
         return item;
       });
     }
@@ -265,7 +265,7 @@ export class UnityUssCompletionProvider implements vscode.CompletionItemProvider
           val,
           isId ? vscode.CompletionItemKind.Field : vscode.CompletionItemKind.Class,
         );
-        item.detail = `[UnityBrain] ${path.basename(el.assetPath)}에서 추출됨`;
+        item.detail = `[UnitySense] ${path.basename(el.assetPath)}에서 추출됨`;
         items.push(item);
       }
       return items;
@@ -293,9 +293,9 @@ export class UnityUssCompletionProvider implements vscode.CompletionItemProvider
     return UNITY_USS_PROPERTIES.map((prop) => {
       const item = new vscode.CompletionItem(prop.name, vscode.CompletionItemKind.Property);
       item.detail = prop.name.startsWith('-unity-')
-        ? '[UnityBrain] Unity USS 전용 스타일 속성'
-        : '[UnityBrain] Unity UI Toolkit USS 스타일 속성';
-      item.documentation = `[UnityBrain] ${prop.description}`;
+        ? '[UnitySense] Unity USS 전용 스타일 속성'
+        : '[UnitySense] Unity UI Toolkit USS 스타일 속성';
+      item.documentation = `[UnitySense] ${prop.description}`;
       item.insertText = new vscode.SnippetString(`${prop.name}: $1;`);
       if (replaceRange) {
         item.range = replaceRange;

@@ -50,7 +50,7 @@ afterEach(() => {
   }
 });
 
-describe('UnityBrain Extension End-to-End Integration Suite', () => {
+describe('UnitySense Extension End-to-End Integration Suite', () => {
   it('activates on SampleUnityProject and integrates Directory.Build.props, Shader Definition/Variants, C# Completions, CodeLens, and Meta Sync', async () => {
     const repoRoot = process.cwd();
     const fixtureProject = path.join(repoRoot, 'test-fixtures', 'SampleUnityProject');
@@ -146,7 +146,7 @@ describe('UnityBrain Extension End-to-End Integration Suite', () => {
 
     const variantLenses = api!.shaderVariantCodeLensProvider.provideCodeLenses(shaderDoc);
     expect(variantLenses.length).toBe(1);
-    expect(variantLenses[0].command?.title).toBe('$(layers) [UnityBrain] 셰이더 배리언트 6개');
+    expect(variantLenses[0].command?.title).toBe('$(layers) [UnitySense] 셰이더 배리언트 6개');
 
     // 3. Verify C# CompareTag("") completion + Asset Usage CodeLens
     const scriptsDir = path.join(sampleRoot, 'Assets', 'Scripts');
@@ -180,7 +180,7 @@ describe('UnityBrain Extension End-to-End Integration Suite', () => {
       new vscode.CancellationTokenSource().token,
     );
     expect(usageLenses.length).toBeGreaterThan(0);
-    expect(usageLenses[0].command?.title).toBe('$(symbol-reference) [UnityBrain] 에셋 참조 1곳 (씬 1개)');
+    expect(usageLenses[0].command?.title).toBe('$(symbol-reference) [UnitySense] 에셋 참조 1곳 (씬 1개)');
 
     // 4. Verify .meta lifecycle sync on newly created file
     const spawnedCs = path.join(scriptsDir, 'NewItem.cs');

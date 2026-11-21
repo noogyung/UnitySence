@@ -49,14 +49,14 @@ export class ShaderHoverProvider {
         return {
           contents: {
             kind: MarkupKind.Markdown,
-            value: `**[UnityBrain] 셰이더 인클루드 경로**: \`${inc.rawPath}\`\n\n해석 방식(\`${mapped.resolvedVia}\`):\n\`${mapped.physicalPath}\``,
+            value: `**[UnitySense] 셰이더 인클루드 경로**: \`${inc.rawPath}\`\n\n해석 방식(\`${mapped.resolvedVia}\`):\n\`${mapped.physicalPath}\``,
           },
         };
       }
       return {
         contents: {
           kind: MarkupKind.Markdown,
-          value: `**[UnityBrain] 미해석 셰이더 인클루드**: \`${inc.rawPath}\``,
+          value: `**[UnitySense] 미해석 셰이더 인클루드**: \`${inc.rawPath}\``,
         },
       };
     }
@@ -79,7 +79,7 @@ export class ShaderHoverProvider {
           return {
             contents: {
               kind: MarkupKind.Markdown,
-              value: `**[UnityBrain] 셰이더 키워드** \`${word}\`: 현재 컨텍스트에서 **${enabled ? 'ON (활성)' : 'OFF (비활성)'}** 상태입니다.`,
+              value: `**[UnitySense] 셰이더 키워드** \`${word}\`: 현재 컨텍스트에서 **${enabled ? 'ON (활성)' : 'OFF (비활성)'}** 상태입니다.`,
             },
           };
         }
@@ -97,7 +97,7 @@ export class ShaderHoverProvider {
           return {
             contents: {
               kind: MarkupKind.Markdown,
-              value: `\`\`\`hlsl\n${resolved.field.signature ?? `${resolved.field.returnType ?? ''} ${resolved.field.name}`}\n\`\`\`\n\n**[UnityBrain]** 구조체 \`${resolved.ownerType}\`의 멤버\n\n선언 위치: \`${declaredIn}:${resolved.field.line + 1}\``,
+              value: `\`\`\`hlsl\n${resolved.field.signature ?? `${resolved.field.returnType ?? ''} ${resolved.field.name}`}\n\`\`\`\n\n**[UnitySense]** 구조체 \`${resolved.ownerType}\`의 멤버\n\n선언 위치: \`${declaredIn}:${resolved.field.line + 1}\``,
             },
           };
         }
@@ -105,7 +105,7 @@ export class ShaderHoverProvider {
           return {
             contents: {
               kind: MarkupKind.Markdown,
-              value: `\`\`\`hlsl\n${resolved.type} .${word}\n\`\`\`\n\n[UnityBrain] 벡터 스위즐 (${resolved.type})`,
+              value: `\`\`\`hlsl\n${resolved.type} .${word}\n\`\`\`\n\n[UnitySense] 벡터 스위즐 (${resolved.type})`,
             },
           };
         }
@@ -142,7 +142,7 @@ export class ShaderHoverProvider {
         return {
           contents: {
             kind: MarkupKind.Markdown,
-            value: `\`\`\`hlsl\n${localDecl.signature}\n\`\`\`\n\n**[UnityBrain]** ${roleLabel}\n\n선언 위치: \`${declaredIn}:${localDecl.line + 1}\``,
+            value: `\`\`\`hlsl\n${localDecl.signature}\n\`\`\`\n\n**[UnitySense]** ${roleLabel}\n\n선언 위치: \`${declaredIn}:${localDecl.line + 1}\``,
           },
         };
       }
@@ -182,7 +182,7 @@ export class ShaderHoverProvider {
       return {
         contents: {
           kind: MarkupKind.Markdown,
-          value: `\`\`\`hlsl\n${builtin.signature}\n\`\`\`\n\n**[UnityBrain]** ${builtin.description} (*${builtin.pipeline}*)`,
+          value: `\`\`\`hlsl\n${builtin.signature}\n\`\`\`\n\n**[UnitySense]** ${builtin.description} (*${builtin.pipeline}*)`,
         },
       };
     }
@@ -212,7 +212,7 @@ export class ShaderHoverProvider {
       parts.push(sym.documentation);
     }
     if (sym.kind === 'field' && sym.containerName) {
-      parts.push(`**[UnityBrain]** 구조체 \`${sym.containerName}\`의 멤버`);
+      parts.push(`**[UnitySense]** 구조체 \`${sym.containerName}\`의 멤버`);
     }
     if (propNote) {
       parts.push(`ShaderLab 프로퍼티: \`${propNote.signature ?? propNote.name}\``);
@@ -234,7 +234,7 @@ export class ShaderHoverProvider {
       }
     }
     const locWithLine = sym.line !== undefined ? `${declaredIn}:${sym.line + 1}` : declaredIn;
-    parts.push(`**[UnityBrain]** 선언 위치: \`${locWithLine}\``);
+    parts.push(`**[UnitySense]** 선언 위치: \`${locWithLine}\``);
     return {
       contents: {
         kind: MarkupKind.Markdown,

@@ -180,14 +180,14 @@ describe('UnityAssetUsageCodeLensProvider', () => {
 
       const classLens = lenses.find((l) => l.range.start.line === 2);
       expect(classLens?.command?.title).toBe(
-        '$(symbol-reference) [UnityBrain] 에셋 참조 3곳 (씬 2개, 프리팹 1개)',
+        '$(symbol-reference) [UnitySense] 에셋 참조 3곳 (씬 2개, 프리팹 1개)',
       );
 
       const fieldLens = lenses.find((l) => l.range.start.line === 5);
-      expect(fieldLens?.command?.title).toContain('[UnityBrain] 인스펙터 값: 8.5 (MainMenu), 12 (Hero)');
+      expect(fieldLens?.command?.title).toContain('[UnitySense] 인스펙터 값: 8.5 (MainMenu), 12 (Hero)');
 
       const methodLens = lenses.find((l) => l.range.start.line === 7);
-      expect(methodLens?.command?.title).toBe('$(zap) [UnityBrain] 이벤트 콜백 1곳');
+      expect(methodLens?.command?.title).toBe('$(zap) [UnitySense] 이벤트 콜백 1곳');
 
       await vscode.commands.executeCommand(
         classLens!.command!.command,
@@ -204,14 +204,14 @@ describe('UnityAssetUsageCodeLensProvider', () => {
     }
   });
 
-  it('respects unityBrain.codeLens.enabled setting', async () => {
+  it('respects unitySense.codeLens.enabled setting', async () => {
     const root = createTempProject();
     const csPath = path.join(root, 'Assets', 'Scripts', 'Simple.cs');
     const source = 'public class Simple : MonoBehaviour {}\n';
     fs.writeFileSync(csPath, source, 'utf8');
     fs.writeFileSync(`${csPath}.meta`, 'guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', 'utf8');
 
-    await vscode.workspace.getConfiguration('unityBrain').update('codeLens.enabled', false);
+    await vscode.workspace.getConfiguration('unitySense').update('codeLens.enabled', false);
 
     let queried = false;
     const daemonClient = new UnityDaemonClient({
@@ -268,9 +268,9 @@ describe('UnityAssetUsageCodeLensProvider', () => {
     const updateLens = lenses.find((l) => l.range.start.line === 5);
     const helperLens = lenses.find((l) => l.range.start.line === 6);
 
-    expect(awakeLens?.command?.title).toBe('$(symbol-event) [UnityBrain] 유니티 이벤트 함수 (MonoBehaviour)');
+    expect(awakeLens?.command?.title).toBe('$(symbol-event) [UnitySense] 유니티 이벤트 함수 (MonoBehaviour)');
     expect(updateLens?.command?.title).toBe(
-      '$(symbol-event) [UnityBrain] 유니티 이벤트 함수 (MonoBehaviour) · 매 프레임 호출',
+      '$(symbol-event) [UnitySense] 유니티 이벤트 함수 (MonoBehaviour) · 매 프레임 호출',
     );
     expect(helperLens).toBeUndefined();
     provider.dispose();
@@ -395,10 +395,10 @@ describe('UnityAssetUsageCodeLensProvider', () => {
     const lenses = await provider.provideCodeLenses(doc, new vscode.CancellationTokenSource().token);
 
     const speedLens = lenses.find((l) => l.range.start.line === 4);
-    expect(speedLens?.command?.title).toContain('[UnityBrain] 인스펙터 값: 11.5 (Stage01)');
+    expect(speedLens?.command?.title).toContain('[UnitySense] 인스펙터 값: 11.5 (Stage01)');
 
     const statsLens = lenses.find((l) => l.range.start.line === 6);
-    expect(statsLens?.command?.title).toContain('[UnityBrain] 인스펙터 값: maxHealth=400 (Boss)');
+    expect(statsLens?.command?.title).toContain('[UnitySense] 인스펙터 값: maxHealth=400 (Boss)');
 
     const ignoredLens = lenses.find((l) => l.range.start.line === 7);
     expect(ignoredLens).toBeUndefined();

@@ -95,12 +95,12 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
     const provider = new ShaderVariantCodeLensProvider();
     const lenses = provider.provideCodeLenses(doc);
     expect(lenses.length).toBe(1);
-    expect(lenses[0].command?.title).toBe('$(layers) [UnityBrain] 셰이더 배리언트 256개 (배리언트 과다 주의!)');
-    expect(lenses[0].command?.command).toBe('unityBrain.switchShaderKeywords');
+    expect(lenses[0].command?.title).toBe('$(layers) [UnitySense] 셰이더 배리언트 256개 (배리언트 과다 주의!)');
+    expect(lenses[0].command?.command).toBe('unitySense.switchShaderKeywords');
     provider.dispose();
   });
 
-  it('updates status bar text and invokes callback on unityBrain.switchShaderKeywords', async () => {
+  it('updates status bar text and invokes callback on unitySense.switchShaderKeywords', async () => {
     const shaderUri = vscode.Uri.file('Assets/Shaders/LitCustom.shader');
     const shaderDoc = vscode.__mock.createTextDocument(
       shaderUri,
@@ -129,23 +129,23 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
     });
 
     try {
-      expect(statusBar.getStatusBarItem().text).toBe('$(symbol-keyword) [UnityBrain] 셰이더 키워드: (기본값)');
+      expect(statusBar.getStatusBarItem().text).toBe('$(symbol-keyword) [UnitySense] 셰이더 키워드: (기본값)');
 
-      await vscode.commands.executeCommand('unityBrain.switchShaderKeywords');
+      await vscode.commands.executeCommand('unitySense.switchShaderKeywords');
       expect(events.length).toBe(1);
       expect(events[0].keywords).toEqual(['_ALPHATEST_ON']);
       expect(statusBar.getStatusBarItem().text).toBe(
-        '$(symbol-keyword) [UnityBrain] 셰이더 키워드: _ALPHATEST_ON',
+        '$(symbol-keyword) [UnitySense] 셰이더 키워드: _ALPHATEST_ON',
       );
 
-      await vscode.commands.executeCommand('unityBrain.switchShaderKeywords', [
+      await vscode.commands.executeCommand('unitySense.switchShaderKeywords', [
         '_ALPHATEST_ON',
         '_EMISSION',
       ]);
       expect(events.length).toBe(2);
       expect(events[1].keywords).toEqual(['_ALPHATEST_ON', '_EMISSION']);
       expect(statusBar.getStatusBarItem().text).toBe(
-        '$(symbol-keyword) [UnityBrain] 셰이더 키워드: _ALPHATEST_ON, _EMISSION',
+        '$(symbol-keyword) [UnitySense] 셰이더 키워드: _ALPHATEST_ON, _EMISSION',
       );
     } finally {
       statusBar.dispose();
@@ -362,7 +362,7 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
       expect(firstToggleOn.preselect).toBe(true);
       expect(firstToggleOn.insertText).toBe('_RIM_LIGHT_ON');
       expect(firstToggleOn.filterText).toContain('_RIM_LIGHT_ON');
-      expect(firstToggleOn.command?.command).toBe('unityBrain.toggleShaderKeyword');
+      expect(firstToggleOn.command?.command).toBe('unitySense.toggleShaderKeyword');
 
       await vscode.commands.executeCommand(
         firstToggleOn.command!.command,
@@ -371,7 +371,7 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
 
       expect(statusBar.getActiveKeywords(shaderUri)).toEqual(['_RIM_LIGHT_ON']);
       expect(statusBar.getStatusBarItem().text).toBe(
-        '$(symbol-keyword) [UnityBrain] 셰이더 키워드: _RIM_LIGHT_ON',
+        '$(symbol-keyword) [UnitySense] 셰이더 키워드: _RIM_LIGHT_ON',
       );
       expect(
         evaluateInactivePreprocessorRanges(shaderText, new Set(statusBar.getActiveKeywords(shaderUri))),
@@ -408,7 +408,7 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
 
       expect(statusBar.getActiveKeywords(shaderUri)).toEqual([]);
       expect(statusBar.getStatusBarItem().text).toBe(
-        '$(symbol-keyword) [UnityBrain] 셰이더 키워드: (기본값)',
+        '$(symbol-keyword) [UnitySense] 셰이더 키워드: (기본값)',
       );
       expect(
         evaluateInactivePreprocessorRanges(shaderText, new Set(statusBar.getActiveKeywords(shaderUri))),
@@ -565,7 +565,7 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
     const rgbItem = sampleSwizzleItems.find((i) => i.label === 'rgb');
     expect(rgbItem).toBeDefined();
     expect(rgbItem?.kind).toBe(CompletionItemKind.Field);
-    expect(rgbItem?.detail).toBe('[UnityBrain] float4 벡터 스위즐 (float3)');
+    expect(rgbItem?.detail).toBe('[UnitySense] float4 벡터 스위즐 (float3)');
     expect(sampleSwizzleItems.some((i) => i.label === 'xyzw')).toBe(true);
 
     const vec2DotLines = [...lines];
@@ -594,7 +594,7 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
     );
     const rgbHoverMd = typeof rgbHover?.contents === 'string' ? rgbHover.contents : rgbHover?.contents.value;
     expect(rgbHoverMd).toContain('```hlsl\nfloat3 .rgb\n```');
-    expect(rgbHoverMd).toContain('[UnityBrain] 벡터 스위즐 (float3)');
+    expect(rgbHoverMd).toContain('[UnitySense] 벡터 스위즐 (float3)');
 
     const colAlphaHover = hoverProvider.provideHover(
       shaderUri,
@@ -604,7 +604,7 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
     );
     const colAlphaMd = typeof colAlphaHover?.contents === 'string' ? colAlphaHover.contents : colAlphaHover?.contents.value;
     expect(colAlphaMd).toContain('```hlsl\nfloat .a\n```');
-    expect(colAlphaMd).toContain('[UnityBrain] 벡터 스위즐 (float)');
+    expect(colAlphaMd).toContain('[UnitySense] 벡터 스위즐 (float)');
 
     // 5. #if defined(...) and #pragma dynamic_branch_local hover (OFF when empty, ON when active, null on keywords like defined/if)
     const offIfHover = hoverProvider.provideHover(
@@ -674,7 +674,7 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
     );
     const inputItem = paramItems.find((i) => i.label === 'input');
     expect(inputItem?.kind).toBe(CompletionItemKind.Variable);
-    expect(inputItem?.detail).toBe('[UnityBrain] 함수 파라미터 · Varyings input');
+    expect(inputItem?.detail).toBe('[UnitySense] 함수 파라미터 · Varyings input');
 
     const fadeCompLines = [...lines];
     fadeCompLines[uvCheckLine] = '      fade';
@@ -685,7 +685,7 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
     );
     const fadeItem = fadeItems.find((i) => i.label === 'fadeWeight');
     expect(fadeItem?.kind).toBe(CompletionItemKind.Variable);
-    expect(fadeItem?.detail).toBe('[UnityBrain] 함수 파라미터 · float fadeWeight');
+    expect(fadeItem?.detail).toBe('[UnitySense] 함수 파라미터 · float fadeWeight');
 
     const beforeDeclLines = [...lines];
     beforeDeclLines[uvCheckLine] = '      laterDec';

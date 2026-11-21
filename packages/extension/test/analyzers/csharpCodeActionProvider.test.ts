@@ -161,7 +161,7 @@ describe('UnityCSharpCodeActionProvider', () => {
 
     // Active Camera.main line offers QuickFix
     const camActions = provider.provideCodeActions(doc, new vscode.Range(6, 12, 6, 12));
-    const camFix = camActions.find((a) => a.title === "[UnityBrain] Awake()에 'Camera.main' 캐싱 (_cachedMainCamera)");
+    const camFix = camActions.find((a) => a.title === "[UnitySense] Awake()에 'Camera.main' 캐싱 (_cachedMainCamera)");
     expect(camFix).toBeDefined();
     expect(camFix?.kind).toBe(vscode.CodeActionKind.QuickFix);
     expect(camFix?.isPreferred).toBe(true);

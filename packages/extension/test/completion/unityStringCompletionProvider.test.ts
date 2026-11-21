@@ -103,7 +103,7 @@ describe('UnityStringCompletionProvider', () => {
     const tagItems = await runAtSnippet('if (other.CompareTag("/*CURSOR*/")) {}');
     expect(tagItems?.map((i) => i.label)).toContain('Enemy');
     expect(tagItems?.find((i) => i.label === 'Enemy')?.detail).toContain('Unity Tag');
-    expect(tagItems?.find((i) => i.label === 'Enemy')?.detail).toContain('[UnityBrain]');
+    expect(tagItems?.find((i) => i.label === 'Enemy')?.detail).toContain('[UnitySense]');
 
     // Also completes right after '(' before typing quotes, inserting quoted string and sorting at top
     const parenTagItems = await runAtSnippet('if (other.CompareTag(/*CURSOR*/)) {}');
@@ -358,7 +358,7 @@ describe('UnityStringCompletionProvider', () => {
 
       const offlineNav = defProvider.resolveUnityStringNavigation(csDoc, sceneStrPos);
       expect(offlineNav?.kind).toBe('location');
-      await vscode.commands.executeCommand('unityBrain.csharpGoToDefinition');
+      await vscode.commands.executeCommand('unitySense.csharpGoToDefinition');
       expect(revealCount).toBe(0);
       expect(path.resolve(vscode.window.activeTextEditor!.document.uri.fsPath)).toBe(
         path.resolve(scenePath),
@@ -372,7 +372,7 @@ describe('UnityStringCompletionProvider', () => {
         setDecorations: () => {},
       } as unknown as vscode.TextEditor;
       expect(defProvider.resolveUnityStringNavigation(csDoc, nonStringPos)).toBeUndefined();
-      await vscode.commands.executeCommand('unityBrain.csharpGoToDefinition');
+      await vscode.commands.executeCommand('unitySense.csharpGoToDefinition');
       expect(revealCount).toBe(1);
 
       // 3. Live Unity Editor running: F12 triggers Unity navigation without revealDefinition
@@ -397,14 +397,14 @@ describe('UnityStringCompletionProvider', () => {
         setDecorations: () => {},
       } as unknown as vscode.TextEditor;
       mockUnityUdpOk = true;
-      await vscode.commands.executeCommand('unityBrain.csharpGoToDefinition');
+      await vscode.commands.executeCommand('unitySense.csharpGoToDefinition');
       expect(revealCount).toBe(1);
       expect(udpCalls).toBe(1);
       expect(vscode.window.activeTextEditor?.document.uri.fsPath).toBe(csDoc.uri.fsPath);
 
       // 3b. Live Unity process without UDP listener: F12 falls back to opening scene locally
       mockUnityUdpOk = false;
-      await vscode.commands.executeCommand('unityBrain.csharpGoToDefinition');
+      await vscode.commands.executeCommand('unitySense.csharpGoToDefinition');
       expect(revealCount).toBe(1);
       expect(udpCalls).toBe(2);
       expect(path.resolve(vscode.window.activeTextEditor!.document.uri.fsPath)).toBe(

@@ -142,12 +142,12 @@ describe('ShaderCompletionProvider, ShaderHoverProvider, Server RPC & 50-file Be
       textDocument: { uri: shaderUri, languageId: 'shaderlab', version: 1, text: content },
     });
 
-    const indexRes = (await clientConn.sendRequest('unityBrain/getShaderPropertyIndex')) as ShaderSymbolIndex;
+    const indexRes = (await clientConn.sendRequest('unitySense/getShaderPropertyIndex')) as ShaderSymbolIndex;
     expect(indexRes.schemaVersion).toBe(1);
     expect(indexRes.shaderNames).toContain('UnityBrain/TestLit');
     expect(indexRes.properties.some((p) => p.name === '_BaseMap')).toBe(true);
 
-    await clientConn.sendNotification('unityBrain/setShaderKeywords', {
+    await clientConn.sendNotification('unitySense/setShaderKeywords', {
       keywords: ['_MAIN_LIGHT_SHADOWS', '_ALPHATEST_ON'],
     });
     expect(serverHandle.getHoverProvider()?.getActiveKeywords().has('_ALPHATEST_ON')).toBe(true);

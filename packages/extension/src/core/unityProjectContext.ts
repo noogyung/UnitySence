@@ -252,7 +252,7 @@ export class UnityProjectContextManager implements vscode.Disposable {
 
   private resolveEditorInstallPath(editorVersion: string, projectRoot: string): string | null {
     const configPath = vscode.workspace
-      .getConfiguration('unityBrain')
+      .getConfiguration('unitySense')
       .get<string>('unityEditorPath');
     const explicit = this._options.unityEditorPath ?? (configPath && configPath.trim() ? configPath.trim() : null);
 
@@ -370,7 +370,7 @@ export class UnityProjectContextManager implements vscode.Disposable {
 
     this._disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('unityBrain.unityEditorPath')) {
+        if (e.affectsConfiguration('unitySense.unityEditorPath')) {
           void this.refresh();
         }
       }),

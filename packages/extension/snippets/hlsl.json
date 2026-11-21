@@ -13,7 +13,7 @@
       "\t${2:Result}[id.xy] = float4(id.x & id.y, (id.x & 15) / 15.0, (id.y & 15) / 15.0, 0.0);",
       "}"
     ],
-    "description": "[UnityBrain] Unity Compute Shader 기본 커널 템플릿"
+    "description": "[UnitySense] Unity Compute Shader 기본 커널 템플릿"
   },
   "Unity CBUFFER_START UnityPerMaterial": {
     "prefix": "cbuffer-unity",
@@ -22,7 +22,7 @@
       "\t$0",
       "CBUFFER_END"
     ],
-    "description": "[UnityBrain] SRP Batcher 호환 UnityPerMaterial CBUFFER 블록"
+    "description": "[UnitySense] SRP Batcher 호환 UnityPerMaterial CBUFFER 블록"
   },
   "Unity Texture2D & Sampler Pair": {
     "prefix": "tex2d-pair",
@@ -30,7 +30,7 @@
       "TEXTURE2D(${1:_BaseMap});",
       "SAMPLER(sampler${1:_BaseMap});"
     ],
-    "description": "[UnityBrain] SRP 호환 TEXTURE2D + SAMPLER 쌍 선언"
+    "description": "[UnitySense] SRP 호환 TEXTURE2D + SAMPLER 쌍 선언"
   },
   "HLSL Attributes & Varyings Structs": {
     "prefix": "hlsl-structs",
@@ -49,6 +49,6 @@
       "\tfloat2 uv : TEXCOORD0;",
       "};"
     ],
-    "description": "[UnityBrain] URP 표준 Attributes / Varyings 구조체 쌍"
+    "description": "[UnitySense] URP 표준 Attributes / Varyings 구조체 쌍"
   }
 }

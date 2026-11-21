@@ -74,7 +74,7 @@ import { ShaderFormattingProvider } from './shader/shaderFormatter.ts';
 import { executeShaderLiveTestCommand } from './shader/shaderLiveTester.ts';
 import { ProjectSettingsWatcher } from './watchers/projectSettingsWatcher.ts';
 
-export interface UnityBrainActivationOptions {
+export interface UnitySenseActivationOptions {
   workspaceRoot?: string;
   unityEditorPath?: string | null;
   cacheDir?: string;
@@ -82,7 +82,7 @@ export interface UnityBrainActivationOptions {
   daemonTransportFactory?: () => DaemonClientTransport;
 }
 
-export interface UnityBrainExtensionApi {
+export interface UnitySenseExtensionApi {
   context: UnityProjectContext;
   contextManager: UnityProjectContextManager;
   settingsWatcher: ProjectSettingsWatcher;
@@ -111,11 +111,11 @@ const SHADER_SELECTOR: vscode.DocumentSelector = [
 
 const CSHARP_SELECTOR: vscode.DocumentSelector = [{ language: 'csharp' }];
 
-let activeApi: UnityBrainExtensionApi | undefined;
+let activeApi: UnitySenseExtensionApi | undefined;
 
 function setUnityProjectContextKey(enabled: boolean): void {
   if (typeof vscode.commands.executeCommand === 'function') {
-    void vscode.commands.executeCommand('setContext', 'unityBrain.isUnityProject', enabled);
+    void vscode.commands.executeCommand('setContext', 'unitySense.isUnityProject', enabled);
   }
 }
 
@@ -162,11 +162,11 @@ function walkShaderFiles(dir: string, out: string[] = []): string[] {
 
 export async function activate(
   context: vscode.ExtensionContext,
-  options: UnityBrainActivationOptions = {},
-): Promise<UnityBrainExtensionApi | undefined> {
+  options: UnitySenseActivationOptions = {},
+): Promise<UnitySenseExtensionApi | undefined> {
   const enableWatchers = options.enableWatchers ?? true;
   const configuredEditorPath = vscode.workspace
-    .getConfiguration('unityBrain')
+    .getConfiguration('unitySense')
     .get<string>('unityEditorPath', '');
 
   const contextManager = new UnityProjectContextManager({
@@ -194,8 +194,8 @@ export async function activate(
   const settingsWatcher = new ProjectSettingsWatcher(unityContext, { enableWatchers });
   const initialCache = await settingsWatcher.start();
 
-  const outputChannel = vscode.window.createOutputChannel?.('UnityBrain');
-  const shaderLiveOutputChannel = vscode.window.createOutputChannel?.('UnityBrain Shader Live Profiler');
+  const outputChannel = vscode.window.createOutputChannel?.('UnitySense');
+  const shaderLiveOutputChannel = vscode.window.createOutputChannel?.('UnitySense Shader Live Profiler');
 
   const msbuildInjector = new MsbuildAnalyzerInjector({
     extensionPath: context.extensionPath,
@@ -206,24 +206,24 @@ export async function activate(
     await msbuildInjector.ensureInjected();
   } catch (err) {
     outputChannel?.appendLine(
-      `[UnityBrain] Directory.Build.props 자동 주입 중 오류 (무시하고 계속 진행): ${err instanceof Error ? err.message : String(err)}`,
+      `[UnitySense] Directory.Build.props 자동 주입 중 오류 (무시하고 계속 진행): ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 
   const mainStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  mainStatusBar.command = 'unityBrain.rebuildAssetIndex';
+  mainStatusBar.command = 'unitySense.rebuildAssetIndex';
   const refreshMainStatusBar = (ctx: UnityProjectContext, cache: ProjectSettingsCache) => {
-    mainStatusBar.text = `$(flame) [UnityBrain] 활성 (Unity ${ctx.editorVersion} | 태그 ${cache.tags.length} · 레이어 ${cache.layers.length} · 씬 ${cache.buildScenes.length})`;
-    mainStatusBar.tooltip = `[UnityBrain] 프로젝트: ${ctx.projectRoot}\n에디터 경로: ${ctx.editorInstallPath ?? '미감지 (PackageCache 기반 동작)'}\n클릭하여 에셋 인덱스를 다시 구축합니다.`;
+    mainStatusBar.text = `$(flame) [UnitySense] 활성 (Unity ${ctx.editorVersion} | 태그 ${cache.tags.length} · 레이어 ${cache.layers.length} · 씬 ${cache.buildScenes.length})`;
+    mainStatusBar.tooltip = `[UnitySense] 프로젝트: ${ctx.projectRoot}\n에디터 경로: ${ctx.editorInstallPath ?? '미감지 (PackageCache 기반 동작)'}\n클릭하여 에셋 인덱스를 다시 구축합니다.`;
   };
   refreshMainStatusBar(unityContext, initialCache);
   mainStatusBar.show();
 
   outputChannel?.appendLine(
-    `[UnityBrain] 활성화 완료 (Unity ${unityContext.editorVersion}) | 루트: ${unityContext.projectRoot}`,
+    `[UnitySense] 활성화 완료 (Unity ${unityContext.editorVersion}) | 루트: ${unityContext.projectRoot}`,
   );
   outputChannel?.appendLine(
-    `[UnityBrain] 설정 로드: 태그 ${initialCache.tags.length}개, 레이어 ${initialCache.layers.length}개, 빌드 씬 ${initialCache.buildScenes.length}개`,
+    `[UnitySense] 설정 로드: 태그 ${initialCache.tags.length}개, 레이어 ${initialCache.layers.length}개, 빌드 씬 ${initialCache.buildScenes.length}개`,
   );
 
   const shaderGraph = new IncludeDependencyGraph(unityContext);
@@ -231,12 +231,12 @@ export async function activate(
   const shaderDefinitionProvider = new ShaderDefinitionProvider(shaderGraph);
   const shaderCompletionProvider = new ShaderCompletionProvider(shaderGraph);
   const shaderHoverProvider = new ShaderHoverProvider(shaderGraph);
-  const shaderDiagnosticCollection = vscode.languages.createDiagnosticCollection('unitybrain-shader');
+  const shaderDiagnosticCollection = vscode.languages.createDiagnosticCollection('unitysense-shader');
 
   const updateShaderDiagnostics = (doc: vscode.TextDocument) => {
     if (!isShaderDocument(doc)) return;
     const diagsEnabled = vscode.workspace
-      .getConfiguration('unityBrain')
+      .getConfiguration('unitySense')
       .get<boolean>('shader.diagnostics.enabled', true);
     if (!diagsEnabled) {
       shaderDiagnosticCollection.delete(doc.uri);
@@ -251,7 +251,7 @@ export async function activate(
         (u) =>
           new vscode.Diagnostic(
             new vscode.Range(u.line, u.startCol, u.line, u.endCol),
-            `[UnityBrain] 해석할 수 없는 유니티 셰이더 include 경로입니다: "${u.includePath}"`,
+            `[UnitySense] 해석할 수 없는 유니티 셰이더 include 경로입니다: "${u.includePath}"`,
             vscode.DiagnosticSeverity.Error,
           ),
       );
@@ -440,20 +440,20 @@ export async function activate(
     }),
 
     vscode.workspace.onDidChangeConfiguration(async (e) => {
-      if (e.affectsConfiguration('unityBrain.analyzers.enabled')) {
+      if (e.affectsConfiguration('unitySense.analyzers.enabled')) {
         try {
           await msbuildInjector.ensureInjected();
         } catch (err) {
           outputChannel?.appendLine(
-            `[UnityBrain] Directory.Build.props 갱신 중 오류: ${err instanceof Error ? err.message : String(err)}`,
+            `[UnitySense] Directory.Build.props 갱신 중 오류: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }
-      if (e.affectsConfiguration('unityBrain.codeLens.enabled')) {
+      if (e.affectsConfiguration('unitySense.codeLens.enabled')) {
         assetUsageCodeLensProvider.refresh();
         shaderVariantCodeLensProvider.refresh();
       }
-      if (e.affectsConfiguration('unityBrain.shader.diagnostics.enabled')) {
+      if (e.affectsConfiguration('unitySense.shader.diagnostics.enabled')) {
         for (const openDoc of vscode.workspace.textDocuments) {
           updateShaderDiagnostics(openDoc);
         }
@@ -658,25 +658,25 @@ export async function activate(
 
     registerGenerateEventFunctionsCommand(eventCompletionProvider),
     registerShowAssetUsagesCommand(unityContext.projectRoot),
-    vscode.commands.registerCommand('unityBrain.rebuildAssetIndex', async () => {
+    vscode.commands.registerCommand('unitySense.rebuildAssetIndex', async () => {
       try {
         const res = await daemonClient.rebuild(true);
         assetUsageCodeLensProvider.refresh();
         void vscode.window.showInformationMessage(
-          `[UnityBrain] 에셋 인덱스 재구축 완료 (${res.indexedAssets}개 에셋, ${res.elapsedMs}ms)`,
+          `[UnitySense] 에셋 인덱스 재구축 완료 (${res.indexedAssets}개 에셋, ${res.elapsedMs}ms)`,
         );
         return res;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        outputChannel?.appendLine(`[UnityBrain] 에셋 인덱스 재구축 실패: ${msg}`);
-        void vscode.window.showErrorMessage(`[UnityBrain] 에셋 인덱스 재구축 실패: ${msg}`);
+        outputChannel?.appendLine(`[UnitySense] 에셋 인덱스 재구축 실패: ${msg}`);
+        void vscode.window.showErrorMessage(`[UnitySense] 에셋 인덱스 재구축 실패: ${msg}`);
         return null;
       }
     }),
-    vscode.commands.registerCommand('unityBrain.cleanOrphanMetaFiles', async () => {
+    vscode.commands.registerCommand('unitySense.cleanOrphanMetaFiles', async () => {
       const removed = await metaSyncManager.cleanOrphanMetaFiles();
       void vscode.window.showInformationMessage(
-        `[UnityBrain] 고아 .meta 파일 ${removed.length}개를 정리했습니다.`,
+        `[UnitySense] 고아 .meta 파일 ${removed.length}개를 정리했습니다.`,
       );
       return removed;
     }),
@@ -717,7 +717,7 @@ export async function activate(
             const link = DocLinkCtor
               ? new DocLinkCtor(range, target)
               : { range, target, tooltip: '' };
-            link.tooltip = `[UnityBrain] 클릭하여 셰이더 파일 열기: ${resolved.physicalPath}`;
+            link.tooltip = `[UnitySense] 클릭하여 셰이더 파일 열기: ${resolved.physicalPath}`;
             links.push(link);
           }
           return links;
@@ -757,17 +757,17 @@ export async function activate(
     vscode.languages.registerRenameProvider(SHADER_SELECTOR, shaderRenameProvider),
     vscode.languages.registerFoldingRangeProvider(SHADER_SELECTOR, shaderFoldingRangeProvider),
     vscode.languages.registerColorProvider(SHADER_SELECTOR, shaderColorProvider),
-    vscode.commands.registerCommand('unityBrain.testCurrentShader', () =>
+    vscode.commands.registerCommand('unitySense.testCurrentShader', () =>
       executeShaderLiveTestCommand(shaderGraph, shaderDiagnosticCollection, shaderLiveOutputChannel),
     ),
   );
   if (typeof vscode.window.registerTreeDataProvider === 'function') {
     disposables.push(
-      vscode.window.registerTreeDataProvider('unityBrain.shaderExplorer', shaderExplorerProvider),
+      vscode.window.registerTreeDataProvider('unitySense.shaderExplorer', shaderExplorerProvider),
     );
   }
   disposables.push(
-    vscode.commands.registerCommand('unityBrain.refreshShaderExplorer', () => {
+    vscode.commands.registerCommand('unitySense.refreshShaderExplorer', () => {
       shaderExplorerProvider.refresh();
     }),
   );
@@ -797,7 +797,7 @@ export async function activate(
   stringCompletionProvider.setExtraSources({ getUiToolkitElements });
 
   const asmdefProvider = new UnityAsmdefProvider(unityContext.projectRoot);
-  const asmdefDiagCollection = vscode.languages.createDiagnosticCollection('unitybrain-asmdef');
+  const asmdefDiagCollection = vscode.languages.createDiagnosticCollection('unitysense-asmdef');
   const updateAsmdefDiagnostics = (doc: vscode.TextDocument) => {
     if (!/\.(?:asmdef|asmref)$/i.test(doc.fileName)) return;
     asmdefDiagCollection.set(doc.uri, asmdefProvider.validateDocument(doc));
@@ -938,7 +938,7 @@ export async function activate(
       );
       const onAssetChanged = () => {
         const codeLensEnabled = vscode.workspace
-          .getConfiguration('unityBrain')
+          .getConfiguration('unitySense')
           .get<boolean>('codeLens.enabled', true);
         if (!codeLensEnabled) return;
         if (assetRebuildTimer) clearTimeout(assetRebuildTimer);
@@ -977,11 +977,11 @@ export async function activate(
   }
 
   void vscode.window.showInformationMessage(
-    `[UnityBrain] 유니티 프로젝트 활성화 완료! (Unity ${unityContext.editorVersion} | 태그 ${initialCache.tags.length}개 · 레이어 ${initialCache.layers.length}개 · 씬 ${initialCache.buildScenes.length}개 로드됨)`,
+    `[UnitySense] 유니티 프로젝트 활성화 완료! (Unity ${unityContext.editorVersion} | 태그 ${initialCache.tags.length}개 · 레이어 ${initialCache.layers.length}개 · 씬 ${initialCache.buildScenes.length}개 로드됨)`,
   );
 
   let disposed = false;
-  const api: UnityBrainExtensionApi = {
+  const api: UnitySenseExtensionApi = {
     context: unityContext,
     contextManager,
     settingsWatcher,

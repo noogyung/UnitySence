@@ -722,7 +722,7 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
     context?: vscode.CompletionContext,
   ): vscode.CompletionItem[] | undefined {
     const enabled = vscode.workspace
-      .getConfiguration('unityBrain')
+      .getConfiguration('unitySense')
       .get<boolean>('completion.showEventSnippets', true);
     if (!enabled) return undefined;
 
@@ -802,9 +802,9 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
       const baseItem = new vscode.CompletionItem(ev.name, vscode.CompletionItemKind.Method);
       baseItem.detail =
         hasExistingBody && chosenMod !== canonicalMod
-          ? `[UnityBrain] 유니티 이벤트 시그니처 변환 (${chosenMod})`
-          : `[UnityBrain] 유니티 이벤트 함수 (${missing.apiType.fullName})`;
-      baseItem.documentation = new vscode.MarkdownString(`[UnityBrain] ${ev.description}`);
+          ? `[UnitySense] 유니티 이벤트 시그니처 변환 (${chosenMod})`
+          : `[UnitySense] 유니티 이벤트 함수 (${missing.apiType.fullName})`;
+      baseItem.documentation = new vscode.MarkdownString(`[UnitySense] ${ev.description}`);
       baseItem.insertText = new vscode.SnippetString(
         formatUnityEventMethod(ev, {
           asCoroutine: false,
@@ -834,8 +834,8 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
           `${ev.name} (${canonicalMod})`,
           vscode.CompletionItemKind.Method,
         );
-        canonicalItem.detail = `[UnityBrain] ${missing.apiType.fullName} 표준 시그니처(${canonicalMod})로 변환`;
-        canonicalItem.documentation = new vscode.MarkdownString(`[UnityBrain] ${ev.description}`);
+        canonicalItem.detail = `[UnitySense] ${missing.apiType.fullName} 표준 시그니처(${canonicalMod})로 변환`;
+        canonicalItem.documentation = new vscode.MarkdownString(`[UnitySense] ${ev.description}`);
         canonicalItem.insertText = new vscode.SnippetString(
           formatUnityEventMethod(ev, {
             asCoroutine: false,
@@ -864,9 +864,9 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
           vscode.CompletionItemKind.Snippet,
         );
         coroItem.filterText = replaceRange ? `${modifierPrefix}${ev.name}` : ev.name;
-        coroItem.detail = `[UnityBrain] 유니티 코루틴 이벤트 (${missing.apiType.fullName})`;
+        coroItem.detail = `[UnitySense] 유니티 코루틴 이벤트 (${missing.apiType.fullName})`;
         coroItem.documentation = new vscode.MarkdownString(
-          `[UnityBrain] ${ev.description}\n\n코루틴 실행을 위해 \`IEnumerator\`를 반환합니다.`,
+          `[UnitySense] ${ev.description}\n\n코루틴 실행을 위해 \`IEnumerator\`를 반환합니다.`,
         );
         coroItem.insertText = new vscode.SnippetString(
           formatUnityEventMethod(ev, {
@@ -893,9 +893,9 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
           vscode.CompletionItemKind.Snippet,
         );
         awaitableItem.filterText = replaceRange ? `${modifierPrefix}${ev.name}` : ev.name;
-        awaitableItem.detail = `[UnityBrain] Unity 6 Awaitable 비동기 이벤트 함수 — async Awaitable ${ev.name}(${paramsStr})`;
+        awaitableItem.detail = `[UnitySense] Unity 6 Awaitable 비동기 이벤트 함수 — async Awaitable ${ev.name}(${paramsStr})`;
         awaitableItem.documentation = new vscode.MarkdownString(
-          `[UnityBrain] ${ev.description}\n\nUnity 6 비동기 실행을 위해 \`async Awaitable\`을 반환합니다.`,
+          `[UnitySense] ${ev.description}\n\nUnity 6 비동기 실행을 위해 \`async Awaitable\`을 반환합니다.`,
         );
         awaitableItem.insertText = new vscode.SnippetString(
           formatUnityEventMethod(ev, {
@@ -929,12 +929,12 @@ export function registerGenerateEventFunctionsCommand(
   provider: UnityEventCompletionProvider,
 ): vscode.Disposable {
   return vscode.commands.registerCommand(
-    'unityBrain.generateEventFunctions',
+    'unitySense.generateEventFunctions',
     async (preselectedLabels?: string[]) => {
       const editor = vscode.window.activeTextEditor;
       if (!editor || editor.document.languageId !== 'csharp') {
         await vscode.window.showInformationMessage(
-          '[UnityBrain] C# 스크립트 파일 안에서만 유니티 이벤트 함수를 생성할 수 있습니다.',
+          '[UnitySense] C# 스크립트 파일 안에서만 유니티 이벤트 함수를 생성할 수 있습니다.',
         );
         return 0;
       }
@@ -943,7 +943,7 @@ export function registerGenerateEventFunctionsCommand(
       const missing = provider.getMissingEventsForDocument(doc, pos);
       if (!missing || missing.events.length === 0) {
         await vscode.window.showInformationMessage(
-          '[UnityBrain] 현재 위치에서 생성 가능한 유니티 이벤트 함수가 없습니다. MonoBehaviour 등 유니티 클래스 내부에 커서를 두세요.',
+          '[UnitySense] 현재 위치에서 생성 가능한 유니티 이벤트 함수가 없습니다. MonoBehaviour 등 유니티 클래스 내부에 커서를 두세요.',
         );
         return 0;
       }
@@ -957,7 +957,7 @@ export function registerGenerateEventFunctionsCommand(
         choices.push({
           label: ev.name,
           description: `${retType} ${ev.name}(${params})`,
-          detail: `[UnityBrain] ${ev.description}`,
+          detail: `[UnitySense] ${ev.description}`,
           event: ev,
           asCoroutine: false,
           asAwaitable: false,
@@ -966,7 +966,7 @@ export function registerGenerateEventFunctionsCommand(
           choices.push({
             label: `${ev.name} (Coroutine)`,
             description: `IEnumerator ${ev.name}(${params})`,
-            detail: `[UnityBrain] ${ev.description} (코루틴)`,
+            detail: `[UnitySense] ${ev.description} (코루틴)`,
             event: ev,
             asCoroutine: true,
             asAwaitable: false,
@@ -976,7 +976,7 @@ export function registerGenerateEventFunctionsCommand(
           choices.push({
             label: `${ev.name} (Awaitable)`,
             description: `async Awaitable ${ev.name}(${params})`,
-            detail: `[UnityBrain] ${ev.description} (Unity 6 Awaitable 비동기)`,
+            detail: `[UnitySense] ${ev.description} (Unity 6 Awaitable 비동기)`,
             event: ev,
             asCoroutine: false,
             asAwaitable: true,
@@ -988,7 +988,7 @@ export function registerGenerateEventFunctionsCommand(
         ? choices.filter((c) => preselectedLabels.includes(c.label))
         : ((await vscode.window.showQuickPick(choices, {
             canPickMany: true,
-            placeHolder: `[UnityBrain] ${missing.classCtx.className} 클래스에 생성할 유니티 이벤트 함수를 선택하세요 (복수 선택 가능)`,
+            placeHolder: `[UnitySense] ${missing.classCtx.className} 클래스에 생성할 유니티 이벤트 함수를 선택하세요 (복수 선택 가능)`,
           })) as typeof choices | undefined);
 
       if (!selected) return 0;

@@ -49,7 +49,7 @@ public sealed class FormerlySerializedAsRefactoringProvider : CodeRefactoringPro
         }
 
         context.RegisterRefactoring(CodeAction.Create(
-            title: $"[UnityBrain] [FormerlySerializedAs(\"{fieldName}\")] 특성 추가 ({DiagnosticIds.FormerlySerializedAsSuggested})",
+            title: $"[UnitySense] [FormerlySerializedAs(\"{fieldName}\")] 특성 추가 ({DiagnosticIds.FormerlySerializedAsSuggested})",
             createChangedDocument: ct => AddFormerlySerializedAsAsync(context.Document, fieldDecl, fieldName, ct),
             equivalenceKey: nameof(FormerlySerializedAsRefactoringProvider)));
     }

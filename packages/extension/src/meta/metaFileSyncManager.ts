@@ -44,7 +44,7 @@ export class MetaFileSyncManager implements vscode.Disposable {
   }
 
   public isEnabled(): boolean {
-    return vscode.workspace.getConfiguration('unityBrain').get<boolean>('metaSync.enabled', true);
+    return vscode.workspace.getConfiguration('unitySense').get<boolean>('metaSync.enabled', true);
   }
 
   public isEligibleUnityPath(targetPath: string): boolean {

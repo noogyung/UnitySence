@@ -278,7 +278,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(
                 DiagnosticIds.UB3001Rule,
                 lit.GetLocation(),
-                $"[UnityBrain] '{targetType.Name}' 클래스(또는 부모 클래스)에 {apiName} 대상 메서드 '{targetMethodName}'가 존재하지 않습니다."));
+                $"[UnitySense] '{targetType.Name}' 클래스(또는 부모 클래스)에 {apiName} 대상 메서드 '{targetMethodName}'가 존재하지 않습니다."));
             return;
         }
 
@@ -291,7 +291,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticIds.UB3001Rule,
                     lit.GetLocation(),
-                    $"[UnityBrain] StartCoroutine 대상 메서드 '{targetMethodName}'('{targetType.Name}')는 반드시 IEnumerator를 반환해야 합니다."));
+                    $"[UnitySense] StartCoroutine 대상 메서드 '{targetMethodName}'('{targetType.Name}')는 반드시 IEnumerator를 반환해야 합니다."));
             }
         }
     }

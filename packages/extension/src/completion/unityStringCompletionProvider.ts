@@ -423,8 +423,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
       case 'tag': {
         for (const tag of cache.tags) {
           const item = new vscode.CompletionItem(tag, vscode.CompletionItemKind.EnumMember);
-          item.detail = '[UnityBrain] 유니티 태그 (Unity Tag)';
-          item.documentation = '[UnityBrain] ProjectSettings/TagManager.asset에서 불러온 프로젝트 태그입니다.';
+          item.detail = '[UnitySense] 유니티 태그 (Unity Tag)';
+          item.documentation = '[UnitySense] ProjectSettings/TagManager.asset에서 불러온 프로젝트 태그입니다.';
           items.push(item);
         }
         break;
@@ -432,8 +432,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
       case 'layer': {
         for (const layer of cache.layers) {
           const item = new vscode.CompletionItem(layer.name, vscode.CompletionItemKind.EnumMember);
-          item.detail = `[UnityBrain] 유니티 레이어 ${layer.index} (Layer ${layer.index})`;
-          item.documentation = '[UnityBrain] ProjectSettings/TagManager.asset에 등록된 레이어입니다.';
+          item.detail = `[UnitySense] 유니티 레이어 ${layer.index} (Layer ${layer.index})`;
+          item.documentation = '[UnitySense] ProjectSettings/TagManager.asset에 등록된 레이어입니다.';
           items.push(item);
         }
         break;
@@ -441,8 +441,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
       case 'sortingLayer': {
         for (const sl of cache.sortingLayers) {
           const item = new vscode.CompletionItem(sl.name, vscode.CompletionItemKind.EnumMember);
-          item.detail = '[UnityBrain] 정렬 레이어 (Sorting Layer)';
-          item.documentation = '[UnityBrain] ProjectSettings/TagManager.asset에 등록된 정렬 레이어입니다.';
+          item.detail = '[UnitySense] 정렬 레이어 (Sorting Layer)';
+          item.documentation = '[UnitySense] ProjectSettings/TagManager.asset에 등록된 정렬 레이어입니다.';
           items.push(item);
         }
         break;
@@ -450,10 +450,10 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
       case 'input': {
         for (const axis of cache.inputAxes) {
           const item = new vscode.CompletionItem(axis.name, vscode.CompletionItemKind.Constant);
-          item.detail = '[UnityBrain] 입력 축 (Input Axis)';
+          item.detail = '[UnitySense] 입력 축 (Input Axis)';
           item.documentation = axis.descriptiveName
-            ? `[UnityBrain] ${axis.descriptiveName}`
-            : '[UnityBrain] ProjectSettings/InputManager.asset 입력 축입니다.';
+            ? `[UnitySense] ${axis.descriptiveName}`
+            : '[UnitySense] ProjectSettings/InputManager.asset 입력 축입니다.';
           items.push(item);
         }
         break;
@@ -465,15 +465,15 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
           if (!seen.has(act.name)) {
             seen.add(act.name);
             const item = new vscode.CompletionItem(act.name, vscode.CompletionItemKind.Event);
-            item.detail = `[UnityBrain] InputAction (${act.actionMap} · ${act.assetName})`;
-            item.documentation = `[UnityBrain] '.inputactions' 에셋의 액션 '${act.actionMap}/${act.name}'입니다.`;
+            item.detail = `[UnitySense] InputAction (${act.actionMap} · ${act.assetName})`;
+            item.documentation = `[UnitySense] '.inputactions' 에셋의 액션 '${act.actionMap}/${act.name}'입니다.`;
             items.push(item);
           }
           if (!seen.has(act.actionMap)) {
             seen.add(act.actionMap);
             const mapItem = new vscode.CompletionItem(act.actionMap, vscode.CompletionItemKind.Module);
-            mapItem.detail = `[UnityBrain] InputActionMap (${act.assetName})`;
-            mapItem.documentation = `[UnityBrain] '.inputactions' 에셋의 액션 맵입니다.`;
+            mapItem.detail = `[UnitySense] InputActionMap (${act.assetName})`;
+            mapItem.documentation = `[UnitySense] '.inputactions' 에셋의 액션 맵입니다.`;
             items.push(mapItem);
           }
         }
@@ -482,8 +482,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
       case 'scene': {
         for (const scene of cache.buildScenes) {
           const item = new vscode.CompletionItem(scene.name, vscode.CompletionItemKind.File);
-          item.detail = `[UnityBrain] 빌드 씬 #${scene.buildIndex} (Build Index ${scene.buildIndex} · ${scene.path})`;
-          item.documentation = `[UnityBrain] EditorBuildSettings.asset 빌드 인덱스 ${scene.buildIndex}번 씬입니다.`;
+          item.detail = `[UnitySense] 빌드 씬 #${scene.buildIndex} (Build Index ${scene.buildIndex} · ${scene.path})`;
+          item.documentation = `[UnitySense] EditorBuildSettings.asset 빌드 인덱스 ${scene.buildIndex}번 씬입니다.`;
           items.push(item);
         }
         break;
@@ -492,8 +492,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
         const resPaths = this.extraSources?.getResourcePaths?.() ?? [];
         for (const rPath of resPaths) {
           const item = new vscode.CompletionItem(rPath, vscode.CompletionItemKind.File);
-          item.detail = '[UnityBrain] Resources 리소스 경로';
-          item.documentation = `[UnityBrain] Assets/.../Resources/${rPath} 에셋입니다.`;
+          item.detail = '[UnitySense] Resources 리소스 경로';
+          item.documentation = `[UnitySense] Assets/.../Resources/${rPath} 에셋입니다.`;
           items.push(item);
         }
         break;
@@ -503,8 +503,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
         if (!shaderIndex) return [];
         for (const sName of shaderIndex.shaderNames) {
           const item = new vscode.CompletionItem(sName, vscode.CompletionItemKind.Class);
-          item.detail = '[UnityBrain] 유니티 셰이더 이름 (Shader.Find)';
-          item.documentation = `[UnityBrain] 프로젝트에 정의된 셰이더 '${sName}'입니다.`;
+          item.detail = '[UnitySense] 유니티 셰이더 이름 (Shader.Find)';
+          item.documentation = `[UnitySense] 프로젝트에 정의된 셰이더 '${sName}'입니다.`;
           items.push(item);
         }
         break;
@@ -513,8 +513,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
         const keywords = this.extraSources?.getShaderKeywords?.() ?? [];
         for (const kw of keywords) {
           const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Constant);
-          item.detail = '[UnityBrain] 셰이더 키워드 (#pragma keyword)';
-          item.documentation = `[UnityBrain] 프로젝트 셰이더에 선언된 배리언트 키워드 '${kw}'입니다.`;
+          item.detail = '[UnitySense] 셰이더 키워드 (#pragma keyword)';
+          item.documentation = `[UnitySense] 프로젝트 셰이더에 선언된 배리언트 키워드 '${kw}'입니다.`;
           items.push(item);
         }
         break;
@@ -528,8 +528,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
           seen.add(prop.name);
           const item = new vscode.CompletionItem(prop.name, vscode.CompletionItemKind.Property);
           const shaderLabel = prop.shaderName ?? path.basename(prop.shaderFile);
-          item.detail = `[UnityBrain] 셰이더 프로퍼티 (${prop.type} in ${shaderLabel})`;
-          item.documentation = `[UnityBrain] 셰이더 '${shaderLabel}'에 선언된 ${prop.type} 프로퍼티입니다.`;
+          item.detail = `[UnitySense] 셰이더 프로퍼티 (${prop.type} in ${shaderLabel})`;
+          item.documentation = `[UnitySense] 셰이더 '${shaderLabel}'에 선언된 ${prop.type} 프로퍼티입니다.`;
           items.push(item);
         }
         break;
@@ -544,8 +544,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
             for (const param of ctrl.parameters) {
               if (subFilter && param.type !== subFilter) continue;
               const item = new vscode.CompletionItem(param.name, vscode.CompletionItemKind.Variable);
-              item.detail = `[UnityBrain] 애니메이터 파라미터 (${param.type} · ${ctrlName})`;
-              item.documentation = `[UnityBrain] '${ctrl.assetPath}' 컨트롤러의 파라미터입니다.`;
+              item.detail = `[UnitySense] 애니메이터 파라미터 (${param.type} · ${ctrlName})`;
+              item.documentation = `[UnitySense] '${ctrl.assetPath}' 컨트롤러의 파라미터입니다.`;
               item.sortText = `0_${param.name}`;
               primaryItems.push(item);
             }
@@ -553,16 +553,16 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
           if (!subFilter || subFilter === 'State') {
             for (const state of ctrl.states) {
               const item = new vscode.CompletionItem(state, vscode.CompletionItemKind.Enum);
-              item.detail = `[UnityBrain] 애니메이터 상태 (State · ${ctrlName})`;
-              item.documentation = `[UnityBrain] '${ctrl.assetPath}' 컨트롤러의 스테이트입니다.`;
+              item.detail = `[UnitySense] 애니메이터 상태 (State · ${ctrlName})`;
+              item.documentation = `[UnitySense] '${ctrl.assetPath}' 컨트롤러의 스테이트입니다.`;
               item.sortText = `0_${state}`;
               primaryItems.push(item);
             }
           } else {
             for (const state of ctrl.states) {
               const item = new vscode.CompletionItem(state, vscode.CompletionItemKind.Enum);
-              item.detail = `[UnityBrain] 애니메이터 상태 (State · ${ctrlName})`;
-              item.documentation = `[UnityBrain] '${ctrl.assetPath}' 컨트롤러의 스테이트입니다.`;
+              item.detail = `[UnitySense] 애니메이터 상태 (State · ${ctrlName})`;
+              item.documentation = `[UnitySense] '${ctrl.assetPath}' 컨트롤러의 스테이트입니다.`;
               item.sortText = `2_${state}`;
               secondaryItems.push(item);
             }
@@ -577,8 +577,8 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
         for (const method of methods) {
           const isCoroutine = method.returnType.includes('IEnumerator');
           const item = new vscode.CompletionItem(method.name, vscode.CompletionItemKind.Method);
-          item.detail = `[UnityBrain] ${method.className} 메서드 (${method.returnType})`;
-          item.documentation = `[UnityBrain] ${method.className} 클래스에 선언된 메서드입니다.`;
+          item.detail = `[UnitySense] ${method.className} 메서드 (${method.returnType})`;
+          item.documentation = `[UnitySense] ${method.className} 클래스에 선언된 메서드입니다.`;
           if (contextKind === 'coroutine') {
             item.sortText = isCoroutine ? `0_${method.name}` : `1_${method.name}`;
           } else {
@@ -597,15 +597,15 @@ export class UnityStringCompletionProvider implements vscode.CompletionItemProvi
           if (el.name && !seenNames.has(el.name)) {
             seenNames.add(el.name);
             const item = new vscode.CompletionItem(el.name, vscode.CompletionItemKind.Field);
-            item.detail = `[UnityBrain] UI Toolkit 요소 이름 (${assetName})`;
-            item.documentation = `[UnityBrain] ${el.assetPath}:${el.line + 1}에 선언된 name="${el.name}" 요소입니다.`;
+            item.detail = `[UnitySense] UI Toolkit 요소 이름 (${assetName})`;
+            item.documentation = `[UnitySense] ${el.assetPath}:${el.line + 1}에 선언된 name="${el.name}" 요소입니다.`;
             items.push(item);
           }
           if (el.className && !seenClasses.has(el.className)) {
             seenClasses.add(el.className);
             const item = new vscode.CompletionItem(el.className, vscode.CompletionItemKind.Class);
-            item.detail = `[UnityBrain] UI Toolkit USS 클래스 (${assetName})`;
-            item.documentation = `[UnityBrain] ${el.assetPath}:${el.line + 1}에 정의된 USS 클래스 '.${el.className}'입니다.`;
+            item.detail = `[UnitySense] UI Toolkit USS 클래스 (${assetName})`;
+            item.documentation = `[UnitySense] ${el.assetPath}:${el.line + 1}에 정의된 USS 클래스 '.${el.className}'입니다.`;
             items.push(item);
           }
         }

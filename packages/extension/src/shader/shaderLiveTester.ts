@@ -270,7 +270,7 @@ export function runShaderLiveTest(
     (u) =>
       new vscode.Diagnostic(
         new vscode.Range(u.line, u.startCol, u.line, u.endCol),
-        `[UnityBrain] 해석할 수 없는 유니티 셰이더 include 경로입니다: "${u.includePath}"`,
+        `[UnitySense] 해석할 수 없는 유니티 셰이더 include 경로입니다: "${u.includePath}"`,
         vscode.DiagnosticSeverity.Error,
       ),
   );
@@ -288,7 +288,7 @@ export function runShaderLiveTest(
 
   const summaryLines: string[] = [
     `============================================================`,
-    `[UnityBrain Shader Live Profiler] ${doc.fileName}`,
+    `[UnitySense Shader Live Profiler] ${doc.fileName}`,
     `============================================================`,
     `▶ 종합 GPU 부하 등급: ${performance.loadGrade} (추정 비용 점수: ${performance.estimatedAluScore})`,
     `▶ 정적 검증: 오류 ${errorCount}건 · 경고 ${warningCount}건 · Include ${walk.files.length}개`,
@@ -344,7 +344,7 @@ export async function executeShaderLiveTestCommand(
 ): Promise<ShaderLiveTestResult | null> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isShaderDocument(editor.document)) {
-    void vscode.window.showWarningMessage('[UnityBrain] 활성화된 셰이더 파일(.shader, .hlsl, .compute)이 없습니다.');
+    void vscode.window.showWarningMessage('[UnitySense] 활성화된 셰이더 파일(.shader, .hlsl, .compute)이 없습니다.');
     return null;
   }
 
@@ -355,7 +355,7 @@ export async function executeShaderLiveTestCommand(
   let channel = outputChannel;
   if (!channel) {
     if (!sharedOutputChannel && typeof vscode.window.createOutputChannel === 'function') {
-      sharedOutputChannel = vscode.window.createOutputChannel('UnityBrain Shader Live Profiler');
+      sharedOutputChannel = vscode.window.createOutputChannel('UnitySense Shader Live Profiler');
     }
     channel = sharedOutputChannel;
   }
@@ -368,7 +368,7 @@ export async function executeShaderLiveTestCommand(
   }
 
   const p = result.performance;
-  const statusText = `[UnityBrain Live Profiler] 부하 등급: ${p.loadGrade} (점수 ${p.estimatedAluScore}) · TMU ${p.textureSampleCount}회 · 고비용연산 ${p.expensiveMathCount}회 · 오류 ${result.errorCount}건 — ${p.heavyReasons[0]}`;
+  const statusText = `[UnitySense Live Profiler] 부하 등급: ${p.loadGrade} (점수 ${p.estimatedAluScore}) · TMU ${p.textureSampleCount}회 · 고비용연산 ${p.expensiveMathCount}회 · 오류 ${result.errorCount}건 — ${p.heavyReasons[0]}`;
   if (result.errorCount > 0 || p.loadGrade === 'CRITICAL') {
     void vscode.window.showWarningMessage(statusText);
   } else {

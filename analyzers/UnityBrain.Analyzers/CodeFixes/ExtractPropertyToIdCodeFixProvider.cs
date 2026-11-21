@@ -47,7 +47,7 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
         var propertyName = literal.Token.ValueText;
         context.RegisterCodeFix(
             CodeAction.Create(
-                title: $"[UnityBrain] \"{propertyName}\" 문자열을 static readonly int 필드로 캐싱 ({hashMethod})",
+                title: $"[UnitySense] \"{propertyName}\" 문자열을 static readonly int 필드로 캐싱 ({hashMethod})",
                 createChangedDocument: ct => ExtractToStaticFieldAsync(context.Document, literal, kind, propertyName, ct),
                 equivalenceKey: nameof(ExtractPropertyToIdCodeFixProvider)),
             diag);
@@ -373,7 +373,7 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
             }
 
             return CodeAction.Create(
-                title: "[UnityBrain] 모든 셰이더/애니메이터 문자열을 static readonly int 필드로 캐싱",
+                title: "[UnitySense] 모든 셰이더/애니메이터 문자열을 static readonly int 필드로 캐싱",
                 createChangedSolution: ct => ApplySequentialFixesAsync(fixAllContext.Solution, diagnostics, ct),
                 equivalenceKey: equiv);
         }

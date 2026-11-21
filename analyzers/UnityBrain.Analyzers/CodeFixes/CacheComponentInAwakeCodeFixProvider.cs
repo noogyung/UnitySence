@@ -60,7 +60,7 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
 
                 context.RegisterCodeFix(
                     CodeAction.Create(
-                        title: $"[UnityBrain] Awake()에서 {capturedTypeArg} 컴포넌트 캐싱하기",
+                        title: $"[UnitySense] Awake()에서 {capturedTypeArg} 컴포넌트 캐싱하기",
                         createChangedSolution: ct => CacheExpressionInAwakeSolutionAsync(
                             context.Document,
                             capturedInvocation,
@@ -93,7 +93,7 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
 
                 context.RegisterCodeFix(
                     CodeAction.Create(
-                        title: "[UnityBrain] Awake()에서 Camera.main 캐싱하기",
+                        title: "[UnitySense] Awake()에서 Camera.main 캐싱하기",
                         createChangedSolution: ct => CacheExpressionInAwakeSolutionAsync(
                             context.Document,
                             capturedMemberAccess,
@@ -581,8 +581,8 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
 
             var equiv = fixAllContext.CodeActionEquivalenceKey;
             var title = equiv == CameraMainEquivalenceKey
-                ? "[UnityBrain] Awake()에서 모든 Camera.main 캐싱하기"
-                : "[UnityBrain] Awake()에서 모든 컴포넌트 조회 캐싱하기";
+                ? "[UnitySense] Awake()에서 모든 Camera.main 캐싱하기"
+                : "[UnitySense] Awake()에서 모든 컴포넌트 조회 캐싱하기";
 
             return CodeAction.Create(
                 title: title,

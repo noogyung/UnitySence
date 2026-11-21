@@ -95,9 +95,9 @@ export function createShaderLanguageServer(
           start: { line: u.line, character: u.startCol },
           end: { line: u.line, character: u.endCol },
         },
-        source: 'unitybrain-shader-lsp',
+        source: 'unitysense-shader-lsp',
         code: 'UB-SHADER-001',
-        message: `[UnityBrain] 해석할 수 없는 유니티 셰이더 include 경로입니다: "${u.includePath}"`,
+        message: `[UnitySense] 해석할 수 없는 유니티 셰이더 include 경로입니다: "${u.includePath}"`,
       }));
     void connection.sendDiagnostics({ uri: doc.uri, diagnostics });
   };
@@ -215,7 +215,7 @@ export function createShaderLanguageServer(
     }));
   });
 
-  connection.onRequest('unityBrain/getShaderPropertyIndex', async (): Promise<ShaderSymbolIndex> => {
+  connection.onRequest('unitySense/getShaderPropertyIndex', async (): Promise<ShaderSymbolIndex> => {
     if (!graph || !context) {
       return { schemaVersion: 1, shaderNames: [], properties: [], symbolsByFile: {} };
     }
@@ -225,11 +225,11 @@ export function createShaderLanguageServer(
     return graph.buildShaderSymbolIndex(allPaths);
   });
 
-  connection.onNotification('unityBrain/setShaderKeywords', (params: { keywords?: string[] }) => {
+  connection.onNotification('unitySense/setShaderKeywords', (params: { keywords?: string[] }) => {
     hoverProvider?.setActiveKeywords(params?.keywords ?? []);
   });
 
-  connection.onNotification('unityBrain/updateContext', (params: { unityContext?: UnityProjectContext }) => {
+  connection.onNotification('unitySense/updateContext', (params: { unityContext?: UnityProjectContext }) => {
     if (params?.unityContext) {
       ensureContext(params.unityContext);
       for (const doc of documents.all()) {

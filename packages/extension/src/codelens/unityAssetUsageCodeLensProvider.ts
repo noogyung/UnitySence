@@ -670,7 +670,7 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
     token: vscode.CancellationToken,
   ): Promise<vscode.CodeLens[]> {
     const enabled = vscode.workspace
-      .getConfiguration('unityBrain')
+      .getConfiguration('unitySense')
       .get<boolean>('codeLens.enabled', true);
     if (!enabled || document.languageId !== 'csharp' || token.isCancellationRequested) {
       return [];
@@ -696,9 +696,9 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
         const range = new vscode.Range(method.line, 0, method.line, 0);
         lenses.push(
           new vscode.CodeLens(range, {
-            title: `$(symbol-event) [UnityBrain] 유니티 이벤트 함수 (${shortOwner})${perfBadge}`,
-            command: 'unityBrain.generateEventFunctions',
-            tooltip: `[UnityBrain] ${evInfo.apiType.fullName}.${evInfo.event.name}: ${evInfo.event.description}`,
+            title: `$(symbol-event) [UnitySense] 유니티 이벤트 함수 (${shortOwner})${perfBadge}`,
+            command: 'unitySense.generateEventFunctions',
+            tooltip: `[UnitySense] ${evInfo.apiType.fullName}.${evInfo.event.name}: ${evInfo.event.description}`,
           }),
         );
       }
@@ -733,11 +733,11 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
       lenses.push(
         new vscode.CodeLens(range, {
           title: classTitle,
-          command: 'unityBrain.showAssetUsages',
-          tooltip: '[UnityBrain] 클릭하여 이 스크립트를 참조하는 유니티 씬/프리팹/에셋 목록으로 이동합니다',
+          command: 'unitySense.showAssetUsages',
+          tooltip: '[UnitySense] 클릭하여 이 스크립트를 참조하는 유니티 씬/프리팹/에셋 목록으로 이동합니다',
           arguments: [
             {
-              title: `[UnityBrain] ${cls.className} 에셋 참조 위치`,
+              title: `[UnitySense] ${cls.className} 에셋 참조 위치`,
               projectRoot: this.projectRoot,
               locations: scriptUsages,
             } satisfies ShowAssetUsagesCommandArgs,
@@ -796,12 +796,12 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
         const range = new vscode.Range(field.line, 0, field.line, 0);
         lenses.push(
           new vscode.CodeLens(range, {
-            title: `$(settings-gear) [UnityBrain] 인스펙터 값: ${preview}${suffix}`,
-            command: 'unityBrain.showAssetUsages',
-            tooltip: `[UnityBrain] 유니티 에셋에 직렬화된 '${field.fieldName}' 필드 값 보기`,
+            title: `$(settings-gear) [UnitySense] 인스펙터 값: ${preview}${suffix}`,
+            command: 'unitySense.showAssetUsages',
+            tooltip: `[UnitySense] 유니티 에셋에 직렬화된 '${field.fieldName}' 필드 값 보기`,
             arguments: [
               {
-                title: `[UnityBrain] ${field.className ?? primaryClass}.${field.fieldName} 인스펙터 직렬화 값`,
+                title: `[UnitySense] ${field.className ?? primaryClass}.${field.fieldName} 인스펙터 직렬화 값`,
                 projectRoot: this.projectRoot,
                 locations: fieldLocations,
               } satisfies ShowAssetUsagesCommandArgs,
@@ -834,12 +834,12 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
       const count = item.locations.length;
       lenses.push(
         new vscode.CodeLens(range, {
-          title: `$(zap) [UnityBrain] 이벤트 콜백 ${count}곳`,
-          command: 'unityBrain.showAssetUsages',
-          tooltip: `[UnityBrain] ${item.method.methodName}()를 호출하는 UnityEvent 바인딩 보기`,
+          title: `$(zap) [UnitySense] 이벤트 콜백 ${count}곳`,
+          command: 'unitySense.showAssetUsages',
+          tooltip: `[UnitySense] ${item.method.methodName}()를 호출하는 UnityEvent 바인딩 보기`,
           arguments: [
             {
-              title: `[UnityBrain] ${item.method.className ?? primaryClass}.${item.method.methodName}() 이벤트 콜백 목록`,
+              title: `[UnitySense] ${item.method.className ?? primaryClass}.${item.method.methodName}() 이벤트 콜백 목록`,
               projectRoot: this.projectRoot,
               locations: item.locations,
             } satisfies ShowAssetUsagesCommandArgs,
@@ -854,7 +854,7 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
 
   private formatClassUsageSummary(locations: AssetUsageLocation[]): string {
     if (locations.length === 0) {
-      return '$(symbol-reference) [UnityBrain] 에셋 참조 0곳';
+      return '$(symbol-reference) [UnitySense] 에셋 참조 0곳';
     }
 
     let scenes = 0;
@@ -872,7 +872,7 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
     if (assets > 0) parts.push(`에셋 ${assets}개`);
 
     const total = locations.length;
-    return `$(symbol-reference) [UnityBrain] 에셋 참조 ${total}곳 (${parts.join(', ')})`;
+    return `$(symbol-reference) [UnitySense] 에셋 참조 ${total}곳 (${parts.join(', ')})`;
   }
 
   public dispose(): void {
@@ -881,13 +881,13 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
 }
 
 export function registerShowAssetUsagesCommand(defaultProjectRoot: string): vscode.Disposable {
-  return vscode.commands.registerCommand('unityBrain.showAssetUsages', async (rawArgs?: unknown) => {
+  return vscode.commands.registerCommand('unitySense.showAssetUsages', async (rawArgs?: unknown) => {
     const args = rawArgs as ShowAssetUsagesCommandArgs | undefined;
     const locations = args?.locations ?? [];
     const root = args?.projectRoot ?? defaultProjectRoot;
 
     if (locations.length === 0) {
-      await vscode.window.showInformationMessage('[UnityBrain] 이 심볼을 참조하는 유니티 씬/프리팹/에셋이 없습니다.');
+      await vscode.window.showInformationMessage('[UnitySense] 이 심볼을 참조하는 유니티 씬/프리팹/에셋이 없습니다.');
       return undefined;
     }
 
@@ -899,15 +899,15 @@ export function registerShowAssetUsagesCommand(defaultProjectRoot: string): vsco
       label: `${loc.assetPath}:${loc.line}`,
       description: loc.gameObjectPath,
       detail: loc.methodName
-        ? `[UnityBrain] UnityEvent 콜백 -> ${loc.methodName}()`
+        ? `[UnitySense] UnityEvent 콜백 -> ${loc.methodName}()`
         : loc.usageKind === 'prefabOverride'
-          ? '[UnityBrain] 프리팹 오버라이드'
-          : `[UnityBrain] 컴포넌트 참조 (${loc.assetType})`,
+          ? '[UnitySense] 프리팹 오버라이드'
+          : `[UnitySense] 컴포넌트 참조 (${loc.assetType})`,
       location: loc,
     }));
 
     const picked = await vscode.window.showQuickPick<UsageQuickPickItem>(items, {
-      placeHolder: args?.title ?? '[UnityBrain] 이동할 유니티 에셋 참조 위치를 선택하세요',
+      placeHolder: args?.title ?? '[UnitySense] 이동할 유니티 에셋 참조 위치를 선택하세요',
     });
 
     const selected = Array.isArray(picked) ? picked[0] : picked;
@@ -923,7 +923,7 @@ export function registerShowAssetUsagesCommand(defaultProjectRoot: string): vsco
     );
     if (openedInUnity) {
       void vscode.window.showInformationMessage(
-        `[UnityBrain] Unity Editor에서 '${selected.location.assetPath}' (${selected.location.gameObjectPath}) 위치를 열었습니다.`,
+        `[UnitySense] Unity Editor에서 '${selected.location.assetPath}' (${selected.location.gameObjectPath}) 위치를 열었습니다.`,
       );
       return selected.location;
     }

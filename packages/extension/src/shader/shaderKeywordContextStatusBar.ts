@@ -345,7 +345,7 @@ export class ShaderVariantCodeLensProvider implements vscode.CodeLensProvider, v
       getConfiguration?: (section?: string) => { get: <T>(key: string, def: T) => T };
     }).getConfiguration;
     const enabled =
-      typeof getConfig === 'function' ? getConfig('unityBrain')?.get<boolean>('codeLens.enabled', true) ?? true : true;
+      typeof getConfig === 'function' ? getConfig('unitySense')?.get<boolean>('codeLens.enabled', true) ?? true : true;
     if (!enabled || !isShaderDocument(document)) {
       return [];
     }
@@ -363,9 +363,9 @@ export class ShaderVariantCodeLensProvider implements vscode.CodeLensProvider, v
     return analysis.blocks.map((blk) => {
       const warning = blk.variantCount > 128 ? ' (배리언트 과다 주의!)' : '';
       return new vscode.CodeLens(new vscode.Range(blk.anchorLine, 0, blk.anchorLine, 0), {
-        title: `$(layers) [UnityBrain] 셰이더 배리언트 ${blk.variantCount}개${warning}`,
-        command: 'unityBrain.switchShaderKeywords',
-        tooltip: '[UnityBrain] 클릭하여 활성 셰이더 전처리기 키워드 컨텍스트를 전환합니다',
+        title: `$(layers) [UnitySense] 셰이더 배리언트 ${blk.variantCount}개${warning}`,
+        command: 'unitySense.switchShaderKeywords',
+        tooltip: '[UnitySense] 클릭하여 활성 셰이더 전처리기 키워드 컨텍스트를 전환합니다',
       });
     });
   }
@@ -956,7 +956,7 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
     this.getDefinedMacros = options.getDefinedMacros;
     this.resolveIncludeText = options.resolveIncludeText;
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    this.statusBarItem.command = 'unityBrain.switchShaderKeywords';
+    this.statusBarItem.command = 'unitySense.switchShaderKeywords';
     this.inactiveDecorationType =
       typeof vscode.window.createTextEditorDecorationType === 'function'
         ? vscode.window.createTextEditorDecorationType({ opacity: '0.45', isWholeLine: true })
@@ -968,11 +968,11 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
 
     this.disposables.push(
       this.statusBarItem,
-      vscode.commands.registerCommand('unityBrain.switchShaderKeywords', (explicitKeywords?: unknown) =>
+      vscode.commands.registerCommand('unitySense.switchShaderKeywords', (explicitKeywords?: unknown) =>
         this.switchKeywordsCommand(Array.isArray(explicitKeywords) ? (explicitKeywords as string[]) : undefined),
       ),
       vscode.commands.registerCommand(
-        'unityBrain.toggleShaderKeyword',
+        'unitySense.toggleShaderKeyword',
         (uri?: unknown, keyword?: unknown, enabled?: unknown) => {
           const targetUri =
             uri && typeof uri === 'object' && 'scheme' in uri ? (uri as vscode.Uri) : undefined;
@@ -1112,8 +1112,8 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
     const active = overrideKeywords ?? this.getActiveKeywords(doc!.uri);
     const analysis = this.analyzeDocVariants(doc!);
     const label = active.length > 0 ? active.join(', ') : '(기본값)';
-    this.statusBarItem.text = `$(symbol-keyword) [UnityBrain] 셰이더 키워드: ${label}`;
-    this.statusBarItem.tooltip = `[UnityBrain] 전체 배리언트 ${analysis.totalVariants}개 | 사용 가능 키워드: ${
+    this.statusBarItem.text = `$(symbol-keyword) [UnitySense] 셰이더 키워드: ${label}`;
+    this.statusBarItem.tooltip = `[UnitySense] 전체 배리언트 ${analysis.totalVariants}개 | 사용 가능 키워드: ${
       analysis.allKeywords.length > 0 ? analysis.allKeywords.join(', ') : '없음'
     }`;
     this.statusBarItem.show();
@@ -1129,7 +1129,7 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
     const analysis = doc ? this.analyzeDocVariants(doc) : { allKeywords: [], blocks: [], totalVariants: 0 };
     if (analysis.allKeywords.length === 0) {
       await vscode.window.showInformationMessage(
-        '[UnityBrain] 현재 셰이더에서 multi_compile 또는 shader_feature 키워드를 찾지 못했습니다.',
+        '[UnitySense] 현재 셰이더에서 multi_compile 또는 shader_feature 키워드를 찾지 못했습니다.',
       );
       return [];
     }
@@ -1143,7 +1143,7 @@ export class ShaderKeywordContextStatusBar implements vscode.Disposable {
 
     const picked = await vscode.window.showQuickPick(items, {
       canPickMany: true,
-      placeHolder: '[UnityBrain] HLSL 전처리기 컨텍스트에 활성화할 셰이더 키워드를 선택하세요',
+      placeHolder: '[UnitySense] HLSL 전처리기 컨텍스트에 활성화할 셰이더 키워드를 선택하세요',
     });
 
     if (!picked) {
@@ -1197,9 +1197,9 @@ export function buildShaderPreprocessorKeywordCompletions(
       `[${stateTag}] ${kw} — 셰이더 키워드 ${targetState ? '켜기' : '끄기'} (현재: ${currentTag})`,
       vscode.CompletionItemKind.Event,
     );
-    toggleItem.detail = `[UnityBrain] ${kw}: ${currentTag} -> ${stateTag} 전환`;
+    toggleItem.detail = `[UnitySense] ${kw}: ${currentTag} -> ${stateTag} 전환`;
     toggleItem.documentation = new vscode.MarkdownString(
-      `[UnityBrain] 선택 시 텍스트 변경 없이 **\`${kw}\`** 전처리기 키워드를 **${stateTag}** 상태로 전환합니다.`,
+      `[UnitySense] 선택 시 텍스트 변경 없이 **\`${kw}\`** 전처리기 키워드를 **${stateTag}** 상태로 전환합니다.`,
     );
     toggleItem.range = replaceRange;
     toggleItem.insertText = ctx.wordToken.text;
@@ -1207,8 +1207,8 @@ export function buildShaderPreprocessorKeywordCompletions(
     toggleItem.sortText = `\u0000_${String(idx * 2).padStart(2, '0')}_${kw}`;
     toggleItem.preselect = idx === 0;
     toggleItem.command = {
-      command: 'unityBrain.toggleShaderKeyword',
-      title: '[UnityBrain] 셰이더 키워드 On/Off 전환',
+      command: 'unitySense.toggleShaderKeyword',
+      title: '[UnitySense] 셰이더 키워드 On/Off 전환',
       arguments: [document.uri, kw, targetState],
     };
     items.push(toggleItem);
@@ -1218,17 +1218,17 @@ export function buildShaderPreprocessorKeywordCompletions(
       `[${sameTag}] ${kw} — 셰이더 키워드 ${isActive ? '켜기' : '끄기'} (현재: ${sameTag} 유지)`,
       vscode.CompletionItemKind.Keyword,
     );
-    keepItem.detail = `[UnityBrain] ${kw}: ${sameTag} 상태 유지`;
+    keepItem.detail = `[UnitySense] ${kw}: ${sameTag} 상태 유지`;
     keepItem.documentation = new vscode.MarkdownString(
-      `[UnityBrain] 현재 **\`${kw}\`** 키워드 상태를 **${sameTag}**로 명시적으로 설정합니다.`,
+      `[UnitySense] 현재 **\`${kw}\`** 키워드 상태를 **${sameTag}**로 명시적으로 설정합니다.`,
     );
     keepItem.range = replaceRange;
     keepItem.insertText = ctx.wordToken.text;
     keepItem.filterText = filterText;
     keepItem.sortText = `\u0000_${String(idx * 2 + 1).padStart(2, '0')}_${kw}`;
     keepItem.command = {
-      command: 'unityBrain.toggleShaderKeyword',
-      title: '[UnityBrain] 셰이더 키워드 On/Off 전환',
+      command: 'unitySense.toggleShaderKeyword',
+      title: '[UnitySense] 셰이더 키워드 On/Off 전환',
       arguments: [document.uri, kw, isActive],
     };
     items.push(keepItem);

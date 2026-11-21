@@ -1,18 +1,18 @@
 {
-  "name": "unitybrain",
-  "displayName": "UnityBrain",
+  "name": "unitysense",
+  "displayName": "UnitySense",
   "description": "JetBrains Rider 수준의 Unity 개발 지능형 지원 확장 (ShaderLab/HLSL LSP, Roslyn 분석기, YAML 에셋 인덱서, .meta 자동 동기화).",
   "version": "1.1.6",
-  "publisher": "unitybrain",
+  "publisher": "unitysense",
   "license": "MIT",
   "icon": "resources/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/unitybrain/unitybrain.git"
+    "url": "https://github.com/unitysense/unitysense.git"
   },
-  "homepage": "https://github.com/unitybrain/unitybrain#readme",
+  "homepage": "https://github.com/unitysense/unitysense#readme",
   "bugs": {
-    "url": "https://github.com/unitybrain/unitybrain/issues"
+    "url": "https://github.com/unitysense/unitysense/issues"
   },
   "qna": "marketplace",
   "galleryBanner": {
@@ -90,64 +90,64 @@
     ],
     "commands": [
       {
-        "command": "unityBrain.generateEventFunctions",
-        "title": "[UnityBrain] 유니티 이벤트 함수 자동 생성..."
+        "command": "unitySense.generateEventFunctions",
+        "title": "[UnitySense] 유니티 이벤트 함수 자동 생성..."
       },
       {
-        "command": "unityBrain.switchShaderKeywords",
-        "title": "[UnityBrain] 셰이더 키워드 컨텍스트 전환..."
+        "command": "unitySense.switchShaderKeywords",
+        "title": "[UnitySense] 셰이더 키워드 컨텍스트 전환..."
       },
       {
-        "command": "unityBrain.toggleShaderKeyword",
-        "title": "[UnityBrain] 셰이더 키워드 On/Off 전환"
+        "command": "unitySense.toggleShaderKeyword",
+        "title": "[UnitySense] 셰이더 키워드 On/Off 전환"
       },
       {
-        "command": "unityBrain.testCurrentShader",
-        "title": "[UnityBrain] 현재 셰이더 Live Test 실행"
+        "command": "unitySense.testCurrentShader",
+        "title": "[UnitySense] 현재 셰이더 Live Test 실행"
       },
       {
-        "command": "unityBrain.showAssetUsages",
-        "title": "[UnityBrain] 유니티 에셋 참조 위치 보기"
+        "command": "unitySense.showAssetUsages",
+        "title": "[UnitySense] 유니티 에셋 참조 위치 보기"
       },
       {
-        "command": "unityBrain.rebuildAssetIndex",
-        "title": "[UnityBrain] 유니티 에셋 인덱스 다시 구축"
+        "command": "unitySense.rebuildAssetIndex",
+        "title": "[UnitySense] 유니티 에셋 인덱스 다시 구축"
       },
       {
-        "command": "unityBrain.cleanOrphanMetaFiles",
-        "title": "[UnityBrain] 고아 .meta 파일 정리"
+        "command": "unitySense.cleanOrphanMetaFiles",
+        "title": "[UnitySense] 고아 .meta 파일 정리"
       },
       {
-        "command": "unityBrain.generateDebugConfig",
-        "title": "[UnityBrain] 유니티 디버거 설정(launch.json) 생성"
+        "command": "unitySense.generateDebugConfig",
+        "title": "[UnitySense] 유니티 디버거 설정(launch.json) 생성"
       },
       {
-        "command": "unityBrain.openUnityEditorLog",
-        "title": "[UnityBrain] 유니티 에디터 콘솔 로그(Editor.log) 열기"
+        "command": "unitySense.openUnityEditorLog",
+        "title": "[UnitySense] 유니티 에디터 콘솔 로그(Editor.log) 열기"
       },
       {
-        "command": "unityBrain.csharpGoToDefinition",
-        "title": "[UnityBrain] C# Unity 에셋/심볼 정의로 이동"
+        "command": "unitySense.csharpGoToDefinition",
+        "title": "[UnitySense] C# Unity 에셋/심볼 정의로 이동"
       },
       {
-        "command": "unityBrain.refreshShaderExplorer",
-        "title": "[UnityBrain] 셰이더 탐색기 새로고침"
+        "command": "unitySense.refreshShaderExplorer",
+        "title": "[UnitySense] 셰이더 탐색기 새로고침"
       }
     ],
     "views": {
       "explorer": [
         {
-          "id": "unityBrain.shaderExplorer",
-          "name": "UnityBrain Shaders",
-          "when": "unityBrain.isUnityProject"
+          "id": "unitySense.shaderExplorer",
+          "name": "UnitySense Shaders",
+          "when": "unitySense.isUnityProject"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "unityBrain.csharpGoToDefinition",
+        "command": "unitySense.csharpGoToDefinition",
         "key": "f12",
-        "when": "unityBrain.isUnityProject && editorTextFocus && editorLangId == csharp"
+        "when": "unitySense.isUnityProject && editorTextFocus && editorLangId == csharp"
       }
     ],
     "snippets": [
@@ -161,43 +161,43 @@
       }
     ],
     "configuration": {
-      "title": "UnityBrain",
+      "title": "UnitySense",
       "properties": {
-        "unityBrain.metaSync.enabled": {
+        "unitySense.metaSync.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "[UnityBrain] 탐색기에서 에셋을 생성/변경/삭제할 때 .meta 파일 및 GUID를 자동으로 동기화합니다."
+          "description": "[UnitySense] 탐색기에서 에셋을 생성/변경/삭제할 때 .meta 파일 및 GUID를 자동으로 동기화합니다."
         },
-        "unityBrain.codeLens.enabled": {
+        "unitySense.codeLens.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "[UnityBrain] 유니티 에셋 참조, 이벤트 콜백, 인스펙터 직렬화 값 및 셰이더 배리언트 CodeLens를 표시합니다."
+          "description": "[UnitySense] 유니티 에셋 참조, 이벤트 콜백, 인스펙터 직렬화 값 및 셰이더 배리언트 CodeLens를 표시합니다."
         },
-        "unityBrain.analyzers.enabled": {
+        "unitySense.analyzers.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "[UnityBrain] Directory.Build.props를 통해 UnityBrain Roslyn 분석기 및 AdditionalFiles를 자동으로 주입합니다."
+          "description": "[UnitySense] Directory.Build.props를 통해 UnitySense Roslyn 분석기 및 AdditionalFiles를 자동으로 주입합니다."
         },
-        "unityBrain.unityEditorPath": {
+        "unitySense.unityEditorPath": {
           "type": "string",
           "default": "",
-          "description": "[UnityBrain] CGIncludes 및 빌트인 패키지를 찾기 위한 Unity Editor 설치 디렉터리 수동 지정 경로(선택 사항)입니다."
+          "description": "[UnitySense] CGIncludes 및 빌트인 패키지를 찾기 위한 Unity Editor 설치 디렉터리 수동 지정 경로(선택 사항)입니다."
         },
-        "unityBrain.shader.format.indentSize": {
+        "unitySense.shader.format.indentSize": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "description": "[UnityBrain] ShaderLab/HLSL 포매팅 들여쓰기 크기입니다 (0 이하면 에디터 tabSize를 따릅니다)."
+          "description": "[UnitySense] ShaderLab/HLSL 포매팅 들여쓰기 크기입니다 (0 이하면 에디터 tabSize를 따릅니다)."
         },
-        "unityBrain.shader.diagnostics.enabled": {
+        "unitySense.shader.diagnostics.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "[UnityBrain] ShaderLab/HLSL/Compute 정적 진단 및 SRP Batcher CBUFFER 검사를 활성화합니다."
+          "description": "[UnitySense] ShaderLab/HLSL/Compute 정적 진단 및 SRP Batcher CBUFFER 검사를 활성화합니다."
         },
-        "unityBrain.completion.showEventSnippets": {
+        "unitySense.completion.showEventSnippets": {
           "type": "boolean",
           "default": true,
-          "description": "[UnityBrain] C# MonoBehaviour/NetworkBehaviour 유니티 이벤트 함수 자동완성 제안을 표시합니다."
+          "description": "[UnitySense] C# MonoBehaviour/NetworkBehaviour 유니티 이벤트 함수 자동완성 제안을 표시합니다."
         }
       }
     }

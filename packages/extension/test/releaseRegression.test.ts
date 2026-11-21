@@ -218,9 +218,9 @@ describe('Extension Release Regression Suite', () => {
     expect(netItems?.some((i) => i.label === 'OnNetworkSpawn')).toBe(true);
     expect(netItems?.some((i) => i.label === 'Update')).toBe(true);
 
-    await vscode.workspace.getConfiguration('unityBrain').update('completion.showEventSnippets', false);
+    await vscode.workspace.getConfiguration('unitySense').update('completion.showEventSnippets', false);
     expect(provider.provideCompletionItems(netDoc, new vscode.Position(2, 4))).toBeUndefined();
-    await vscode.workspace.getConfiguration('unityBrain').update('completion.showEventSnippets', true);
+    await vscode.workspace.getConfiguration('unitySense').update('completion.showEventSnippets', true);
 
     const nsFile = path.join(root, 'NsPanel.cs');
     const nsCode = [
@@ -239,7 +239,7 @@ describe('Extension Release Regression Suite', () => {
       selection: new vscode.Selection(new vscode.Position(4, 4), new vscode.Position(4, 4)),
     } as unknown as vscode.TextEditor;
     const disp = registerGenerateEventFunctionsCommand(provider);
-    await vscode.commands.executeCommand('unityBrain.generateEventFunctions', ['Update']);
+    await vscode.commands.executeCommand('unitySense.generateEventFunctions', ['Update']);
     const afterGen = fs.readFileSync(nsFile, 'utf8');
     expect(afterGen).toContain('        private void Update()');
     expect(afterGen).toContain('    }\n}');

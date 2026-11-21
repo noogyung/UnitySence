@@ -314,15 +314,15 @@ export class UnityAsmdefProvider implements vscode.Disposable {
         if (normalizePathKey(rec.filePath) === currentDocKey) continue;
         const rel = path.relative(this.projectRoot, rec.filePath).replace(/\\/g, '/');
         const nameItem = new vscode.CompletionItem(rec.name, vscode.CompletionItemKind.Module);
-        nameItem.detail = `[UnityBrain] 어셈블리 참조 (${rel})`;
-        nameItem.documentation = `[UnityBrain] ${rel} 어셈블리를 이름으로 참조합니다.`;
+        nameItem.detail = `[UnitySense] 어셈블리 참조 (${rel})`;
+        nameItem.documentation = `[UnitySense] ${rel} 어셈블리를 이름으로 참조합니다.`;
         items.push(formatJsonItem(nameItem));
 
         if (rec.guid) {
           const guidLabel = `GUID:${rec.guid}`;
           const guidItem = new vscode.CompletionItem(guidLabel, vscode.CompletionItemKind.Reference);
-          guidItem.detail = `[UnityBrain] ${rec.name} (GUID 참조 · ${rel})`;
-          guidItem.documentation = `[UnityBrain] ${rec.name} 어셈블리의 .meta GUID 참조입니다.`;
+          guidItem.detail = `[UnitySense] ${rec.name} (GUID 참조 · ${rel})`;
+          guidItem.documentation = `[UnitySense] ${rec.name} 어셈블리의 .meta GUID 참조입니다.`;
           items.push(formatJsonItem(guidItem));
         }
       }
@@ -332,7 +332,7 @@ export class UnityAsmdefProvider implements vscode.Disposable {
     if (key === 'includePlatforms' || key === 'excludePlatforms') {
       return UNITY_ASMDEF_PLATFORMS.map((p) => {
         const item = new vscode.CompletionItem(p, vscode.CompletionItemKind.EnumMember);
-        item.detail = '[UnityBrain] Unity 빌드 타겟 플랫폼';
+        item.detail = '[UnitySense] Unity 빌드 타겟 플랫폼';
         return formatJsonItem(item);
       });
     }
@@ -387,7 +387,7 @@ export class UnityAsmdefProvider implements vscode.Disposable {
         diags.push(
           new vscode.Diagnostic(
             findRefRange(refStr),
-            `[UnityBrain] 어셈블리 GUID 참조 '${refStr}'에 해당하는 .asmdef를 찾을 수 없습니다.`,
+            `[UnitySense] 어셈블리 GUID 참조 '${refStr}'에 해당하는 .asmdef를 찾을 수 없습니다.`,
             vscode.DiagnosticSeverity.Warning,
           ),
         );
@@ -410,7 +410,7 @@ export class UnityAsmdefProvider implements vscode.Disposable {
         diags.push(
           new vscode.Diagnostic(
             findRefRange(offendingRef),
-            `[UnityBrain] 순환 어셈블리 참조가 감지되었습니다: ${currentCycle.join(' -> ')}`,
+            `[UnitySense] 순환 어셈블리 참조가 감지되었습니다: ${currentCycle.join(' -> ')}`,
             vscode.DiagnosticSeverity.Error,
           ),
         );

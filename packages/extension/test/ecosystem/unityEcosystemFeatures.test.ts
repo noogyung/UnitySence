@@ -319,10 +319,10 @@ describe('Unity Ecosystem Features (Asmdef, UI Toolkit, Editor Integration)', ()
       const found = flexItems.find((i) => i.label === propName);
       expect(found).toBeDefined();
       expect(found?.kind).toBe(vscode.CompletionItemKind.Property);
-      expect(found?.detail).toBe('[UnityBrain] Unity UI Toolkit USS 스타일 속성');
+      expect(found?.detail).toBe('[UnitySense] Unity UI Toolkit USS 스타일 속성');
     }
     const unitySpecific = flexItems.find((i) => i.label === '-unity-font-definition');
-    expect(unitySpecific?.detail).toBe('[UnityBrain] Unity USS 전용 스타일 속성');
+    expect(unitySpecific?.detail).toBe('[UnitySense] Unity USS 전용 스타일 속성');
 
     // Colon inside rule body does not falsely emit selector pseudo-states
     const valueColonDoc = vscode.__mock.createTextDocument(
