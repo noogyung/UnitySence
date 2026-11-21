@@ -86,4 +86,4 @@ jobs:
             echo "VSCE_PAT secret is not set; skipping Marketplace publish."
             exit 0
           fi
-          npx --yes @vscode/vsce publish --packagePath dist/unitysense-*.vsix
+          npx --yes @vscode/vsce publish --packagePath dist/unitysense-*.vsix -p "$VSCE_PAT"

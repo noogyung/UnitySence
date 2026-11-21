@@ -2,6 +2,11 @@
 
 All notable changes to the **UnitySense** extension will be documented in this file.
 
+## [1.0.1] - 2026-11-22
+
+### Changed
+- **VS Code Marketplace Publisher ID 정규화 & 자동 게시 파이프라인 연동**: `publisher`를 소문자 Marketplace ID(`noogkim`)로 일치시키고 GitHub Actions 태그(`v*`) 푸시 시 `VSCE_PAT`를 통해 VS Code Marketplace 자동 게시가 실행되도록 연동했습니다.
+
 ## [1.0.0] - 2026-11-21
 
 ### Added
