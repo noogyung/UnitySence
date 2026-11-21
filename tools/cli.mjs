@@ -428,7 +428,7 @@ function isSameOrInsideDir(targetPath, rootDir) {
 function rewriteVscodeImportsSync(code) {
   let usesVscode = false;
   let result = code.replace(
-    /^\s*import\s+([\s\S]*?)\s+from\s+['"]vscode['"];?\s*$/gm,
+    /^[ \t]*import[ \t]+((?:(?!\bimport\b)[^;])*?)[ \t]+from[ \t]+['"]vscode['"];?[ \t]*$/gm,
     (_full, rawClause) => {
       usesVscode = true;
       const clause = rawClause.trim();
@@ -458,7 +458,7 @@ function rewriteVscodeImportsSync(code) {
   );
   if (usesVscode) {
     result =
-      `import { createRequire as __createVscodeRequire } from 'node:module';\nconst __unitybrainVscode = __createVscodeRequire(import.meta.url)('vscode');\n` +
+      `import { createRequire as __createVscodeRequire } from 'node:module';\nconst __unitybrainVscode = globalThis.__unitybrainVscode ?? __createVscodeRequire(import.meta.url)('vscode');\n` +
       result;
   }
   return result;
@@ -557,11 +557,11 @@ function compileTsDirectory(srcRoot, distRoot, preserveDirs = []) {
 
 function cmdBuildAnalyzers() {
   const csproj = path.join(ROOT, 'analyzers', 'UnityBrain.Analyzers', 'UnityBrain.Analyzers.csproj');
-  const res = spawnSync(
-    'dotnet',
-    ['build', csproj, '-c', 'Release', '-nodeReuse:false', '-p:UseSharedCompilation=false'],
-    { cwd: ROOT, stdio: 'inherit' },
-  );
+  const buildArgs = ['build', csproj, '-c', 'Release', '-nodeReuse:false', '-p:UseSharedCompilation=false'];
+  if (process.env.UseNuGetNetStandard !== 'true') {
+    buildArgs.push('--no-restore');
+  }
+  const res = spawnSync('dotnet', buildArgs, { cwd: ROOT, stdio: 'inherit' });
   if (res.status !== 0) process.exit(res.status ?? 1);
 
   const releaseRoot = path.join(ROOT, 'analyzers', 'UnityBrain.Analyzers', 'bin', 'Release');
@@ -586,11 +586,11 @@ function cmdBuildAnalyzers() {
 
 function cmdBuildDaemon() {
   const csproj = path.join(ROOT, 'packages', 'unity-daemon', 'UnityBrain.Daemon.csproj');
-  const res = spawnSync(
-    'dotnet',
-    ['build', csproj, '-c', 'Release', '-nodeReuse:false', '-p:UseSharedCompilation=false'],
-    { cwd: ROOT, stdio: 'inherit' },
-  );
+  const buildArgs = ['build', csproj, '-c', 'Release', '-nodeReuse:false', '-p:UseSharedCompilation=false'];
+  if (process.env.UseNuGetNetStandard !== 'true') {
+    buildArgs.push('--no-restore');
+  }
+  const res = spawnSync('dotnet', buildArgs, { cwd: ROOT, stdio: 'inherit' });
   if (res.status !== 0) process.exit(res.status ?? 1);
 
   const releaseRoot = path.join(ROOT, 'packages', 'unity-daemon', 'bin', 'Release');
@@ -638,7 +638,12 @@ function cmdBuildExtension() {
     'let extensionModulePromise = null;',
     '',
     'exports.activate = async function activate(context, options) {',
-    "  if (!extensionModulePromise) {",
+    '  try {',
+    "    globalThis.__unitybrainVscode = require('vscode');",
+    '  } catch {',
+    '    // Fall back to module-local createRequire when loaded outside VS Code Extension Host',
+    '  }',
+    '  if (!extensionModulePromise) {',
     "    extensionModulePromise = import('./extension.js');",
     '  }',
     '  const mod = await extensionModulePromise;',

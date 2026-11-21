@@ -2,6 +2,12 @@
 
 All notable changes to the **UnityBrain** extension will be documented in this file.
 
+## [1.1.3] - 2026-11-21
+
+### Fixed
+- **VS Code 확장 활성화 치명적 버그 수정 (`tools/cli.mjs`)**: `rewriteVscodeImportsSync()`의 멀티라인 정규식이 `import * as vscode from 'vscode'` 이전의 `node:fs`/`node:path`/`node:os`/`node:child_process` 등 Node 내장 모듈 import를 함께 제거하여 VS Code 활성화 시 `ReferenceError: path is not defined`로 실행이 실패하던 문제를 수정했습니다.
+- **VS Code Extension Host `vscode` 브리지 보강**: `extension.cjs`가 활성화 시점에 CJS `require('vscode')`를 `globalThis.__unitybrainVscode`로 먼저 바인딩한 뒤 ESM `extension.js`를 로드하도록 개선하고, 빌드된 `extension.cjs`에 대해 실제 `activate()`/`deactivate()` 실행까지 검증하는 E2E 테스트를 추가했습니다.
+
 ## [1.1.2] - 2026-11-21
 
 ### Added

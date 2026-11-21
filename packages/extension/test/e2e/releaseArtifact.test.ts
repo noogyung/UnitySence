@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 describe('Built Release Artifact End-to-End Verification', () => {
-  it('loads built packages/extension/dist/extension.cjs exporting activate and deactivate cleanly', () => {
+  it('loads and actually activates/deactivates built packages/extension/dist/extension.cjs end-to-end', async () => {
     const cjsEntry = path.join(EXT_ROOT, 'dist', 'extension.cjs');
     const jsEntry = path.join(EXT_ROOT, 'dist', 'extension.js');
     const lspEntry = path.join(EXT_ROOT, 'dist', 'shader-lsp', 'server.js');
@@ -42,10 +42,41 @@ describe('Built Release Artifact End-to-End Verification', () => {
     expect(fs.existsSync(jsEntry)).toBe(true);
     expect(fs.existsSync(lspEntry)).toBe(true);
 
+    // Ensure Node built-in imports were NOT stripped by rewriteVscodeImportsSync
+    const builtExtJs = fs.readFileSync(jsEntry, 'utf8');
+    expect(builtExtJs).toContain("from 'node:fs'");
+    expect(builtExtJs).toContain("from 'node:path'");
+
     const req = createRequire(import.meta.url);
-    const extMod = req(cjsEntry) as { activate?: unknown; deactivate?: unknown };
+    const extMod = req(cjsEntry) as {
+      activate: (ctx: unknown, opts: unknown) => Promise<{
+        context: { editorVersion: string; projectRoot: string };
+        dispose: () => void;
+      } | undefined>;
+      deactivate: () => Promise<void> | void;
+    };
     expect(typeof extMod.activate).toBe('function');
     expect(typeof extMod.deactivate).toBe('function');
+
+    const root = createTempUnityFixture();
+    const subscriptions: Array<{ dispose: () => void }> = [];
+    const api = await extMod.activate(
+      { extensionPath: EXT_ROOT, subscriptions },
+      {
+        workspaceRoot: root,
+        enableWatchers: false,
+        daemonTransportFactory: () => ({
+          sendRequest: async <T>() => ({ locations: [], fields: [], state: 'ready', indexedAssets: 0, indexedMetas: 0, lastBuildMs: 0 }) as T,
+          dispose: () => {},
+        }),
+      },
+    );
+    expect(api).toBeDefined();
+    expect(api!.context.editorVersion).toBe('6000.0.23f1');
+    for (const s of subscriptions) {
+      s.dispose();
+    }
+    await extMod.deactivate();
   });
 
   it('spawns real built UnityBrain.Daemon.dll and handles live stdio JSON-RPC index/status, index/rebuild, and shutdown', async () => {
