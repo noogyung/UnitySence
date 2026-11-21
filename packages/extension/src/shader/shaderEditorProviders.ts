@@ -2,8 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as vscode from 'vscode';
-import type { IncludeDependencyGraph } from '../../../shader-lsp/src/indexer/hlslIncludeGraph.ts';
-import { findBlockIndexAtLine, isLineVisibleInPass } from '../../../shader-lsp/src/indexer/hlslSymbolTable.ts';
+import {
+  extractMemberChainExpression,
+  type IncludeDependencyGraph,
+} from '../../../shader-lsp/src/indexer/hlslIncludeGraph.ts';
+import {
+  findBlockIndexAtLine,
+  isLineVisibleInPass,
+  type ParsedHlslFile,
+} from '../../../shader-lsp/src/indexer/hlslSymbolTable.ts';
 import {
   blankShaderCommentsPreservingLayout,
   extractVirtualHlslDocument,
@@ -752,7 +759,76 @@ function collectIdentifierMatches(
   return hits;
 }
 
+function resolveTargetStructName(
+  doc: vscode.TextDocument,
+  parsed: ParsedHlslFile,
+  word: string,
+  wordRange: vscode.Range | undefined,
+  position: vscode.Position,
+  shaderGraph: IncludeDependencyGraph,
+): string | null {
+  const declSym =
+    parsed.symbols.find(
+      (s) =>
+        s.kind === 'field' &&
+        s.name === word &&
+        s.line === position.line &&
+        position.character >= s.column &&
+        position.character <= s.column + s.name.length,
+    ) ??
+    parsed.symbols.find(
+      (s) => s.kind === 'field' && s.name === word && s.line === position.line,
+    );
+  if (declSym) {
+    return declSym.containerName ?? null;
+  }
+
+  const lineText = doc.lineAt(position.line).text;
+  const isDotCursor = Boolean(
+    wordRange && wordRange.start.character > 0 && lineText[wordRange.start.character - 1] === '.',
+  );
+  if (isDotCursor && wordRange) {
+    const chainExpr = extractMemberChainExpression(lineText.slice(0, wordRange.end.character));
+    if (chainExpr) {
+      const entryNorm = shaderGraph.normalizeFilePath(doc.uri.toString());
+      const resolved = shaderGraph.resolveExpressionChain(entryNorm, chainExpr, position.line);
+      return resolved.field?.containerName ?? resolved.ownerType ?? null;
+    }
+  }
+  return null;
+}
+
+function filterFieldMatchesByStruct<T extends { line: number; col: number; isDotAccess: boolean }>(
+  matches: readonly T[],
+  fileLines: readonly string[],
+  fileParsed: ParsedHlslFile,
+  word: string,
+  targetStructName: string,
+  filePath: string,
+  shaderGraph: IncludeDependencyGraph,
+): T[] {
+  return matches.filter((hit) => {
+    if (hit.isDotAccess) {
+      const hitLine = fileLines[hit.line] ?? '';
+      const hitChain = extractMemberChainExpression(hitLine.slice(0, hit.col + word.length));
+      if (!hitChain) return false;
+      const hitResolved = shaderGraph.resolveExpressionChain(filePath, hitChain, hit.line);
+      const hitOwner = hitResolved.field?.containerName ?? hitResolved.ownerType ?? null;
+      return hitOwner === targetStructName;
+    }
+    return fileParsed.symbols.some(
+      (s) =>
+        s.kind === 'field' &&
+        s.name === word &&
+        s.line === hit.line &&
+        s.containerName === targetStructName,
+    );
+  });
+}
+
 export class ShaderDocumentHighlightProvider {
+  constructor(private readonly shaderGraph?: IncludeDependencyGraph) {}
+
   public provideDocumentHighlights(
     doc: vscode.TextDocument,
     position: vscode.Position,
@@ -764,9 +840,64 @@ export class ShaderDocumentHighlightProvider {
 
     const lineText = doc.lineAt(position.line).text;
     const isDotCursor = wordRange.start.character > 0 && lineText[wordRange.start.character - 1] === '.';
-    const matches = collectIdentifierMatches(doc.getText(), word).filter((hit) =>
-      isDotCursor ? hit.isDotAccess : !hit.isDotAccess,
-    );
+    const text = doc.getText();
+    const allMatches = collectIdentifierMatches(text, word);
+    let matches: Array<{ line: number; col: number; isWrite: boolean; isDotAccess: boolean }>;
+
+    if (this.shaderGraph) {
+      const parsed = this.shaderGraph.setOpenDocumentContent(doc.uri.toString(), text);
+      const cursorLine = position.line;
+      const isFieldDeclCursor = parsed.symbols.some(
+        (s) => s.kind === 'field' && s.name === word && s.line === cursorLine,
+      );
+      const isFieldCursor = isDotCursor || isFieldDeclCursor;
+
+      if (isFieldCursor) {
+        const targetStructName = resolveTargetStructName(
+          doc,
+          parsed,
+          word,
+          wordRange,
+          position,
+          this.shaderGraph,
+        );
+        if (targetStructName) {
+          const entryNorm = this.shaderGraph.normalizeFilePath(doc.uri.toString());
+          const lines = text.split(/\r?\n/);
+          matches = filterFieldMatchesByStruct(
+            allMatches,
+            lines,
+            parsed,
+            word,
+            targetStructName,
+            entryNorm,
+            this.shaderGraph,
+          );
+        } else {
+          matches = allMatches.filter((hit) => {
+            const isStructFieldDecl = parsed.symbols.some(
+              (s) => s.kind === 'field' && s.name === word && s.line === hit.line,
+            );
+            return isDotCursor ? hit.isDotAccess : hit.isDotAccess || isStructFieldDecl;
+          });
+        }
+      } else {
+        const localScope = parsed.localVarScopes.find(
+          (sc) => cursorLine >= sc.startLine && cursorLine <= sc.endLine && sc.declarations.has(word),
+        );
+        const decl = localScope?.declarations.get(word);
+        if (localScope && decl && cursorLine >= decl.line) {
+          matches = allMatches.filter(
+            (hit) => !hit.isDotAccess && hit.line >= localScope.startLine && hit.line <= localScope.endLine,
+          );
+        } else {
+          matches = allMatches.filter((hit) => !hit.isDotAccess);
+        }
+      }
+    } else {
+      matches = allMatches.filter((hit) => (isDotCursor ? hit.isDotAccess : !hit.isDotAccess));
+    }
+
     return matches.map(
       (hit) =>
         new vscode.DocumentHighlight(
@@ -857,6 +988,9 @@ function collectCrossFileOccurrences(
   const symDeclInCurrent = parsed.symbols.find(
     (s) => s.name === word && s.kind !== 'property' && isLineVisibleInPass(parsed.blocks, s.line, cursorLine),
   );
+  const targetStructName = isFieldCursor
+    ? resolveTargetStructName(doc, parsed, word, wordRange, position, shaderGraph)
+    : null;
 
   const visitedKeys = new Set<string>();
   const results: Array<{ uri: vscode.Uri; filePath: string; line: number; col: number }> = [];
@@ -867,8 +1001,13 @@ function collectCrossFileOccurrences(
     visitedKeys.add(fileKey);
 
     const isCurrent = fileKey === entryKey;
+    let fileParsed = isCurrent ? parsed : file;
     let content = isCurrent ? doc.getText() : openBuffersByKey.get(fileKey);
-    if (content === undefined) {
+    if (content !== undefined) {
+      if (!isCurrent) {
+        fileParsed = shaderGraph.setOpenDocumentContent(file.uri, content);
+      }
+    } else {
       try {
         content = fs.existsSync(file.filePath)
           ? fs.readFileSync(file.filePath, 'utf8')
@@ -879,15 +1018,28 @@ function collectCrossFileOccurrences(
     }
 
     const matches = collectIdentifierMatches(content, word);
-    for (const hit of matches) {
-      if (isFieldCursor) {
-        const isStructFieldDecl =
-          file.symbols.some((s) => s.kind === 'field' && s.name === word && s.line === hit.line);
-        if (!hit.isDotAccess && !isStructFieldDecl) continue;
-      } else if (hit.isDotAccess) {
-        continue;
-      }
+    if (matches.length === 0) continue;
 
+    const filteredMatches = isFieldCursor
+      ? targetStructName
+        ? filterFieldMatchesByStruct(
+            matches,
+            content.split(/\r?\n/),
+            fileParsed,
+            word,
+            targetStructName,
+            file.filePath,
+            shaderGraph,
+          )
+        : matches.filter((hit) => {
+            const isStructFieldDecl = fileParsed.symbols.some(
+              (s) => s.kind === 'field' && s.name === word && s.line === hit.line,
+            );
+            return hit.isDotAccess || isStructFieldDecl;
+          })
+      : matches.filter((hit) => !hit.isDotAccess);
+
+    for (const hit of filteredMatches) {
       if (
         isCurrent &&
         restrictToCurrentShaderFile &&

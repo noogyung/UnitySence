@@ -19,7 +19,9 @@ namespace UnityBrain.Analyzers.CodeFixes;
 public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
 {
     public override ImmutableArray<string> FixableDiagnosticIds =>
-        ImmutableArray.Create(DiagnosticIds.UncachedComponentLookup);
+        ImmutableArray.Create(
+            DiagnosticIds.UncachedComponentLookup,
+            DiagnosticIds.IndirectPerformanceCriticalInvocation);
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -30,20 +32,75 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
         var root = await context.Document.GetSyntaxRootAsync(context.CancellationToken).ConfigureAwait(false);
         if (root == null) return;
 
-        var diag = context.Diagnostics[0];
-        var node = root.FindNode(diag.Location.SourceSpan, getInnermostNodeForTie: true);
-        var invocation = node.FirstAncestorOrSelf<InvocationExpressionSyntax>();
-        if (invocation == null) return;
+        SemanticModel? semanticModel = null;
 
-        var typeArg = ExtractGenericTypeArgument(invocation);
-        if (typeArg == null || string.IsNullOrWhiteSpace(typeArg.ToString())) return;
+        foreach (var diag in context.Diagnostics)
+        {
+            var node = root.FindNode(diag.Location.SourceSpan, getInnermostNodeForTie: true);
 
-        context.RegisterCodeFix(
-            CodeAction.Create(
-                title: $"[UnityBrain] Awake()에서 {typeArg} 컴포넌트 캐싱하기",
-                createChangedDocument: ct => CacheComponentAsync(context.Document, invocation, typeArg, ct),
-                equivalenceKey: nameof(CacheComponentInAwakeCodeFixProvider)),
-            diag);
+            if (diag.Id == DiagnosticIds.UncachedComponentLookup)
+            {
+                var invocation = node.FirstAncestorOrSelf<InvocationExpressionSyntax>();
+                if (invocation == null) continue;
+
+                var typeArg = ExtractGenericTypeArgument(invocation);
+                if (typeArg == null || string.IsNullOrWhiteSpace(typeArg.ToString())) continue;
+
+                var baseName = ExtractCleanTypeIdentifier(typeArg);
+                if (string.IsNullOrEmpty(baseName))
+                {
+                    baseName = "Component";
+                }
+
+                var capturedInvocation = invocation;
+                var capturedTypeArg = typeArg;
+
+                context.RegisterCodeFix(
+                    CodeAction.Create(
+                        title: $"[UnityBrain] Awake()에서 {capturedTypeArg} 컴포넌트 캐싱하기",
+                        createChangedDocument: ct => CacheExpressionInAwakeAsync(
+                            context.Document,
+                            capturedInvocation,
+                            capturedTypeArg,
+                            baseName,
+                            ct),
+                        equivalenceKey: nameof(CacheComponentInAwakeCodeFixProvider)),
+                    diag);
+            }
+            else if (diag.Id == DiagnosticIds.IndirectPerformanceCriticalInvocation)
+            {
+                var memberAccess = node.FirstAncestorOrSelf<MemberAccessExpressionSyntax>();
+                if (memberAccess == null || memberAccess.Name.Identifier.ValueText != "main")
+                {
+                    continue;
+                }
+
+                semanticModel ??= await context.Document.GetSemanticModelAsync(context.CancellationToken).ConfigureAwait(false);
+                if (semanticModel == null) continue;
+
+                if (semanticModel.GetSymbolInfo(memberAccess, context.CancellationToken).Symbol is not IPropertySymbol prop ||
+                    prop.Name != "main" ||
+                    prop.ContainingType.ToDisplayString() != "UnityEngine.Camera")
+                {
+                    continue;
+                }
+
+                var fieldType = ResolveCameraFieldType(root, memberAccess);
+                var capturedMemberAccess = memberAccess;
+
+                context.RegisterCodeFix(
+                    CodeAction.Create(
+                        title: "[UnityBrain] Awake()에서 Camera.main 캐싱하기",
+                        createChangedDocument: ct => CacheExpressionInAwakeAsync(
+                            context.Document,
+                            capturedMemberAccess,
+                            fieldType,
+                            "mainCamera",
+                            ct),
+                        equivalenceKey: nameof(CacheComponentInAwakeCodeFixProvider) + ".CameraMain"),
+                    diag);
+            }
+        }
     }
 
     private static TypeSyntax? ExtractGenericTypeArgument(InvocationExpressionSyntax invocation)
@@ -61,62 +118,104 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
         return null;
     }
 
-    private static async Task<Document> CacheComponentAsync(
+    private static TypeSyntax ResolveCameraFieldType(SyntaxNode root, MemberAccessExpressionSyntax memberAccess)
+    {
+        bool usesQualifiedUnityEngineCamera = memberAccess.Expression is MemberAccessExpressionSyntax ma &&
+            ma.Name.Identifier.ValueText == "Camera" &&
+            (ma.Expression is IdentifierNameSyntax id && id.Identifier.ValueText == "UnityEngine" ||
+             ma.Expression is AliasQualifiedNameSyntax aq &&
+             aq.Alias.Identifier.ValueText == "global" &&
+             aq.Name.Identifier.ValueText == "UnityEngine");
+
+        if (usesQualifiedUnityEngineCamera)
+        {
+            bool hasUsingUnityEngine = root.DescendantNodes()
+                .OfType<UsingDirectiveSyntax>()
+                .Any(u => u.Alias == null &&
+                          u.StaticKeyword.IsKind(SyntaxKind.None) &&
+                          u.Name?.ToString() == "UnityEngine");
+            if (!hasUsingUnityEngine)
+            {
+                return SyntaxFactory.ParseTypeName("UnityEngine.Camera");
+            }
+        }
+
+        return SyntaxFactory.IdentifierName("Camera");
+    }
+
+    private static async Task<Document> CacheExpressionInAwakeAsync(
         Document document,
-        InvocationExpressionSyntax invocation,
-        TypeSyntax typeArg,
+        ExpressionSyntax targetExpr,
+        TypeSyntax fieldType,
+        string preferredBaseName,
         CancellationToken ct)
     {
         var root = await document.GetSyntaxRootAsync(ct).ConfigureAwait(false);
         var semanticModel = await document.GetSemanticModelAsync(ct).ConfigureAwait(false);
         if (root == null) return document;
 
-        var classDecl = invocation.FirstAncestorOrSelf<ClassDeclarationSyntax>();
+        var classDecl = targetExpr.FirstAncestorOrSelf<ClassDeclarationSyntax>();
         if (classDecl == null) return document;
 
+        var existingAwake = classDecl.Members
+            .OfType<MethodDeclarationSyntax>()
+            .FirstOrDefault(m => m.Identifier.ValueText == "Awake" && m.ParameterList.Parameters.Count == 0);
+
+        var existingCachedField = FindExistingCachedFieldName(classDecl, existingAwake, targetExpr);
+        if (existingCachedField != null)
+        {
+            var reusedIdentifier = SyntaxFactory.IdentifierName(existingCachedField);
+            var reusedClassDecl = classDecl.ReplaceNode(
+                targetExpr,
+                reusedIdentifier.WithTriviaFrom(targetExpr));
+            var reusedRoot = root.ReplaceNode(classDecl, reusedClassDecl);
+            var reusedDoc = document.WithSyntaxRoot(reusedRoot);
+            return await Formatter.FormatAsync(reusedDoc, Formatter.Annotation, cancellationToken: ct).ConfigureAwait(false);
+        }
+
         var classSymbol = semanticModel?.GetDeclaredSymbol(classDecl, ct);
-        var enclosingMethod = invocation.FirstAncestorOrSelf<MethodDeclarationSyntax>();
-        var fieldName = GenerateUniqueFieldName(classDecl, classSymbol, enclosingMethod, typeArg);
+        var enclosingMethod = targetExpr.FirstAncestorOrSelf<MethodDeclarationSyntax>();
+        var fieldName = GenerateUniqueFieldName(classDecl, classSymbol, enclosingMethod, preferredBaseName);
         var fieldIdentifier = SyntaxFactory.IdentifierName(fieldName);
 
         var newClassDecl = classDecl.ReplaceNode(
-            invocation,
-            fieldIdentifier.WithTriviaFrom(invocation));
+            targetExpr,
+            fieldIdentifier.WithTriviaFrom(targetExpr));
 
         var fieldDecl = SyntaxFactory.FieldDeclaration(
             SyntaxFactory.VariableDeclaration(
-                typeArg.WithoutTrivia(),
+                fieldType.WithoutTrivia(),
                 SyntaxFactory.SingletonSeparatedList(
                     SyntaxFactory.VariableDeclarator(SyntaxFactory.Identifier(fieldName)))))
             .WithModifiers(SyntaxFactory.TokenList(SyntaxFactory.Token(SyntaxKind.PrivateKeyword)))
             .WithAdditionalAnnotations(Formatter.Annotation);
 
-        var assignStmt = SyntaxFactory.ParseStatement($"{fieldName} = {invocation.WithoutTrivia().ToFullString()};")
+        var assignStmt = SyntaxFactory.ParseStatement($"{fieldName} = {targetExpr.WithoutTrivia().ToFullString()};")
             .WithAdditionalAnnotations(Formatter.Annotation);
 
-        var existingAwake = newClassDecl.Members
+        var awakeInNewClass = newClassDecl.Members
             .OfType<MethodDeclarationSyntax>()
             .FirstOrDefault(m => m.Identifier.ValueText == "Awake" && m.ParameterList.Parameters.Count == 0);
 
-        if (existingAwake != null)
+        if (awakeInNewClass != null)
         {
-            if (existingAwake.Body != null)
+            if (awakeInNewClass.Body != null)
             {
-                var updatedBody = existingAwake.Body.WithStatements(
-                    existingAwake.Body.Statements.Insert(0, assignStmt));
-                newClassDecl = newClassDecl.ReplaceNode(existingAwake, existingAwake.WithBody(updatedBody));
+                var updatedBody = awakeInNewClass.Body.WithStatements(
+                    awakeInNewClass.Body.Statements.Insert(0, assignStmt));
+                newClassDecl = newClassDecl.ReplaceNode(awakeInNewClass, awakeInNewClass.WithBody(updatedBody));
                 newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
             }
-            else if (existingAwake.ExpressionBody != null)
+            else if (awakeInNewClass.ExpressionBody != null)
             {
-                var exprStmt = SyntaxFactory.ExpressionStatement(existingAwake.ExpressionBody.Expression)
+                var exprStmt = SyntaxFactory.ExpressionStatement(awakeInNewClass.ExpressionBody.Expression)
                     .WithAdditionalAnnotations(Formatter.Annotation);
-                var convertedAwake = existingAwake
+                var convertedAwake = awakeInNewClass
                     .WithExpressionBody(null)
                     .WithSemicolonToken(default)
                     .WithBody(SyntaxFactory.Block(assignStmt, exprStmt))
                     .WithAdditionalAnnotations(Formatter.Annotation);
-                newClassDecl = newClassDecl.ReplaceNode(existingAwake, convertedAwake);
+                newClassDecl = newClassDecl.ReplaceNode(awakeInNewClass, convertedAwake);
                 newClassDecl = newClassDecl.WithMembers(newClassDecl.Members.Insert(0, fieldDecl));
             }
             else
@@ -152,6 +251,72 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
         return await Formatter.FormatAsync(updatedDoc, Formatter.Annotation, cancellationToken: ct).ConfigureAwait(false);
     }
 
+    private static string? FindExistingCachedFieldName(
+        ClassDeclarationSyntax classDecl,
+        MethodDeclarationSyntax? existingAwake,
+        ExpressionSyntax targetExpr)
+    {
+        if (existingAwake == null) return null;
+
+        var declaredFields = new HashSet<string>(
+            classDecl.Members
+                .OfType<FieldDeclarationSyntax>()
+                .SelectMany(f => f.Declaration.Variables.Select(v => v.Identifier.ValueText)),
+            StringComparer.Ordinal);
+
+        if (declaredFields.Count == 0) return null;
+
+        bool targetIsCameraMain = IsCameraMainSyntax(targetExpr);
+        var cleanTarget = targetExpr.WithoutTrivia();
+
+        foreach (var assign in existingAwake.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+        {
+            if (!assign.IsKind(SyntaxKind.SimpleAssignmentExpression) || assign.Right == targetExpr)
+            {
+                continue;
+            }
+
+            string? assignedField = assign.Left switch
+            {
+                IdentifierNameSyntax id => id.Identifier.ValueText,
+                MemberAccessExpressionSyntax ma when ma.Expression is ThisExpressionSyntax &&
+                    ma.Name is IdentifierNameSyntax memberId => memberId.Identifier.ValueText,
+                _ => null,
+            };
+
+            if (assignedField == null || !declaredFields.Contains(assignedField))
+            {
+                continue;
+            }
+
+            if (assign.Right.WithoutTrivia().IsEquivalentTo(cleanTarget) ||
+                (targetIsCameraMain && IsCameraMainSyntax(assign.Right)))
+            {
+                return assignedField;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsCameraMainSyntax(ExpressionSyntax expr)
+    {
+        if (expr is not MemberAccessExpressionSyntax ma || ma.Name.Identifier.ValueText != "main")
+        {
+            return false;
+        }
+        if (ma.Expression is IdentifierNameSyntax id && id.Identifier.ValueText == "Camera")
+        {
+            return true;
+        }
+        return ma.Expression is MemberAccessExpressionSyntax qma &&
+            qma.Name.Identifier.ValueText == "Camera" &&
+            (qma.Expression is IdentifierNameSyntax uid && uid.Identifier.ValueText == "UnityEngine" ||
+             qma.Expression is AliasQualifiedNameSyntax aq &&
+             aq.Alias.Identifier.ValueText == "global" &&
+             aq.Name.Identifier.ValueText == "UnityEngine");
+    }
+
     private static string ExtractCleanTypeIdentifier(TypeSyntax typeArg)
     {
         switch (typeArg)
@@ -176,13 +341,9 @@ public sealed class CacheComponentInAwakeCodeFixProvider : CodeFixProvider
         ClassDeclarationSyntax classDecl,
         INamedTypeSymbol? classSymbol,
         MethodDeclarationSyntax? enclosingMethod,
-        TypeSyntax typeArg)
+        string preferredBaseName)
     {
-        var shortName = ExtractCleanTypeIdentifier(typeArg);
-        if (string.IsNullOrEmpty(shortName))
-        {
-            shortName = "Component";
-        }
+        var shortName = string.IsNullOrEmpty(preferredBaseName) ? "Component" : preferredBaseName;
         var cleanBase = "_" + char.ToLowerInvariant(shortName[0]) + shortName.Substring(1);
 
         var existing = new HashSet<string>(

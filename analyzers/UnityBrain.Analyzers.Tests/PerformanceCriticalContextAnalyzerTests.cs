@@ -3,10 +3,14 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CodeActions;
+using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Text;
 using UnityBrain.Analyzers.CallGraph;
 using UnityBrain.Analyzers.CodeFixes;
 
@@ -310,5 +314,237 @@ public class ReceiverScopeChecker : MonoBehaviour
         }
         AssertEx.True(texts.Any(t => t == "GetComponent<Rigidbody>()"), "Expected UB1002 for GetComponent<Rigidbody>()");
         AssertEx.True(texts.Any(t => t == "this.gameObject.GetComponent<Rigidbody>()"), "Expected UB1002 for this.gameObject.GetComponent<Rigidbody>()");
+    }
+
+    [Fact]
+    public async Task DetectsCameraMainBackgroundColorInUpdateAsUB1001AndCachesInGeneratedAwake()
+    {
+        const string source = @"
+using UnityEngine;
+
+public class CameraFlash : MonoBehaviour
+{
+    private void Update()
+    {
+        Camera.main.backgroundColor = Color.Lerp(Color.red, Color.blue, Mathf.PingPong(Time.time, 1));
+    }
+}";
+
+        string cameraStubs = BuildCameraExtendedStubs();
+        var analyzer = new PerformanceCriticalContextAnalyzer();
+        var diags = await GetDiagnosticsWithCustomStubsAsync(source, cameraStubs, analyzer);
+        var ub1001 = diags.Where(d => d.Id == DiagnosticIds.IndirectPerformanceCriticalInvocation).ToList();
+        AssertEx.Equal(1, ub1001.Count, $"Expected 1 UB1001 diagnostic for Camera.main, got {ub1001.Count}");
+        AssertEx.Contains("Camera.main", ub1001[0].GetMessage());
+
+        var fixedCode = await ApplyCodeFixWithCustomStubsAsync(
+            source,
+            cameraStubs,
+            analyzer,
+            new CacheComponentInAwakeCodeFixProvider(),
+            DiagnosticIds.IndirectPerformanceCriticalInvocation);
+
+        AssertEx.Contains("private Camera _mainCamera;", fixedCode);
+        AssertEx.Contains("void Awake()", fixedCode);
+        AssertEx.Contains("_mainCamera = Camera.main;", fixedCode);
+        AssertEx.Contains(
+            "_mainCamera.backgroundColor = Color.Lerp(Color.red, Color.blue, Mathf.PingPong(Time.time, 1));",
+            fixedCode);
+    }
+
+    [Fact]
+    public async Task CachesCameraMainInExistingAwakeAndAvoidsDuplicateFieldOrAssignment()
+    {
+        string cameraStubs = BuildCameraExtendedStubs();
+        var analyzer = new PerformanceCriticalContextAnalyzer();
+        var codeFix = new CacheComponentInAwakeCodeFixProvider();
+
+        // 1. Injects into existing Awake() without creating a second Awake()
+        const string existingAwakeSource = @"
+using UnityEngine;
+
+public class CameraFlashExisting : MonoBehaviour
+{
+    private int _x;
+    private void Awake()
+    {
+        _x = 1;
+    }
+
+    private void Update()
+    {
+        Camera.main.backgroundColor = Color.Lerp(Color.red, Color.blue, Mathf.PingPong(Time.time, 1));
+    }
+}";
+        var fixedExisting = await ApplyCodeFixWithCustomStubsAsync(
+            existingAwakeSource,
+            cameraStubs,
+            analyzer,
+            codeFix,
+            DiagnosticIds.IndirectPerformanceCriticalInvocation);
+
+        AssertEx.Contains("private Camera _mainCamera;", fixedExisting);
+        AssertEx.Contains("_mainCamera = Camera.main;", fixedExisting);
+        AssertEx.Contains("_x = 1;", fixedExisting);
+        AssertEx.Contains("_mainCamera.backgroundColor =", fixedExisting);
+        AssertEx.Equal(1, fixedExisting.Split("Awake()").Length - 1, "Existing Awake() should be reused");
+
+        // 2. If _mainCamera and Awake() assignment are already applied, do NOT duplicate field or assignment
+        const string alreadyAppliedSource = @"
+using UnityEngine;
+
+public class CameraFlashAlreadyCached : MonoBehaviour
+{
+    private Camera _mainCamera;
+    private void Awake()
+    {
+        _mainCamera = Camera.main;
+    }
+
+    private void Update()
+    {
+        Camera.main.backgroundColor = Color.red;
+    }
+}";
+        var fixedReused = await ApplyCodeFixWithCustomStubsAsync(
+            alreadyAppliedSource,
+            cameraStubs,
+            analyzer,
+            codeFix,
+            DiagnosticIds.IndirectPerformanceCriticalInvocation);
+
+        AssertEx.Equal(1, fixedReused.Split("private Camera _mainCamera;").Length - 1, "Field should not be duplicated");
+        AssertEx.Equal(1, fixedReused.Split("_mainCamera = Camera.main;").Length - 1, "Awake assignment should not be duplicated");
+        AssertEx.Contains("_mainCamera.backgroundColor = Color.red;", fixedReused);
+
+        // 3. If an unrelated member named _mainCamera exists, avoid colliding by using _mainCamera2
+        const string collisionSource = @"
+using UnityEngine;
+
+public class CameraFlashCollision : MonoBehaviour
+{
+    private int _mainCamera;
+
+    private void Update()
+    {
+        _ = _mainCamera;
+        Camera.main.backgroundColor = Color.blue;
+    }
+}";
+        var fixedCollision = await ApplyCodeFixWithCustomStubsAsync(
+            collisionSource,
+            cameraStubs,
+            analyzer,
+            codeFix,
+            DiagnosticIds.IndirectPerformanceCriticalInvocation);
+
+        AssertEx.Contains("private Camera _mainCamera2;", fixedCollision);
+        AssertEx.Contains("_mainCamera2 = Camera.main;", fixedCollision);
+        AssertEx.Contains("_mainCamera2.backgroundColor = Color.blue;", fixedCollision);
+    }
+
+    private static string BuildCameraExtendedStubs()
+    {
+        return UnityTestStubs.UnityStubsSource.Replace(
+            @"    public static class Camera
+    {
+        public static Component? main => null;
+    }",
+            @"    public struct Color
+    {
+        public static Color red => default;
+        public static Color blue => default;
+        public static Color Lerp(Color a, Color b, float t) => default;
+    }
+    public static class Mathf
+    {
+        public static float PingPong(float t, float length) => 0f;
+    }
+    public static class Time
+    {
+        public static float time => 0f;
+    }
+    public sealed class Camera : Behaviour
+    {
+        public static Camera main => null!;
+        public Color backgroundColor { get; set; }
+    }");
+    }
+
+    private static async Task<string> ApplyCodeFixWithCustomStubsAsync(
+        string userSource,
+        string stubsSource,
+        DiagnosticAnalyzer analyzer,
+        CodeFixProvider codeFixProvider,
+        string diagnosticId)
+    {
+        var trusted = (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string ?? string.Empty)
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        var refs = new List<MetadataReference>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in trusted)
+        {
+            var fileName = Path.GetFileName(path);
+            if (!fileName.StartsWith("System.", StringComparison.OrdinalIgnoreCase) &&
+                !fileName.Equals("mscorlib.dll", StringComparison.OrdinalIgnoreCase) &&
+                !fileName.Equals("netstandard.dll", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (seen.Add(path))
+            {
+                refs.Add(MetadataReference.CreateFromFile(path));
+            }
+        }
+
+        using var workspace = new AdhocWorkspace();
+        var projectId = ProjectId.CreateNewId();
+        var stubDocId = DocumentId.CreateNewId(projectId);
+        var userDocId = DocumentId.CreateNewId(projectId);
+
+        var solution = workspace.CurrentSolution
+            .AddProject(projectId, "TestProject", "TestProject", LanguageNames.CSharp)
+            .WithProjectCompilationOptions(projectId, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+            .WithProjectParseOptions(projectId, new CSharpParseOptions(LanguageVersion.Latest))
+            .AddMetadataReferences(projectId, refs)
+            .AddDocument(stubDocId, "UnityStubs.cs", SourceText.From(stubsSource))
+            .AddDocument(userDocId, "TestScript.cs", SourceText.From(userSource));
+
+        var doc = solution.GetDocument(userDocId)!;
+        var compilation = await doc.Project.GetCompilationAsync().ConfigureAwait(false);
+        var withAnalyzers = compilation!.WithAnalyzers(ImmutableArray.Create(analyzer));
+        var diags = (await withAnalyzers.GetAnalyzerDiagnosticsAsync().ConfigureAwait(false))
+            .Where(d => d.Location.SourceTree?.FilePath == "TestScript.cs")
+            .Where(d => d.Id == diagnosticId)
+            .ToImmutableArray();
+
+        if (diags.IsEmpty)
+        {
+            throw new InvalidOperationException($"No matching diagnostic found to apply CodeFix ({diagnosticId}).");
+        }
+
+        var actions = new List<CodeAction>();
+        var targetDiag = diags[0];
+        var ctx = new CodeFixContext(
+            doc,
+            targetDiag,
+            (action, _) => actions.Add(action),
+            CancellationToken.None);
+
+        await codeFixProvider.RegisterCodeFixesAsync(ctx).ConfigureAwait(false);
+        if (actions.Count == 0)
+        {
+            throw new InvalidOperationException($"CodeFixProvider registered zero actions for {targetDiag.Id}.");
+        }
+
+        var ops = await actions[0].GetOperationsAsync(CancellationToken.None).ConfigureAwait(false);
+        foreach (var op in ops.OfType<ApplyChangesOperation>())
+        {
+            op.Apply(workspace, CancellationToken.None);
+        }
+
+        var updatedDoc = workspace.CurrentSolution.GetDocument(userDocId)!;
+        var text = await updatedDoc.GetTextAsync().ConfigureAwait(false);
+        return text.ToString();
     }
 }

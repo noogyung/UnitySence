@@ -125,6 +125,34 @@ export class ShaderDefinitionProvider {
           },
         ];
       }
+
+      // Case C-3: Direct struct field declaration on the cursor line
+      const directFieldSym =
+        parsed.symbols.find(
+          (s) =>
+            s.kind === 'field' &&
+            s.name === word &&
+            s.line === position.line &&
+            position.character >= s.column &&
+            position.character <= s.column + s.name.length,
+        ) ??
+        parsed.symbols.find(
+          (s) => s.kind === 'field' && s.name === word && s.line === position.line,
+        );
+      if (directFieldSym) {
+        return [
+          {
+            uri: directFieldSym.uri,
+            range: {
+              start: { line: directFieldSym.line, character: directFieldSym.column },
+              end: {
+                line: directFieldSym.line,
+                character: directFieldSym.column + directFieldSym.name.length,
+              },
+            },
+          },
+        ];
+      }
     }
 
     // Case D: General symbol lookup (Pass-scoped + HLSL CBUFFER/variable prioritized over ShaderLab Properties)

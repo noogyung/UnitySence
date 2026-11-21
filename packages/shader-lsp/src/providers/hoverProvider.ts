@@ -97,7 +97,7 @@ export class ShaderHoverProvider {
           return {
             contents: {
               kind: MarkupKind.Markdown,
-              value: `\`\`\`hlsl\n${resolved.field.signature ?? `${resolved.field.returnType ?? ''} ${resolved.field.name}`}\n\`\`\`\n\n**[UnityBrain]** 구조체 \`${resolved.ownerType}\`의 멤버\n\n선언 위치: \`${declaredIn}\``,
+              value: `\`\`\`hlsl\n${resolved.field.signature ?? `${resolved.field.returnType ?? ''} ${resolved.field.name}`}\n\`\`\`\n\n**[UnityBrain]** 구조체 \`${resolved.ownerType}\`의 멤버\n\n선언 위치: \`${declaredIn}:${resolved.field.line + 1}\``,
             },
           };
         }
@@ -146,6 +146,23 @@ export class ShaderHoverProvider {
           },
         };
       }
+
+      // 3-4. Direct struct field declaration on the cursor line
+      const directFieldSym =
+        parsed.symbols.find(
+          (s) =>
+            s.kind === 'field' &&
+            s.name === word &&
+            s.line === position.line &&
+            position.character >= s.column &&
+            position.character <= s.column + s.name.length,
+        ) ??
+        parsed.symbols.find(
+          (s) => s.kind === 'field' && s.name === word && s.line === position.line,
+        );
+      if (directFieldSym) {
+        return this.buildSymbolHover(directFieldSym, undefined, projectRoot);
+      }
     }
 
     // 4. Visible symbols from Include graph (Pass-scoped + HLSL variable preferred over Property)
@@ -174,7 +191,16 @@ export class ShaderHoverProvider {
   }
 
   private buildSymbolHover(
-    sym: { name: string; kind: string; returnType?: string; signature?: string; documentation?: string; uri: string },
+    sym: {
+      name: string;
+      kind: string;
+      returnType?: string;
+      signature?: string;
+      documentation?: string;
+      uri: string;
+      line?: number;
+      containerName?: string;
+    },
     propNote: { name: string; signature?: string; documentation?: string } | undefined,
     projectRoot?: string,
   ): Hover {
@@ -184,6 +210,9 @@ export class ShaderHoverProvider {
     ];
     if (sym.documentation) {
       parts.push(sym.documentation);
+    }
+    if (sym.kind === 'field' && sym.containerName) {
+      parts.push(`**[UnityBrain]** 구조체 \`${sym.containerName}\`의 멤버`);
     }
     if (propNote) {
       parts.push(`ShaderLab 프로퍼티: \`${propNote.signature ?? propNote.name}\``);
@@ -204,7 +233,8 @@ export class ShaderHoverProvider {
         parts.push(`색상 미리보기: \`rgba(${cm[1]}, ${cm[2]}, ${cm[3]}, ${cm[4]})\` · **\`${hex}\`**`);
       }
     }
-    parts.push(`**[UnityBrain]** 선언 위치: \`${declaredIn}\``);
+    const locWithLine = sym.line !== undefined ? `${declaredIn}:${sym.line + 1}` : declaredIn;
+    parts.push(`**[UnityBrain]** 선언 위치: \`${locWithLine}\``);
     return {
       contents: {
         kind: MarkupKind.Markdown,

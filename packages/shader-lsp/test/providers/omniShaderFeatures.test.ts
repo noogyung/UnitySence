@@ -156,4 +156,59 @@ describe('Omni Shader Features in shader-lsp', () => {
     const colorHover = hover.provideHover(uri, { line: 15, character: 55 }, src, ctx.projectRoot);
     expect((colorHover?.contents as { value: string }).value).toContain('#FF8000FF');
   });
+
+  it('disambiguates Hover on same-named struct field declarations (Step8Attributes vs Step8Varyings)', () => {
+    const ctx = createTempContext();
+    const graph = new IncludeDependencyGraph(ctx);
+    const hover = new ShaderHoverProvider(graph);
+    const uri = pathToFileURL(path.join(ctx.projectRoot, 'Assets', 'Shaders', 'Step8SurfaceDemo.shader')).toString();
+
+    const src = [
+      'Shader "UnityBrain/Step8SurfaceDemo"',
+      '{',
+      '    SubShader',
+      '    {',
+      '        Pass',
+      '        {',
+      '            HLSLPROGRAM',
+      '            struct Step8Attributes',
+      '            {',
+      '                float4 positionOS : POSITION;',
+      '                float2 texcoord : TEXCOORD0;',
+      '            };',
+      '            struct Step8Varyings',
+      '            {',
+      '                float4 positionHCS : SV_POSITION;',
+      '                float2 texcoord : TEXCOORD0;',
+      '            };',
+      '            Step8Varyings Vert(Step8Attributes input)',
+      '            {',
+      '                Step8Varyings output;',
+      '                output.texcoord = input.texcoord;',
+      '                return output;',
+      '            }',
+      '            ENDHLSL',
+      '        }',
+      '    }',
+      '}',
+    ].join('\n');
+
+    const lines = src.split('\n');
+    const attrTexLine = lines.findIndex((l, idx) => idx < 12 && l.includes('float2 texcoord'));
+    const attrTexCol = lines[attrTexLine].indexOf('texcoord') + 2;
+    const varyTexLine = lines.findIndex((l, idx) => idx > 12 && l.includes('float2 texcoord'));
+    const varyTexCol = lines[varyTexLine].indexOf('texcoord') + 2;
+
+    const attrHover = hover.provideHover(uri, { line: attrTexLine, character: attrTexCol }, src, ctx.projectRoot);
+    const attrValue = (attrHover?.contents as { value: string }).value;
+    expect(attrValue).toContain('Step8Attributes');
+    expect(attrValue).not.toContain('Step8Varyings');
+    expect(attrValue).toContain(`Step8SurfaceDemo.shader:${attrTexLine + 1}`);
+
+    const varyHover = hover.provideHover(uri, { line: varyTexLine, character: varyTexCol }, src, ctx.projectRoot);
+    const varyValue = (varyHover?.contents as { value: string }).value;
+    expect(varyValue).toContain('Step8Varyings');
+    expect(varyValue).not.toContain('Step8Attributes');
+    expect(varyValue).toContain(`Step8SurfaceDemo.shader:${varyTexLine + 1}`);
+  });
 });

@@ -7,6 +7,7 @@ import type { UnityProjectContext } from '../../src/contracts/index.ts';
 import { IncludeDependencyGraph } from '../../../shader-lsp/src/indexer/hlslIncludeGraph.ts';
 import {
   collectComputeAndShaderLabDiagnostics,
+  ShaderDocumentHighlightProvider,
   ShaderDocumentSymbolProvider,
   ShaderReferenceProvider,
   ShaderRenameProvider,
@@ -327,5 +328,199 @@ describe('Omni Shader Integrated Capabilities', () => {
       '    /* closing',
       '*/ }',
     ].join('\n'));
+  });
+
+  it('disambiguates struct field References, Rename, and DocumentHighlight across structs sharing field names (Step8SurfaceDemo pattern)', () => {
+    const ctx = createTempProject();
+    const graph = new IncludeDependencyGraph(ctx);
+    const refProvider = new ShaderReferenceProvider(graph);
+    const renameProvider = new ShaderRenameProvider(graph);
+    const highlightProvider = new ShaderDocumentHighlightProvider(graph);
+    const shaderPath = path.join(ctx.projectRoot, 'Assets', 'Shaders', 'Step8SurfaceDemo.shader');
+    const content = [
+      'Shader "UnityBrain/Step8SurfaceDemo"',
+      '{',
+      '    SubShader',
+      '    {',
+      '        Pass',
+      '        {',
+      '            HLSLPROGRAM',
+      '            #pragma vertex Vert',
+      '            #pragma fragment Frag',
+      '            struct Step8Attributes',
+      '            {',
+      '                float4 positionOS : POSITION;',
+      '                float2 texcoord : TEXCOORD0;',
+      '            };',
+      '            struct Step8Varyings',
+      '            {',
+      '                float4 positionHCS : SV_POSITION;',
+      '                float2 texcoord : TEXCOORD0;',
+      '            };',
+      '            Step8Varyings Vert(Step8Attributes input)',
+      '            {',
+      '                Step8Varyings output;',
+      '                output.positionHCS = float4(input.positionOS.xyz, 1.0);',
+      '                output.texcoord = input.texcoord;',
+      '                return output;',
+      '            }',
+      '            half4 Frag(Step8Varyings input) : SV_Target',
+      '            {',
+      '                half4 sampled = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, input.texcoord);',
+      '                half rChannel = _MainTex.Sample(sampler_MainTex, input.texcoord).r;',
+      '                return sampled * rChannel;',
+      '            }',
+      '            ENDHLSL',
+      '        }',
+      '    }',
+      '}',
+    ].join('\n');
+    const doc = makeDoc(shaderPath, content);
+    const lines = content.split('\n');
+
+    const attrTexLine = lines.findIndex((l, idx) => idx < 15 && l.includes('float2 texcoord'));
+    const attrTexCol = lines[attrTexLine].indexOf('texcoord');
+    const varyTexLine = lines.findIndex((l, idx) => idx > 15 && l.includes('float2 texcoord'));
+    const varyTexCol = lines[varyTexLine].indexOf('texcoord');
+    const vertAssignLine = lines.findIndex((l) => l.includes('output.texcoord = input.texcoord;'));
+    const vertOutCol = lines[vertAssignLine].indexOf('texcoord');
+    const vertInCol = lines[vertAssignLine].lastIndexOf('texcoord');
+    const fragSampleLine1 = lines.findIndex((l) => l.includes('SAMPLE_TEXTURE2D'));
+    const fragSampleCol1 = lines[fragSampleLine1].indexOf('texcoord');
+    const fragSampleLine2 = lines.findIndex((l) => l.includes('_MainTex.Sample'));
+    const fragSampleCol2 = lines[fragSampleLine2].indexOf('texcoord');
+
+    const expectedAttrCoords = [
+      { line: attrTexLine, col: attrTexCol },
+      { line: vertAssignLine, col: vertInCol },
+    ];
+    const expectedVaryCoords = [
+      { line: varyTexLine, col: varyTexCol },
+      { line: vertAssignLine, col: vertOutCol },
+      { line: fragSampleLine1, col: fragSampleCol1 },
+      { line: fragSampleLine2, col: fragSampleCol2 },
+    ];
+
+    const toCoords = (locs: Array<{ range: vscode.Range }>) =>
+      locs.map((l) => ({ line: l.range.start.line, col: l.range.start.character }));
+
+    // 1. References & Rename on Step8Attributes.texcoord (decl + Vert input.texcoord) -> ONLY 2 locations
+    for (const pos of [
+      new vscode.Position(attrTexLine, attrTexCol + 2),
+      new vscode.Position(vertAssignLine, vertInCol + 2),
+    ]) {
+      const refs = refProvider.provideReferences(doc, pos);
+      expect(toCoords(refs)).toEqual(expectedAttrCoords);
+
+      const edit = renameProvider.provideRenameEdits(doc, pos, 'uvIn');
+      expect(toCoords(edit?.get(doc.uri) ?? [])).toEqual(expectedAttrCoords);
+
+      const highlights = highlightProvider.provideDocumentHighlights(doc, pos);
+      expect(toCoords(highlights)).toEqual(expectedAttrCoords);
+      expect(highlights.every((h) => h.kind === vscode.DocumentHighlightKind.Read)).toBe(true);
+    }
+
+    // 2. References & Rename & Highlight on Step8Varyings.texcoord (decl + output.texcoord + Frag 2x input.texcoord) -> ONLY 4 locations
+    for (const pos of [
+      new vscode.Position(varyTexLine, varyTexCol + 2),
+      new vscode.Position(vertAssignLine, vertOutCol + 2),
+      new vscode.Position(fragSampleLine1, fragSampleCol1 + 2),
+      new vscode.Position(fragSampleLine2, fragSampleCol2 + 2),
+    ]) {
+      const refs = refProvider.provideReferences(doc, pos);
+      expect(toCoords(refs)).toEqual(expectedVaryCoords);
+
+      const edit = renameProvider.provideRenameEdits(doc, pos, 'uvOut');
+      expect(toCoords(edit?.get(doc.uri) ?? [])).toEqual(expectedVaryCoords);
+
+      const highlights = highlightProvider.provideDocumentHighlights(doc, pos);
+      expect(toCoords(highlights)).toEqual(expectedVaryCoords);
+      expect(highlights.find((h) => h.range.start.line === vertAssignLine)?.kind).toBe(
+        vscode.DocumentHighlightKind.Write,
+      );
+    }
+
+    // 3. DocumentHighlight isolates Vert's `input` parameter from Frag's `input` parameter
+    const vertFnLine = lines.findIndex((l) => l.includes('Step8Varyings Vert('));
+    const vertParamCol = lines[vertFnLine].indexOf('input');
+    const fragFnLine = lines.findIndex((l) => l.includes('half4 Frag('));
+    const fragParamCol = lines[fragFnLine].indexOf('input');
+
+    const vertInputHighlights = highlightProvider.provideDocumentHighlights(
+      doc,
+      new vscode.Position(vertFnLine, vertParamCol + 1),
+    );
+    expect(vertInputHighlights.length).toBe(3);
+    expect(vertInputHighlights.every((h) => h.range.start.line >= vertFnLine && h.range.start.line < fragFnLine)).toBe(
+      true,
+    );
+
+    const fragInputHighlights = highlightProvider.provideDocumentHighlights(
+      doc,
+      new vscode.Position(fragFnLine, fragParamCol + 1),
+    );
+    expect(fragInputHighlights.length).toBe(3);
+    expect(fragInputHighlights.every((h) => h.range.start.line >= fragFnLine)).toBe(true);
+  });
+
+  it('disambiguates struct field References across included HLSL files', () => {
+    const ctx = createTempProject();
+    const includePath = path.join(ctx.projectRoot, 'Assets', 'Shaders', 'CommonStructs.hlsl');
+    const includeContent = [
+      'struct SharedInput',
+      '{',
+      '    float2 texcoord : TEXCOORD0;',
+      '};',
+      'struct OtherStruct',
+      '{',
+      '    float2 texcoord : TEXCOORD1;',
+      '};',
+    ].join('\n');
+    fs.writeFileSync(includePath, includeContent, 'utf8');
+
+    const shaderPath = path.join(ctx.projectRoot, 'Assets', 'Shaders', 'CrossFileField.shader');
+    const shaderContent = [
+      'Shader "Custom/CrossFileField"',
+      '{',
+      '    SubShader',
+      '    {',
+      '        Pass',
+      '        {',
+      '            HLSLPROGRAM',
+      '            #include "CommonStructs.hlsl"',
+      '            float2 useIt(SharedInput a, OtherStruct b)',
+      '            {',
+      '                return a.texcoord + b.texcoord;',
+      '            }',
+      '            ENDHLSL',
+      '        }',
+      '    }',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(shaderPath, shaderContent, 'utf8');
+
+    const graph = new IncludeDependencyGraph(ctx);
+    const refProvider = new ShaderReferenceProvider(graph);
+    const renameProvider = new ShaderRenameProvider(graph);
+    const shaderDoc = makeDoc(shaderPath, shaderContent);
+    const useLine = shaderContent.split('\n').findIndex((l) => l.includes('a.texcoord + b.texcoord'));
+    const aTexCol = shaderContent.split('\n')[useLine].indexOf('texcoord');
+
+    const refs = refProvider.provideReferences(shaderDoc, new vscode.Position(useLine, aTexCol + 2));
+    expect(refs.length).toBe(2);
+    expect(refs.some((r) => path.basename(r.uri.fsPath) === 'CommonStructs.hlsl' && r.range.start.line === 2)).toBe(
+      true,
+    );
+    expect(refs.some((r) => path.basename(r.uri.fsPath) === 'CommonStructs.hlsl' && r.range.start.line === 6)).toBe(
+      false,
+    );
+    expect(refs.some((r) => path.basename(r.uri.fsPath) === 'CrossFileField.shader' && r.range.start.line === useLine && r.range.start.character === aTexCol)).toBe(
+      true,
+    );
+
+    const renameEdit = renameProvider.provideRenameEdits(shaderDoc, new vscode.Position(useLine, aTexCol + 2), 'uv0');
+    const includeUri = vscode.Uri.file(includePath);
+    expect(renameEdit?.get(includeUri)?.map((e) => e.range.start.line)).toEqual([2]);
+    expect(renameEdit?.get(shaderDoc.uri)?.map((e) => e.range.start.character)).toEqual([aTexCol]);
   });
 });

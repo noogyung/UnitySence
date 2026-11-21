@@ -322,4 +322,75 @@ describe('ShaderDefinitionProvider', () => {
     expect(swizDefs.length).toBe(1);
     expect(swizDefs[0].range.start.line).toBe(sLines.findIndex((l) => l.includes('TEXTURE2D(_MainTex)')));
   });
+
+  it('disambiguates Go-to-Definition on same-named struct fields (Step8Attributes vs Step8Varyings)', () => {
+    const { projectRoot, ctx } = setupDefinitionFixture();
+    const graph = new IncludeDependencyGraph(ctx);
+    const provider = new ShaderDefinitionProvider(graph);
+    const shaderPath = path.join(projectRoot, 'Assets', 'Shaders', 'Step8DefDemo.shader');
+    const shaderUri = pathToFileURL(shaderPath).toString();
+    const code = [
+      'Shader "UnityBrain/Step8DefDemo"',
+      '{',
+      '    SubShader',
+      '    {',
+      '        Pass',
+      '        {',
+      '            HLSLPROGRAM',
+      '            struct Step8Attributes',
+      '            {',
+      '                float4 positionOS : POSITION;',
+      '                float2 texcoord : TEXCOORD0;',
+      '            };',
+      '            struct Step8Varyings',
+      '            {',
+      '                float4 positionHCS : SV_POSITION;',
+      '                float2 texcoord : TEXCOORD0;',
+      '            };',
+      '            Step8Varyings Vert(Step8Attributes input)',
+      '            {',
+      '                Step8Varyings output;',
+      '                output.texcoord = input.texcoord;',
+      '                return output;',
+      '            }',
+      '            half4 Frag(Step8Varyings input) : SV_Target',
+      '            {',
+      '                return half4(input.texcoord, 0, 1);',
+      '            }',
+      '            ENDHLSL',
+      '        }',
+      '    }',
+      '}',
+    ].join('\n');
+
+    const lines = code.split('\n');
+    const attrTexLine = lines.findIndex((l, idx) => idx < 13 && l.includes('float2 texcoord'));
+    const varyTexLine = lines.findIndex((l, idx) => idx > 13 && l.includes('float2 texcoord'));
+    const vertAssignLine = lines.findIndex((l) => l.includes('output.texcoord = input.texcoord;'));
+    const fragUseLine = lines.findIndex((l) => l.includes('half4(input.texcoord'));
+
+    // Direct declaration of Step8Varyings.texcoord returns only Step8Varyings.texcoord
+    const varyDeclCol = lines[varyTexLine].indexOf('texcoord') + 2;
+    const varyDeclDefs = provider.provideDefinition(shaderUri, { line: varyTexLine, character: varyDeclCol }, code);
+    expect(varyDeclDefs.length).toBe(1);
+    expect(varyDeclDefs[0].range.start.line).toBe(varyTexLine);
+
+    // Vert's `input.texcoord` -> Step8Attributes.texcoord
+    const vertInCol = lines[vertAssignLine].lastIndexOf('texcoord') + 2;
+    const vertInDefs = provider.provideDefinition(shaderUri, { line: vertAssignLine, character: vertInCol }, code);
+    expect(vertInDefs.length).toBe(1);
+    expect(vertInDefs[0].range.start.line).toBe(attrTexLine);
+
+    // Vert's `output.texcoord` -> Step8Varyings.texcoord
+    const vertOutCol = lines[vertAssignLine].indexOf('texcoord') + 2;
+    const vertOutDefs = provider.provideDefinition(shaderUri, { line: vertAssignLine, character: vertOutCol }, code);
+    expect(vertOutDefs.length).toBe(1);
+    expect(vertOutDefs[0].range.start.line).toBe(varyTexLine);
+
+    // Frag's `input.texcoord` -> Step8Varyings.texcoord
+    const fragInCol = lines[fragUseLine].indexOf('texcoord') + 2;
+    const fragInDefs = provider.provideDefinition(shaderUri, { line: fragUseLine, character: fragInCol }, code);
+    expect(fragInDefs.length).toBe(1);
+    expect(fragInDefs[0].range.start.line).toBe(varyTexLine);
+  });
 });

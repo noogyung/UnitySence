@@ -730,7 +730,7 @@ export async function activate(
   const shaderSemanticTokensProvider = new ShaderSemanticTokensProvider(shaderGraph, semanticLegend);
   const shaderDocumentSymbolProvider = new ShaderDocumentSymbolProvider(shaderGraph);
   const shaderSignatureHelpProvider = new ShaderSignatureHelpProvider(shaderGraph);
-  const shaderHighlightProvider = new ShaderDocumentHighlightProvider();
+  const shaderHighlightProvider = new ShaderDocumentHighlightProvider(shaderGraph);
   const shaderReferenceProvider = new ShaderReferenceProvider(shaderGraph);
   const shaderRenameProvider = new ShaderRenameProvider(shaderGraph);
   const shaderFoldingRangeProvider = new ShaderFoldingRangeProvider();

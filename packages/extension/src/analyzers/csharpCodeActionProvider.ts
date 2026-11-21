@@ -26,6 +26,7 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
   public provideCodeActions(
     document: vscode.TextDocument,
     range: vscode.Range | vscode.Selection,
+    context?: vscode.CodeActionContext,
   ): vscode.CodeAction[] {
     if (document.languageId !== 'csharp') return [];
     const actions: vscode.CodeAction[] = [];
@@ -39,6 +40,17 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
     if (classCtx) {
       const cacheAction = this.tryBuildCacheComponentAction(document, lines, text, targetLineIdx, lineText, classCtx);
       if (cacheAction) actions.push(cacheAction);
+
+      const cameraMainAction = this.tryBuildCacheCameraMainAction(
+        document,
+        lines,
+        text,
+        targetLineIdx,
+        lineText,
+        classCtx,
+        context,
+      );
+      if (cameraMainAction) actions.push(cameraMainAction);
 
       const hashAction = this.tryBuildExtractHashAction(document, lines, text, targetLineIdx, lineText, classCtx);
       if (hashAction) actions.push(hashAction);
@@ -74,13 +86,14 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
       return null;
     }
 
+    const codeBeforeComment = lineText.replace(/\/\/.*$/, '');
     const gcMatch = /\b(?:(?:this|gameObject|transform)\s*\.\s*)?(GetComponent(?:InChildren|InParent)?)\s*<\s*([A-Za-z_][A-Za-z0-9_.]*)\s*>\s*\(\s*\)/.exec(
-      lineText,
+      codeBeforeComment,
     );
     if (!gcMatch) return null;
 
     // Skip external receivers like `other.GetComponent<T>()`
-    const beforeCall = lineText.slice(0, gcMatch.index);
+    const beforeCall = codeBeforeComment.slice(0, gcMatch.index);
     if (/\.\s*$/.test(beforeCall)) return null;
 
     const callMethod = gcMatch[1];
@@ -88,6 +101,102 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
     const shortType = typeName.includes('.') ? typeName.slice(typeName.lastIndexOf('.') + 1) : typeName;
     const fieldName = `_cached${shortType}`;
 
+    const edit = this.buildCacheInAwakeEdit(document, lines, fullText, lineIdx, classCtx, {
+      matchStart: gcMatch.index,
+      matchEnd: gcMatch.index + gcMatch[0].length,
+      fieldType: typeName,
+      fieldName,
+      initExpression: `${callMethod}<${typeName}>()`,
+    });
+
+    const action = new vscode.CodeAction(
+      `[UnityBrain] Awake()에 '${shortType}' 컴포넌트 캐싱 (${fieldName})`,
+      vscode.CodeActionKind.QuickFix,
+    );
+    action.edit = edit;
+    action.isPreferred = true;
+    return action;
+  }
+
+  private tryBuildCacheCameraMainAction(
+    document: vscode.TextDocument,
+    lines: string[],
+    fullText: string,
+    lineIdx: number,
+    lineText: string,
+    classCtx: NonNullable<ReturnType<typeof findEnclosingClassContext>>,
+    context?: vscode.CodeActionContext,
+  ): vscode.CodeAction | null {
+    const enclosingMethod = this.findEnclosingMethodName(lines, lineIdx);
+    const isPerfCriticalMethod = Boolean(enclosingMethod && PERF_CRITICAL_METHOD_NAMES.has(enclosingMethod));
+    const hasUb1001Diag = this.hasDiagnosticCodeOnLine(context, lineIdx, 'UB1001');
+    if (!isPerfCriticalMethod && !hasUb1001Diag) {
+      return null;
+    }
+
+    const codeBeforeComment = lineText.replace(/\/\/.*$/, '');
+    const camMatch = /(?<![A-Za-z0-9_.])(?:UnityEngine\s*\.\s*)?Camera\s*\.\s*main\b/.exec(codeBeforeComment);
+    if (!camMatch) return null;
+
+    const fieldType =
+      camMatch[0].startsWith('UnityEngine') && !/\busing\s+UnityEngine\s*;/.test(fullText)
+        ? 'UnityEngine.Camera'
+        : 'Camera';
+    const fieldName = '_cachedMainCamera';
+    const initExpression = camMatch[0].replace(/\s+/g, '');
+
+    const edit = this.buildCacheInAwakeEdit(document, lines, fullText, lineIdx, classCtx, {
+      matchStart: camMatch.index,
+      matchEnd: camMatch.index + camMatch[0].length,
+      fieldType,
+      fieldName,
+      initExpression,
+    });
+
+    const action = new vscode.CodeAction(
+      `[UnityBrain] Awake()에 'Camera.main' 캐싱 (${fieldName})`,
+      vscode.CodeActionKind.QuickFix,
+    );
+    action.edit = edit;
+    action.isPreferred = true;
+    return action;
+  }
+
+  private hasDiagnosticCodeOnLine(
+    context: vscode.CodeActionContext | undefined,
+    lineIdx: number,
+    targetCode: string,
+  ): boolean {
+    if (!context?.diagnostics) return false;
+    return context.diagnostics.some((diag) => {
+      if (diag.range.start.line > lineIdx || diag.range.end.line < lineIdx) {
+        return false;
+      }
+      const rawCode =
+        typeof diag.code === 'object' && diag.code !== null
+          ? String(diag.code.value)
+          : diag.code !== undefined
+            ? String(diag.code)
+            : '';
+      return rawCode.includes(targetCode);
+    });
+  }
+
+  private buildCacheInAwakeEdit(
+    document: vscode.TextDocument,
+    lines: string[],
+    fullText: string,
+    lineIdx: number,
+    classCtx: NonNullable<ReturnType<typeof findEnclosingClassContext>>,
+    opts: {
+      matchStart: number;
+      matchEnd: number;
+      fieldType: string;
+      fieldName: string;
+      initExpression: string;
+    },
+  ): vscode.WorkspaceEdit {
+    const { matchStart, matchEnd, fieldType, fieldName, initExpression } = opts;
     const classStartPos = document.positionAt(classCtx.classOpenBraceOffset);
     const classEndPos = document.positionAt(classCtx.classCloseBraceOffset);
     const classStartLine = classStartPos.line;
@@ -100,52 +209,101 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
       edit.insert(
         document.uri,
         new vscode.Position(classStartLine + 1, 0),
-        `${indent}private ${typeName} ${fieldName};\n`,
+        `${indent}private ${fieldType} ${fieldName};\n`,
       );
     }
 
     const awakeBody = this.findMethodBodyStart(lines, classStartLine, classEndPos, 'Awake');
     if (awakeBody !== null) {
-      if (awakeBody.sameLineCloseCol !== undefined) {
-        const lineStr = lines[awakeBody.openLine] ?? '';
-        const inner = lineStr.slice(awakeBody.openCol + 1, awakeBody.sameLineCloseCol).trim();
-        const methodIndent = /^(\s*)/.exec(lineStr)?.[1] ?? indent;
-        const innerLines = inner
-          ? `\n${methodIndent}${indent}${fieldName} = ${callMethod}<${typeName}>();\n${methodIndent}${indent}${inner}\n${methodIndent}`
-          : `\n${methodIndent}${indent}${fieldName} = ${callMethod}<${typeName}>();\n${methodIndent}`;
-        edit.replace(
-          document.uri,
-          new vscode.Range(awakeBody.openLine, awakeBody.openCol + 1, awakeBody.openLine, awakeBody.sameLineCloseCol),
-          innerLines,
-        );
-      } else {
-        edit.insert(
-          document.uri,
-          new vscode.Position(awakeBody.openLine + 1, 0),
-          `${indent}${indent}${fieldName} = ${callMethod}<${typeName}>();\n`,
-        );
+      const awakeBodyText = this.extractMethodBodyText(lines, awakeBody, classEndPos).replace(/\/\/.*$/gm, '');
+      const alreadyAssigned = new RegExp(`\\b${fieldName}\\s*=`).test(awakeBodyText);
+      if (!alreadyAssigned) {
+        if (awakeBody.sameLineCloseCol !== undefined) {
+          const lineStr = lines[awakeBody.openLine] ?? '';
+          const inner = lineStr.slice(awakeBody.openCol + 1, awakeBody.sameLineCloseCol).trim();
+          const methodIndent = /^(\s*)/.exec(lineStr)?.[1] ?? indent;
+          const innerLines = inner
+            ? `\n${methodIndent}${indent}${fieldName} = ${initExpression};\n${methodIndent}${indent}${inner}\n${methodIndent}`
+            : `\n${methodIndent}${indent}${fieldName} = ${initExpression};\n${methodIndent}`;
+          edit.replace(
+            document.uri,
+            new vscode.Range(awakeBody.openLine, awakeBody.openCol + 1, awakeBody.openLine, awakeBody.sameLineCloseCol),
+            innerLines,
+          );
+        } else {
+          edit.insert(
+            document.uri,
+            new vscode.Position(awakeBody.openLine + 1, 0),
+            `${indent}${indent}${fieldName} = ${initExpression};\n`,
+          );
+        }
       }
     } else {
       edit.insert(
         document.uri,
         new vscode.Position(classStartLine + 1, 0),
-        `\n${indent}private void Awake()\n${indent}{\n${indent}${indent}${fieldName} = ${callMethod}<${typeName}>();\n${indent}}\n`,
+        `\n${indent}private void Awake()\n${indent}{\n${indent}${indent}${fieldName} = ${initExpression};\n${indent}}\n`,
       );
     }
 
     edit.replace(
       document.uri,
-      new vscode.Range(lineIdx, gcMatch.index, lineIdx, gcMatch.index + gcMatch[0].length),
+      new vscode.Range(lineIdx, matchStart, lineIdx, matchEnd),
       fieldName,
     );
 
-    const action = new vscode.CodeAction(
-      `[UnityBrain] Awake()에 '${shortType}' 컴포넌트 캐싱 (${fieldName})`,
-      vscode.CodeActionKind.QuickFix,
-    );
-    action.edit = edit;
-    action.isPreferred = true;
-    return action;
+    return edit;
+  }
+
+  private extractMethodBodyText(
+    lines: string[],
+    bodyStart: { openLine: number; openCol: number; sameLineCloseCol?: number },
+    endPos: vscode.Position,
+  ): string {
+    if (bodyStart.sameLineCloseCol !== undefined) {
+      const lineStr = lines[bodyStart.openLine] ?? '';
+      return lineStr.slice(bodyStart.openCol + 1, bodyStart.sameLineCloseCol);
+    }
+
+    const chunks: string[] = [];
+    let depth = 1;
+    const maxLine = Math.min(endPos.line, lines.length - 1);
+    for (let i = bodyStart.openLine; i <= maxLine; i++) {
+      const rawLine = i === endPos.line ? (lines[i] ?? '').slice(0, endPos.character) : (lines[i] ?? '');
+      const startCol = i === bodyStart.openLine ? bodyStart.openCol + 1 : 0;
+      let endCol = rawLine.length;
+      let inStr = false;
+
+      for (let c = startCol; c < rawLine.length; c++) {
+        const ch = rawLine[c];
+        if (inStr) {
+          if (ch === '\\') {
+            c++;
+          } else if (ch === '"') {
+            inStr = false;
+          }
+          continue;
+        }
+        if (ch === '/' && rawLine[c + 1] === '/') {
+          break;
+        }
+        if (ch === '"') {
+          inStr = true;
+        } else if (ch === '{') {
+          depth++;
+        } else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            endCol = c;
+            break;
+          }
+        }
+      }
+
+      chunks.push(rawLine.slice(startCol, endCol));
+      if (depth === 0) break;
+    }
+    return chunks.join('\n');
   }
 
   private tryBuildExtractHashAction(

@@ -137,4 +137,131 @@ describe('UnityCSharpCodeActionProvider', () => {
     expect(firstActorPart).toContain('_cachedRigidbody = GetComponent<Rigidbody>();');
     expect(secondActorPart).not.toContain('_cachedRigidbody');
   });
+
+  it('provides QuickFix for Camera.main in Update() and ignores commented-out Camera.main / GetComponent', async () => {
+    fs.mkdirSync(TEMP_DIR, { recursive: true });
+    const csPath = path.join(TEMP_DIR, 'CameraMainQuickFix.cs');
+    const source = [
+      'using UnityEngine;',
+      '',
+      'public class CameraController : MonoBehaviour',
+      '{',
+      '    private void Update()',
+      '    {',
+      '        Camera.main.backgroundColor = Color.Lerp(Color.red, Color.blue, Mathf.PingPong(Time.time, 1));',
+      '        // Camera.main.backgroundColor = Color.black;',
+      '        // var rb = GetComponent<Rigidbody>();',
+      '    }',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(csPath, source, 'utf8');
+
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(csPath));
+    const provider = new UnityCSharpCodeActionProvider();
+
+    // Active Camera.main line offers QuickFix
+    const camActions = provider.provideCodeActions(doc, new vscode.Range(6, 12, 6, 12));
+    const camFix = camActions.find((a) => a.title === "[UnityBrain] Awake()에 'Camera.main' 캐싱 (_cachedMainCamera)");
+    expect(camFix).toBeDefined();
+    expect(camFix?.kind).toBe(vscode.CodeActionKind.QuickFix);
+    expect(camFix?.isPreferred).toBe(true);
+    await vscode.workspace.applyEdit(camFix!.edit!);
+
+    const afterFix = fs.readFileSync(csPath, 'utf8');
+    expect(afterFix).toContain('private Camera _cachedMainCamera;');
+    expect(afterFix).toContain('private void Awake()');
+    expect(afterFix).toContain('_cachedMainCamera = Camera.main;');
+    expect(afterFix).toContain(
+      '_cachedMainCamera.backgroundColor = Color.Lerp(Color.red, Color.blue, Mathf.PingPong(Time.time, 1));',
+    );
+    expect(afterFix).not.toContain('        Camera.main.backgroundColor');
+
+    // Commented-out Camera.main and GetComponent<T>() must NOT offer caching QuickFix
+    const commentedCamActions = provider.provideCodeActions(doc, new vscode.Range(7, 15, 7, 15));
+    expect(commentedCamActions.some((a) => a.title.includes('Camera.main'))).toBe(false);
+
+    const commentedGcActions = provider.provideCodeActions(doc, new vscode.Range(8, 20, 8, 20));
+    expect(commentedGcActions.some((a) => a.title.includes('컴포넌트 캐싱'))).toBe(false);
+  });
+
+  it('appends Camera.main to existing Awake(), avoids duplicates, and triggers via UB1001 diagnostic in helpers', async () => {
+    fs.mkdirSync(TEMP_DIR, { recursive: true });
+    const csPath = path.join(TEMP_DIR, 'CameraMainExistingAwake.cs');
+    const sourceWithAwake = [
+      'using UnityEngine;',
+      '',
+      'public class HudCamera : MonoBehaviour',
+      '{',
+      '    private int _ready;',
+      '    private void Awake()',
+      '    {',
+      '        _ready = 1;',
+      '    }',
+      '',
+      '    private void SyncCamera()',
+      '    {',
+      '        Camera.main.backgroundColor = Color.Lerp(Color.red, Color.blue, Mathf.PingPong(Time.time, 1));',
+      '    }',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(csPath, sourceWithAwake, 'utf8');
+
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(csPath));
+    const provider = new UnityCSharpCodeActionProvider();
+
+    // Without UB1001 diagnostic, non-critical helper SyncCamera() does not trigger Camera.main QuickFix
+    const noDiagActions = provider.provideCodeActions(doc, new vscode.Range(12, 10, 12, 10));
+    expect(noDiagActions.some((a) => a.title.includes('Camera.main'))).toBe(false);
+
+    // With UB1001 diagnostic context, SyncCamera() DOES trigger Camera.main QuickFix
+    const diagContext = {
+      diagnostics: [
+        {
+          range: new vscode.Range(12, 8, 12, 19),
+          code: { value: 'UB1001' },
+        },
+      ],
+    } as unknown as vscode.CodeActionContext;
+    const withDiagActions = provider.provideCodeActions(doc, new vscode.Range(12, 10, 12, 10), diagContext);
+    const camFix = withDiagActions.find((a) => a.title.includes('Camera.main'));
+    expect(camFix).toBeDefined();
+    await vscode.workspace.applyEdit(camFix!.edit!);
+
+    const afterAppend = fs.readFileSync(csPath, 'utf8');
+    expect(afterAppend).toContain('private Camera _cachedMainCamera;');
+    expect(afterAppend).toContain('_cachedMainCamera = Camera.main;');
+    expect(afterAppend).toContain('_ready = 1;');
+    expect(afterAppend.split('Awake()').length - 1).toBe(1);
+    expect(afterAppend).toContain('_cachedMainCamera.backgroundColor =');
+
+    // If _cachedMainCamera and Awake assignment already exist, do NOT duplicate field or assignment
+    const alreadyCachedSource = [
+      'using UnityEngine;',
+      '',
+      'public class HudCamera : MonoBehaviour',
+      '{',
+      '    private Camera _cachedMainCamera;',
+      '    private void Awake()',
+      '    {',
+      '        _cachedMainCamera = Camera.main;',
+      '    }',
+      '',
+      '    private void Update()',
+      '    {',
+      '        Camera.main.backgroundColor = Color.white;',
+      '    }',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(csPath, alreadyCachedSource, 'utf8');
+    const doc2 = vscode.__mock.createTextDocument(vscode.Uri.file(csPath), alreadyCachedSource, 'csharp');
+    const secondActions = provider.provideCodeActions(doc2, new vscode.Range(12, 10, 12, 10));
+    const secondFix = secondActions.find((a) => a.title.includes('Camera.main'));
+    expect(secondFix).toBeDefined();
+    await vscode.workspace.applyEdit(secondFix!.edit!);
+
+    const afterSecond = fs.readFileSync(csPath, 'utf8');
+    expect(afterSecond.split('private Camera _cachedMainCamera;').length - 1).toBe(1);
+    expect(afterSecond.split('_cachedMainCamera = Camera.main;').length - 1).toBe(1);
+    expect(afterSecond).toContain('_cachedMainCamera.backgroundColor = Color.white;');
+  });
 });
