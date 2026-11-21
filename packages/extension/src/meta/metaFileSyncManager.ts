@@ -24,7 +24,7 @@ export class MetaFileSyncManager implements vscode.Disposable {
         const delayMs = isUnityEditorRunning(this.projectRoot) ? 600 : 150;
         const timer = setTimeout(() => {
           this.pendingCreateTimers.delete(timer);
-          void this.handleDidCreateFiles(e.files);
+          void this.handleDidCreateFiles(e.files).catch(() => {});
         }, delayMs);
         this.pendingCreateTimers.add(timer);
       }),
@@ -37,7 +37,7 @@ export class MetaFileSyncManager implements vscode.Disposable {
     if (typeof workspaceWithRename.onDidRenameFiles === 'function') {
       this.disposables.push(
         workspaceWithRename.onDidRenameFiles((e) => {
-          void this.handleDidRenameFiles(e.files);
+          void this.handleDidRenameFiles(e.files).catch(() => {});
         }),
       );
     }

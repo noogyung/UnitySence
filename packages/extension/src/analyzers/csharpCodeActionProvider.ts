@@ -88,7 +88,9 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
     const shortType = typeName.includes('.') ? typeName.slice(typeName.lastIndexOf('.') + 1) : typeName;
     const fieldName = `_cached${shortType}`;
 
-    const classStartLine = document.positionAt(classCtx.classOpenBraceOffset).line;
+    const classStartPos = document.positionAt(classCtx.classOpenBraceOffset);
+    const classEndPos = document.positionAt(classCtx.classCloseBraceOffset);
+    const classStartLine = classStartPos.line;
     const indent = '    ';
     const edit = new vscode.WorkspaceEdit();
 
@@ -102,7 +104,7 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
       );
     }
 
-    const awakeBody = this.findMethodBodyStart(lines, classStartLine, 'Awake');
+    const awakeBody = this.findMethodBodyStart(lines, classStartLine, classEndPos, 'Awake');
     if (awakeBody !== null) {
       if (awakeBody.sameLineCloseCol !== undefined) {
         const lineStr = lines[awakeBody.openLine] ?? '';
@@ -164,17 +166,17 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
     }
 
     const directHash = /\b(Shader\.PropertyToID|Animator\.StringToHash)\s*\(\s*"([^"]+)"\s*\)/.exec(
-      lineText,
+      codeBeforeComment,
     );
     const shaderCall = !directHash
       ? /(?:mat|material|Material|mpb|block|PropertyBlock)[A-Za-z0-9_]*\.(?:SetFloat|SetInt|SetInteger|SetColor|SetVector|SetTexture|GetFloat|GetInt|HasProperty)\s*\(\s*("([^"]+)")/.exec(
-          lineText,
+          codeBeforeComment,
         )
       : null;
     const animCall =
       !directHash && !shaderCall
         ? /(?:anim|animator|Animator)[A-Za-z0-9_]*\.(?:SetFloat|SetInteger|SetBool|SetTrigger|ResetTrigger|GetFloat|GetBool|GetInteger|Play|CrossFade)\s*\(\s*("([^"]+)")/.exec(
-            lineText,
+            codeBeforeComment,
           )
         : null;
 
@@ -191,14 +193,14 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
       hashFactory = `${directHash[1]}("${keyName}")`;
       suffix = directHash[1].includes('Animator') ? 'Hash' : 'Id';
     } else if (shaderCall) {
-      const argIdx = lineText.indexOf(shaderCall[1], shaderCall.index);
+      const argIdx = codeBeforeComment.indexOf(shaderCall[1], shaderCall.index);
       literalOrCallStart = argIdx;
       literalOrCallEnd = argIdx + shaderCall[1].length;
       keyName = shaderCall[2];
       hashFactory = `Shader.PropertyToID("${keyName}")`;
       suffix = 'Id';
     } else if (animCall) {
-      const argIdx = lineText.indexOf(animCall[1], animCall.index);
+      const argIdx = codeBeforeComment.indexOf(animCall[1], animCall.index);
       literalOrCallStart = argIdx;
       literalOrCallEnd = argIdx + animCall[1].length;
       keyName = animCall[2];
@@ -379,13 +381,16 @@ export class UnityCSharpCodeActionProvider implements vscode.CodeActionProvider 
   private findMethodBodyStart(
     lines: string[],
     startLine: number,
+    endPos: vscode.Position,
     methodName: string,
   ): { openLine: number; openCol: number; sameLineCloseCol?: number } | null {
     const re = new RegExp(`\\bvoid\\s+${methodName}\\s*\\(`);
-    for (let i = startLine; i < lines.length; i++) {
-      if (!re.test(lines[i])) continue;
-      for (let j = i; j < Math.min(i + 4, lines.length); j++) {
-        const lineStr = lines[j];
+    const maxLine = Math.min(endPos.line, lines.length - 1);
+    for (let i = startLine; i <= maxLine; i++) {
+      const candidateLine = i === endPos.line ? lines[i].slice(0, endPos.character) : lines[i];
+      if (!re.test(candidateLine)) continue;
+      for (let j = i; j < Math.min(i + 4, maxLine + 1); j++) {
+        const lineStr = j === endPos.line ? lines[j].slice(0, endPos.character) : lines[j];
         const openCol = lineStr.indexOf('{');
         if (openCol >= 0) {
           let depth = 1;

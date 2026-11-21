@@ -170,17 +170,7 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
 
         if (inv.Expression is MemberAccessExpressionSyntax ma)
         {
-            if (ma.Expression is ThisExpressionSyntax)
-            {
-                return true;
-            }
             if (IsUnitySelfComponentOrGameObject(ma.Expression, model, ct))
-            {
-                return true;
-            }
-            if (ma.Expression is MemberAccessExpressionSyntax inner &&
-                inner.Expression is ThisExpressionSyntax &&
-                IsUnitySelfComponentOrGameObject(inner, model, ct))
             {
                 return true;
             }
@@ -189,11 +179,34 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
         return false;
     }
 
+    private static ExpressionSyntax UnwrapParentheses(ExpressionSyntax expr)
+    {
+        while (expr is ParenthesizedExpressionSyntax paren)
+        {
+            expr = paren.Expression;
+        }
+        return expr;
+    }
+
     private static bool IsUnitySelfComponentOrGameObject(
         ExpressionSyntax expr,
         SemanticModel model,
         CancellationToken ct)
     {
+        expr = UnwrapParentheses(expr);
+        if (expr is ThisExpressionSyntax)
+        {
+            return true;
+        }
+
+        bool isSelfReceiver = expr is IdentifierNameSyntax ||
+            (expr is MemberAccessExpressionSyntax inner &&
+             UnwrapParentheses(inner.Expression) is ThisExpressionSyntax);
+        if (!isSelfReceiver)
+        {
+            return false;
+        }
+
         if (model.GetSymbolInfo(expr, ct).Symbol is IPropertySymbol prop &&
             (prop.Name == "gameObject" || prop.Name == "transform"))
         {

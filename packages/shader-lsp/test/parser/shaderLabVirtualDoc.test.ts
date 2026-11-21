@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  blankShaderCommentsPreservingLayout,
   extractVirtualHlslDocument,
   parseShaderPragmas,
   parseShaderProperties,
@@ -86,5 +87,68 @@ describe('shaderLabVirtualDoc & UnityHlslMacroPrepass', () => {
     expect(outLines[5]).toContain('Texture2D tex, SamplerState smp');
     expect(res.synthesizedSymbols.some((s) => s.name === '_MainTex' && s.returnType === 'Texture2D')).toBe(true);
     expect(res.synthesizedSymbols.some((s) => s.name === 'UnityPerMaterial' && s.kind === 'cbuffer')).toBe(true);
+  });
+
+  it('computes #pragma entry point columns without matching inside stage keyword (P1-S1)', () => {
+    const pragmas = parseShaderPragmas([
+      '#pragma vertex vert',
+      '#pragma fragment frag',
+      '    #pragma vertex vert',
+    ].join('\n'));
+    expect(pragmas.entryPoints).toEqual([
+      { stage: 'vertex', name: 'vert', line: 0, column: 15 },
+      { stage: 'fragment', name: 'frag', line: 1, column: 17 },
+      { stage: 'vertex', name: 'vert', line: 2, column: 19 },
+    ]);
+  });
+
+  it('preserves UTF-16 code-unit offsets across non-BMP emoji comments without truncating code or leaking ENDHLSL (P1-S2)', () => {
+    const source = [
+      'Shader "Test/Emoji" {',
+      '  // 😀😀😀😀 outer comment',
+      '  SubShader {',
+      '    Pass {',
+      '      HLSLPROGRAM',
+      '      // 😀😀😀😀 inner comment',
+      '      float4 Frag() : SV_Target { return float4(1,1,1,1); }',
+      '      ENDHLSL',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+
+    const blanked = blankShaderCommentsPreservingLayout(source);
+    expect(blanked.length).toBe(source.length);
+    expect(blanked).toContain('float4 Frag() : SV_Target { return float4(1,1,1,1); }');
+
+    const result = extractVirtualHlslDocument(source, 'Emoji.shader');
+    expect(result.virtualHlsl.length).toBe(source.length);
+    expect(result.virtualHlsl).toContain('float4 Frag() : SV_Target { return float4(1,1,1,1); }');
+    expect(result.virtualHlsl).not.toContain('ENDHLSL');
+
+    const lines = result.virtualHlsl.split('\n');
+    const rawLines = source.split('\n');
+    const fragLine = lines.findIndex((l) => l.includes('float4 Frag'));
+    expect(lines[fragLine].indexOf('Frag')).toBe(rawLines[fragLine].indexOf('Frag'));
+  });
+
+  it('uses word-boundary column lookup for synthesized symbols in UnityHlslMacroPrepass (P1-S3)', () => {
+    const prepass = new UnityHlslMacroPrepass();
+    const hlsl = [
+      'TEXTURE2D(T);',
+      'RW_TEXTURE2D(float4, R);',
+      'SAMPLER(S);',
+      'CBUFFER_START(C)',
+      '    UNITY_DEFINE_INSTANCED_PROP(float, f)',
+      'CBUFFER_END',
+    ].join('\n');
+
+    const res = prepass.preprocess(hlsl, 'file:///short.hlsl');
+    const byName = new Map(res.synthesizedSymbols.map((s) => [s.name, s]));
+    expect(byName.get('T')?.column).toBe(10);
+    expect(byName.get('R')?.column).toBe(21);
+    expect(byName.get('S')?.column).toBe(8);
+    expect(byName.get('C')?.column).toBe(14);
+    expect(byName.get('f')?.column).toBe(39);
   });
 });

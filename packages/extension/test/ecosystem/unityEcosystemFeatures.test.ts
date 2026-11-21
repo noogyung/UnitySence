@@ -451,4 +451,60 @@ describe('Unity Ecosystem Features (Asmdef, UI Toolkit, Editor Integration)', ()
       GameObjectPath: ['Canvas', 'Hero'],
     });
   });
+
+  it('handles UTF-8 BOM and preserves top-level launch.json properties such as compounds and inputs', () => {
+    const root = createTempProject();
+    fs.mkdirSync(path.join(root, '.vscode'), { recursive: true });
+    const launchPath = path.join(root, '.vscode', 'launch.json');
+    const withBom =
+      '\uFEFF' +
+      [
+        '{',
+        '  // User launch configuration with BOM',
+        '  "version": "0.2.0",',
+        '  "configurations": [',
+        '    { "name": "Existing", "type": "node", "request": "launch", },',
+        '  ],',
+        '  "compounds": [{ "name": "All", "configurations": ["Existing"] }],',
+        '  "inputs": [{ "id": "arg1", "type": "promptString", "description": "Arg" }],',
+        '}',
+      ].join('\n');
+    fs.writeFileSync(launchPath, withBom, 'utf8');
+
+    const res = generateUnityLaunchConfig(root);
+    expect(res.aborted).toBeUndefined();
+    const updated = JSON.parse(fs.readFileSync(launchPath, 'utf8')) as {
+      version: string;
+      configurations: Array<{ name: string; type: string }>;
+      compounds?: Array<{ name: string; configurations: string[] }>;
+      inputs?: Array<{ id: string }>;
+    };
+    expect(updated.compounds).toEqual([{ name: 'All', configurations: ['Existing'] }]);
+    expect(updated.inputs).toEqual([{ id: 'arg1', type: 'promptString', description: 'Arg' }]);
+    expect(updated.configurations.some((c) => c.name === 'Existing')).toBe(true);
+    expect(updated.configurations.some((c) => c.type === 'vstuc')).toBe(true);
+  });
+
+  it('highlights asmdef self-reference inside references array rather than name property', () => {
+    const root = createTempProject();
+    const selfAsm = path.join(root, 'Assets', 'Scripts', 'Core', 'Game.Core.asmdef');
+    const content = JSON.stringify(
+      {
+        name: 'Game.Core',
+        references: ['Game.Core'],
+      },
+      null,
+      2,
+    );
+    fs.writeFileSync(selfAsm, content, 'utf8');
+
+    const provider = new UnityAsmdefProvider(root);
+    const doc = vscode.__mock.createTextDocument(vscode.Uri.file(selfAsm), content, 'json');
+    const diags = provider.validateDocument(doc);
+    expect(diags.length).toBe(1);
+    expect(diags[0].message).toContain('순환 어셈블리 참조');
+    expect(doc.getText(diags[0].range)).toBe('Game.Core');
+    const refsLine = content.split('\n').findIndex((l) => l.includes('"references"'));
+    expect(diags[0].range.start.line).toBeGreaterThan(refsLine);
+  });
 });

@@ -241,7 +241,8 @@ export function parseAnimatorControllerYaml(
     } else if (doc.includes('AnimatorController:')) {
       const paramSectionIdx = doc.indexOf('m_AnimatorParameters:');
       if (paramSectionIdx !== -1) {
-        const paramSlice = doc.slice(paramSectionIdx);
+        const lineStart = doc.lastIndexOf('\n', paramSectionIdx) + 1;
+        const paramSlice = doc.slice(lineStart);
         const paramLines = paramSlice.split(/\r?\n/);
         const firstLine = (paramLines[0] ?? '').trim();
         if (!firstLine.endsWith('[]')) {

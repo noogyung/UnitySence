@@ -341,4 +341,24 @@ public class AsyncCmdHero : MonoBehaviour
     expect(updatedCmdText).toContain('await Awaitable.NextFrameAsync();');
     cmdDisp.dispose();
   });
+
+  it('does not emit Unity event completions after non-declaration prefixes like private int x =', () => {
+    const csCode = `using UnityEngine;
+public class FieldTyping : MonoBehaviour
+{
+    private int x = /*CURSOR*/
+}`;
+    const cursorOffset = csCode.indexOf('/*CURSOR*/');
+    const doc = vscode.__mock.createTextDocument(
+      vscode.Uri.file('Assets/FieldTyping.cs'),
+      csCode.replace('/*CURSOR*/', ''),
+      'csharp',
+    );
+    const provider = new UnityEventCompletionProvider({
+      getEditorVersion: () => '6000.0.23f1',
+    });
+
+    const items = provider.provideCompletionItems(doc, doc.positionAt(cursorOffset));
+    expect(items).toBeUndefined();
+  });
 });

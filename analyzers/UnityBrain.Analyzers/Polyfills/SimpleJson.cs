@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
+
+[assembly: InternalsVisibleTo("UnityBrain.Analyzers.Tests")]
 
 namespace UnityBrain.Analyzers.Json;
 
@@ -17,7 +20,7 @@ internal static class SimpleJson
 
     private static void SkipWhitespace(string s, ref int idx)
     {
-        while (idx < s.Length && char.IsWhiteSpace(s[idx])) idx++;
+        while (idx < s.Length && (char.IsWhiteSpace(s[idx]) || s[idx] == '\uFEFF')) idx++;
     }
 
     private static object? ParseValue(string s, ref int idx)

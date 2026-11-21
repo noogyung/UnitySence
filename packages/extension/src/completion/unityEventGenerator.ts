@@ -73,7 +73,7 @@ export function shortenCSharpType(fullType: string): string {
   return lastDot >= 0 ? fullType.slice(lastDot + 1) : fullType;
 }
 
-function maskCSharpCommentsAndStrings(source: string): string {
+export function maskCSharpCommentsAndStrings(source: string): string {
   const out: string[] = [];
   let i = 0;
   const n = source.length;
@@ -601,8 +601,11 @@ export class UnityEventCompletionProvider implements vscode.CompletionItemProvid
       /^(\s*)((?:(?:public|private|protected|internal|static|virtual|override|async|new)\s+)*(?:(?:void|bool|float|int|IEnumerator|Awaitable|VisualElement)\s+)?)([A-Za-z_][A-Za-z0-9_]*)?$/.exec(
         rawLineBeforeCursor,
       );
-    const modifierPrefix = prefixMatch?.[2] ?? '';
-    const typedPartial = prefixMatch?.[3] ?? '';
+    if (!prefixMatch) {
+      return undefined;
+    }
+    const modifierPrefix = prefixMatch[2] ?? '';
+    const typedPartial = prefixMatch[3] ?? '';
     const explicitAccessMatch = /\b(public|private|protected|internal)\b/.exec(modifierPrefix);
     const explicitAccessModifier = explicitAccessMatch?.[1];
     const hasTypedOverride = /\boverride\b/.test(modifierPrefix);

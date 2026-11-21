@@ -92,17 +92,16 @@ function advanceIndentStateForLine(
   state: ShaderIndentState,
   indentUnit: string,
 ): { formattedLine: string; nextState: ShaderIndentState } {
+  const scan = scanLineLexically(trimmedLine, state.inBlockComment);
+
   if (state.inBlockComment) {
-    const scan = scanLineLexically(trimmedLine, true);
-    return {
-      formattedLine: `${indentUnit.repeat(state.braceDepth)}${trimmedLine}`,
-      nextState: { braceDepth: state.braceDepth, inBlockComment: scan.inBlockComment },
-    };
-  }
-
-  const scan = scanLineLexically(trimmedLine, false);
-
-  if (trimmedLine.startsWith('#')) {
+    if (scan.codeOnly.trim().length === 0 || scan.codeOnly.trimStart().startsWith('#')) {
+      return {
+        formattedLine: `${indentUnit.repeat(state.braceDepth)}${trimmedLine}`,
+        nextState: { braceDepth: state.braceDepth, inBlockComment: scan.inBlockComment },
+      };
+    }
+  } else if (trimmedLine.startsWith('#')) {
     return {
       formattedLine: `${indentUnit.repeat(state.braceDepth)}${trimmedLine}`,
       nextState: { braceDepth: state.braceDepth, inBlockComment: scan.inBlockComment },

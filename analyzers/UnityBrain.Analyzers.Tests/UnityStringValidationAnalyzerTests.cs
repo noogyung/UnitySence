@@ -337,4 +337,35 @@ public class FieldSuppressSample : MonoBehaviour
         AssertEx.True(cs0169.Any(d => d.GetMessage().Contains("_plainNeverUsed") && !d.IsSuppressed),
             $"Expected CS0169 on plain _plainNeverUsed NOT to be suppressed. Diags: {dump}");
     }
+
+    [Fact]
+    public async Task SimpleJsonParsesBomPrefixedJsonCleanly()
+    {
+        var parsed = UnityBrain.Analyzers.Json.SimpleJson.Parse("\uFEFF{\"key\":\"val\"}");
+        AssertEx.True(parsed is System.Collections.Generic.Dictionary<string, object?>,
+            "Expected SimpleJson.Parse to return Dictionary for BOM-prefixed JSON object");
+        var dict = (System.Collections.Generic.Dictionary<string, object?>)parsed!;
+        AssertEx.True(dict.TryGetValue("key", out var value), "Expected key 'key' to exist");
+        AssertEx.Equal("val", value as string);
+
+        const string code = @"
+using UnityEngine;
+
+public class BomSettingsCheck : MonoBehaviour
+{
+    private void Check(GameObject go)
+    {
+        _ = go.CompareTag(""Player"");
+    }
+}";
+        var bomSettings = new InMemoryAdditionalText(
+            "D:/FakeProject/Library/UnityBrainCache/project-settings.json",
+            "\uFEFF" + SampleProjectSettingsJson);
+        var diags = await RoslynTestHarness.GetAnalyzerDiagnosticsAsync(
+            code,
+            new UnityStringValidationAnalyzer(),
+            new[] { bomSettings });
+        var ub3002 = diags.Where(d => d.Id == DiagnosticIds.UnknownUnityTagOrLayer).ToArray();
+        AssertEx.Equal(0, ub3002.Length, "BOM-prefixed project-settings.json should recognize 'Player' tag");
+    }
 }

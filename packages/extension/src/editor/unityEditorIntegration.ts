@@ -265,19 +265,27 @@ export function generateUnityLaunchConfig(projectRoot: string): {
     request: 'attach',
   };
 
-  let parsed: { version?: string; configurations?: Array<Record<string, unknown>> } = {
+  let parsed: Record<string, unknown> & {
+    version?: string;
+    configurations?: Array<Record<string, unknown>>;
+  } = {
     version: '0.2.0',
     configurations: [],
   };
   const existed = fs.existsSync(launchPath);
   if (existed) {
     try {
-      const cleaned = stripJsoncCommentsAndTrailingCommas(fs.readFileSync(launchPath, 'utf8'));
-      const raw = JSON.parse(cleaned) as {
+      const rawText = fs.readFileSync(launchPath, 'utf8').replace(/^\uFEFF/, '');
+      const cleaned = stripJsoncCommentsAndTrailingCommas(rawText);
+      const raw = JSON.parse(cleaned) as Record<string, unknown> & {
         version?: string;
         configurations?: Array<Record<string, unknown>>;
       };
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new Error('Invalid launch.json root value');
+      }
       parsed = {
+        ...raw,
         version: raw.version ?? '0.2.0',
         configurations: Array.isArray(raw.configurations) ? [...raw.configurations] : [],
       };

@@ -3,7 +3,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { UnityProjectContext } from '../../src/contracts/index.ts';
-import { ProjectSettingsWatcher } from '../../src/watchers/projectSettingsWatcher.ts';
+import {
+  parseAnimatorControllerYaml,
+  ProjectSettingsWatcher,
+} from '../../src/watchers/projectSettingsWatcher.ts';
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TEST_DIR, '../../../..');
@@ -76,5 +79,31 @@ describe('ProjectSettingsWatcher', () => {
     // ProjectSettings 원본을 메모리로만 읽으며 디스크에 중복 캐시를 쓰지 않아야 함
     expect(fs.existsSync(TEMP_CACHE_DIR)).toBe(false);
     watcher.dispose();
+  });
+
+  it('stops parsing AnimatorController parameters at m_AnimatorLayers even when layer entries contain m_Name and m_Type', () => {
+    const yaml = [
+      '%YAML 1.1',
+      '--- !u!91 &9100000',
+      'AnimatorController:',
+      '  m_Name: PlayerCtrl',
+      '  m_AnimatorParameters:',
+      '  - m_Name: MoveSpeed',
+      '    m_Type: 1',
+      '  - m_Name: IsJumping',
+      '    m_Type: 4',
+      '  m_AnimatorLayers:',
+      '  - serializedVersion: 5',
+      '    m_Name: Base Layer',
+      '    m_Type: 3',
+      '  - m_Name: UpperBody',
+      '    m_Type: 9',
+    ].join('\n');
+
+    const parsed = parseAnimatorControllerYaml(yaml, 'Assets/Anim/PlayerCtrl.controller', 'deadbeef');
+    expect(parsed.parameters).toEqual([
+      { name: 'MoveSpeed', type: 'Float' },
+      { name: 'IsJumping', type: 'Bool' },
+    ]);
   });
 });

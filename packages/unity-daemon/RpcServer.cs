@@ -77,100 +77,120 @@ public sealed class RpcServer
 
             try
             {
-                using var doc = JsonDocument.Parse(payload);
-                var root = doc.RootElement;
-                if (root.ValueKind != JsonValueKind.Object)
+                JsonDocument doc;
+                try
                 {
-                    await WriteErrorResponseObjectAsync(output, null, -32600, "Invalid Request", cancellationToken).ConfigureAwait(false);
+                    doc = JsonDocument.Parse(payload);
+                }
+                catch (JsonException)
+                {
+                    try
+                    {
+                        await WriteErrorResponseObjectAsync(output, null, -32700, "Parse error", cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        break;
+                    }
                     continue;
                 }
 
-                string? method = root.TryGetProperty("method", out var mEl) && mEl.ValueKind == JsonValueKind.String
-                    ? mEl.GetString()
-                    : null;
-                hasId = root.TryGetProperty("id", out var idEl) && idEl.ValueKind != JsonValueKind.Undefined;
-                if (hasId)
+                using (doc)
                 {
-                    parsedIdObj = ExtractJsonIdValue(idEl);
-                }
-                JsonElement paramsEl = root.TryGetProperty("params", out var pEl) ? pEl : default;
-
-                if (method == "exit")
-                {
-                    break;
-                }
-
-                object? result = null;
-                string? errorMsg = null;
-                int errorCode = 0;
-
-                switch (method)
-                {
-                    case "index/status":
-                        result = _cache.GetStatus();
-                        break;
-
-                    case "index/rebuild":
+                    var root = doc.RootElement;
+                    if (root.ValueKind != JsonValueKind.Object)
                     {
-                        bool force = paramsEl.ValueKind == JsonValueKind.Object &&
-                                     ((paramsEl.TryGetProperty("force", out var fEl) && fEl.ValueKind == JsonValueKind.True) ||
-                                      (paramsEl.TryGetProperty("forceFull", out var ffEl) && ffEl.ValueKind == JsonValueKind.True));
-                        result = _cache.BuildOrUpdateIndex(_projectRoot, _cacheFilePath, force);
+                        await WriteErrorResponseObjectAsync(output, null, -32600, "Invalid Request", cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    string? method = root.TryGetProperty("method", out var mEl) && mEl.ValueKind == JsonValueKind.String
+                        ? mEl.GetString()
+                        : null;
+                    hasId = root.TryGetProperty("id", out var idEl) && idEl.ValueKind != JsonValueKind.Undefined;
+                    if (hasId)
+                    {
+                        parsedIdObj = ExtractJsonIdValue(idEl);
+                    }
+                    JsonElement paramsEl = root.TryGetProperty("params", out var pEl) ? pEl : default;
+
+                    if (method == "exit")
+                    {
                         break;
                     }
 
-                    case "usage/findByScriptGuid":
+                    object? result = null;
+                    string? errorMsg = null;
+                    int errorCode = 0;
+
+                    switch (method)
                     {
-                        string guid = GetStringParam(paramsEl, "scriptGuid")
-                                   ?? GetStringParam(paramsEl, "guid")
-                                   ?? string.Empty;
-                        var locations = _cache.FindByScriptGuid(guid);
-                        result = new { locations };
-                        break;
+                        case "index/status":
+                            result = _cache.GetStatus();
+                            break;
+
+                        case "index/rebuild":
+                        {
+                            bool force = paramsEl.ValueKind == JsonValueKind.Object &&
+                                         ((paramsEl.TryGetProperty("force", out var fEl) && fEl.ValueKind == JsonValueKind.True) ||
+                                          (paramsEl.TryGetProperty("forceFull", out var ffEl) && ffEl.ValueKind == JsonValueKind.True));
+                            result = _cache.BuildOrUpdateIndex(_projectRoot, _cacheFilePath, force);
+                            break;
+                        }
+
+                        case "usage/findByScriptGuid":
+                        {
+                            string guid = GetStringParam(paramsEl, "scriptGuid")
+                                       ?? GetStringParam(paramsEl, "guid")
+                                       ?? string.Empty;
+                            var locations = _cache.FindByScriptGuid(guid);
+                            result = new { locations };
+                            break;
+                        }
+
+                        case "usage/findByMethod":
+                        {
+                            string? guid = GetStringParam(paramsEl, "scriptGuid")
+                                        ?? GetStringParam(paramsEl, "guid");
+                            string? className = GetStringParam(paramsEl, "className");
+                            string methodName = GetStringParam(paramsEl, "methodName") ?? string.Empty;
+                            var locations = _cache.FindByMethod(guid, className, methodName);
+                            result = new { locations };
+                            break;
+                        }
+
+                        case "inspector/getSerializedValues":
+                        {
+                            string guid = GetStringParam(paramsEl, "scriptGuid")
+                                       ?? GetStringParam(paramsEl, "guid")
+                                       ?? string.Empty;
+                            string? fieldName = GetStringParam(paramsEl, "fieldName");
+                            var fields = _cache.GetSerializedValues(guid, fieldName);
+                            result = new { fields };
+                            break;
+                        }
+
+                        case "shutdown":
+                            shouldStop = true;
+                            result = new { ok = true };
+                            break;
+
+                        default:
+                            errorCode = -32601;
+                            errorMsg = $"Method not found: {method}";
+                            break;
                     }
 
-                    case "usage/findByMethod":
+                    if (hasId)
                     {
-                        string? guid = GetStringParam(paramsEl, "scriptGuid")
-                                    ?? GetStringParam(paramsEl, "guid");
-                        string? className = GetStringParam(paramsEl, "className");
-                        string methodName = GetStringParam(paramsEl, "methodName") ?? string.Empty;
-                        var locations = _cache.FindByMethod(guid, className, methodName);
-                        result = new { locations };
-                        break;
-                    }
-
-                    case "inspector/getSerializedValues":
-                    {
-                        string guid = GetStringParam(paramsEl, "scriptGuid")
-                                   ?? GetStringParam(paramsEl, "guid")
-                                   ?? string.Empty;
-                        string? fieldName = GetStringParam(paramsEl, "fieldName");
-                        var fields = _cache.GetSerializedValues(guid, fieldName);
-                        result = new { fields };
-                        break;
-                    }
-
-                    case "shutdown":
-                        shouldStop = true;
-                        result = new { ok = true };
-                        break;
-
-                    default:
-                        errorCode = -32601;
-                        errorMsg = $"Method not found: {method}";
-                        break;
-                }
-
-                if (hasId)
-                {
-                    if (errorMsg != null)
-                    {
-                        await WriteErrorResponseObjectAsync(output, parsedIdObj, errorCode, errorMsg, cancellationToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await WriteSuccessResponseAsync(output, parsedIdObj, result, cancellationToken).ConfigureAwait(false);
+                        if (errorMsg != null)
+                        {
+                            await WriteErrorResponseObjectAsync(output, parsedIdObj, errorCode, errorMsg, cancellationToken).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await WriteSuccessResponseAsync(output, parsedIdObj, result, cancellationToken).ConfigureAwait(false);
+                        }
                     }
                 }
             }

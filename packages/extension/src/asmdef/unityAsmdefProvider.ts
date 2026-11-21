@@ -373,8 +373,10 @@ export class UnityAsmdefProvider implements vscode.Disposable {
           }
         : undefined;
 
+    const refsKeyIdx = text.indexOf('"references"');
+    const searchStart = refsKeyIdx >= 0 ? refsKeyIdx : 0;
     const findRefRange = (refStr: string): vscode.Range => {
-      const idx = text.indexOf(`"${refStr}"`);
+      const idx = text.indexOf(`"${refStr}"`, searchStart);
       if (idx < 0) return new vscode.Range(0, 0, 0, 1);
       return new vscode.Range(doc.positionAt(idx + 1), doc.positionAt(idx + 1 + refStr.length));
     };

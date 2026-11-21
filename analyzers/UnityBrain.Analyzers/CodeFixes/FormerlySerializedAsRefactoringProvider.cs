@@ -155,7 +155,7 @@ public sealed class FormerlySerializedAsRefactoringProvider : CodeRefactoringPro
         if (root is not CompilationUnitSyntax cu) return document;
 
         bool hasSerializationUsing = HasDirectUnitySerializationUsing(cu, fieldDecl);
-        string eol = cu.ToFullString().Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        string eol = cu.ToFullString().IndexOf("\r\n", StringComparison.Ordinal) >= 0 ? "\r\n" : "\n";
 
         var originalLeading = fieldDecl.GetLeadingTrivia();
         var indentTrivia = originalLeading.Where(t => t.IsKind(SyntaxKind.WhitespaceTrivia)).ToList();

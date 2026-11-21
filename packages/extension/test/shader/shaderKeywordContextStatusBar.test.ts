@@ -1,7 +1,9 @@
+import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as vscode from 'vscode';
+import { activate, deactivate } from '../../src/extension.ts';
 import { CompletionItemKind } from 'vscode-languageserver';
 import { IncludeDependencyGraph } from '../../../shader-lsp/src/indexer/hlslIncludeGraph.ts';
 import { parseShaderPragmas } from '../../../shader-lsp/src/parser/shaderLabVirtualDoc.ts';
@@ -32,8 +34,14 @@ import {
   ShaderVariantCodeLensProvider,
 } from '../../src/shader/shaderKeywordContextStatusBar.ts';
 
+const tempDirs: string[] = [];
+
 afterEach(() => {
+  deactivate();
   vscode.__mock.reset();
+  while (tempDirs.length > 0) {
+    fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
+  }
 });
 
 describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => {
@@ -739,5 +747,103 @@ describe('ShaderKeywordContextStatusBar & ShaderVariantCodeLensProvider', () => 
     });
     expect(syncedEvents.some((e) => e.uri === docA.uri.toString() && e.keywords.includes('_KW_A'))).toBe(true);
     statusBar.dispose();
+  });
+
+  it('excludes current file #define include guards from getDefinedMacros while keeping included header macros (P0-1)', async () => {
+    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
+    const baseOut = path.join(repoRoot, 'test-output');
+    fs.mkdirSync(baseOut, { recursive: true });
+    const projectRoot = fs.mkdtempSync(path.join(baseOut, 'ub-p0-1-'));
+    tempDirs.push(projectRoot);
+    fs.mkdirSync(path.join(projectRoot, 'Assets', 'Shaders'), { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, 'ProjectSettings'), { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, 'Packages'), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'ProjectSettings', 'ProjectVersion.txt'), 'm_EditorVersion: 6000.0.23f1\n', 'utf8');
+    fs.writeFileSync(path.join(projectRoot, 'Packages', 'manifest.json'), '{"dependencies":{}}', 'utf8');
+
+    const headerPath = path.join(projectRoot, 'Assets', 'Shaders', 'ExtraDefines.hlsl');
+    fs.writeFileSync(headerPath, '#define FROM_INCLUDED_HEADER 1\n', 'utf8');
+
+    const targetPath = path.join(projectRoot, 'Assets', 'Shaders', 'GuardHeader.hlsl');
+    const targetText = [
+      '#ifndef FOO_INCLUDED',
+      '#define FOO_INCLUDED',
+      '#include "./ExtraDefines.hlsl"',
+      'half4 Foo() { return 1; }',
+      '#endif',
+      '#ifndef FROM_INCLUDED_HEADER',
+      'half4 FallbackFn() { return 0; }',
+      '#endif',
+    ].join('\n');
+    fs.writeFileSync(targetPath, targetText, 'utf8');
+
+    const extensionPath = path.join(repoRoot, 'packages', 'extension');
+    const storageDir = path.join(projectRoot, '.storage');
+    const mockCtx: vscode.ExtensionContext = {
+      subscriptions: [],
+      extensionPath,
+      extensionUri: vscode.Uri.file(extensionPath),
+      globalStorageUri: vscode.Uri.file(storageDir),
+      storageUri: vscode.Uri.file(storageDir),
+      extensionMode: vscode.ExtensionMode.Test,
+      asAbsolutePath: (rel: string) => path.resolve(extensionPath, rel),
+    } as unknown as vscode.ExtensionContext;
+
+    const api = await activate(mockCtx, { workspaceRoot: projectRoot, enableWatchers: false });
+    const doc = vscode.__mock.createTextDocument(vscode.Uri.file(targetPath), targetText, 'hlsl');
+    let decoratedRanges: vscode.Range[] = [];
+    const mockEditor = {
+      document: doc,
+      selection: new vscode.Selection(0, 0, 0, 0),
+      setDecorations: (_type: vscode.TextEditorDecorationType, ranges: vscode.Range[]) => {
+        decoratedRanges = ranges;
+      },
+    } as unknown as vscode.TextEditor;
+
+    api.shaderKeywordStatusBar.applyInactiveDecorations(mockEditor);
+    // Guard body (lines 1..3) must NOT be dimmed; only #ifndef FROM_INCLUDED_HEADER body (line 6) is dimmed.
+    expect(decoratedRanges.map((r) => ({ start: r.start.line, end: r.end.line }))).toEqual([
+      { start: 6, end: 6 },
+    ]);
+  });
+
+  it('does not include multiline #elif directive lines in inactive preprocessor ranges (P1-S6)', () => {
+    const code = [
+      '#ifdef UNDEFINED_BRANCH',
+      '  float inactiveVar = 0;',
+      '#elif defined(FEATURE_A) \\',
+      '   || defined(FEATURE_B)',
+      '  float activeVar = 1;',
+      '#endif',
+    ].join('\n');
+
+    const ranges = evaluateInactivePreprocessorRanges(code, new Set(['FEATURE_A']));
+    expect(ranges).toEqual([{ startLine: 1, endLine: 1 }]);
+  });
+
+  it('highlights ShaderLab property types Color, 2D, Float in tmLanguage grammar without blocking on closing paren (P2-S1)', () => {
+    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
+    const grammarPath = path.join(repoRoot, 'packages', 'extension', 'syntaxes', 'unity-shaderlab.tmLanguage.json');
+    const grammar = JSON.parse(fs.readFileSync(grammarPath, 'utf8')) as {
+      repository: {
+        'shaderlab-commands': {
+          patterns: Array<{ name: string; match: string }>;
+        };
+      };
+    };
+    const propTypeRule = grammar.repository['shaderlab-commands'].patterns.find(
+      (p) => p.name === 'support.type.shaderlab.property',
+    );
+    expect(propTypeRule).toBeDefined();
+    expect(propTypeRule!.match).not.toContain('\\)|');
+
+    // Convert Oniguruma negative lookbehind/lookahead to JS RegExp (compatible here)
+    const jsRe = new RegExp(propTypeRule!.match);
+    expect(jsRe.exec('_Color ("Color", Color) = (1,1,1,1)')?.[1]).toBe('Color');
+    expect(jsRe.exec('_MainTex ("Albedo", 2D) = "white" {}')?.[1]).toBe('2D');
+    expect(jsRe.exec('_Glossiness ("Smoothness", Float) = 0.5')?.[1]).toBe('Float');
+    expect(jsRe.exec('_Cutoff ("Alpha", Range(0, 1)) = 0.5')?.[1]).toBe('Range');
+    expect(jsRe.exec('float4 Color = 1;')).toBeNull();
+    expect(jsRe.exec('c.Color')).toBeNull();
   });
 });

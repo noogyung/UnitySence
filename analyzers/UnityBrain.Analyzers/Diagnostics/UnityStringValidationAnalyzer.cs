@@ -399,7 +399,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
                     section = trimmed.EndsWith("[]", StringComparison.Ordinal) ? "none" : "layers";
                     continue;
                 }
-                if (trimmed.Contains(':'))
+                if (trimmed.IndexOf(':') >= 0)
                 {
                     section = "none";
                     continue;
@@ -491,7 +491,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
             }
             if (!inScenes) continue;
 
-            if (indent <= 2 && !trimmed.StartsWith("-", StringComparison.Ordinal) && trimmed.Contains(':'))
+            if (indent <= 2 && !trimmed.StartsWith("-", StringComparison.Ordinal) && trimmed.IndexOf(':') >= 0)
             {
                 Flush();
                 inScenes = false;

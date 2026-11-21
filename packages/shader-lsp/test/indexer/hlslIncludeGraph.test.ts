@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { UnityProjectContext } from '../../../extension/src/contracts/index.ts';
 import { IncludeDependencyGraph } from '../../src/indexer/hlslIncludeGraph.ts';
+import { parseHlslSymbols } from '../../src/indexer/hlslSymbolTable.ts';
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TEST_DIR, '../../../..');
@@ -191,5 +192,30 @@ describe('IncludeDependencyGraph & HlslSymbolTable', () => {
     expect(brdfFromHelper.length).toBe(1);
     const inputFieldsFromHelper = graph.findStructFields(helperPath, 'InputData');
     expect(inputFieldsFromHelper.map((f) => f.name)).toContain('normalWS');
+  });
+
+  it('resolves exact word-boundary columns for struct fields and functions when names are substrings of earlier tokens (P1-S3)', () => {
+    const hlsl = [
+      'struct MyStruct_S { float S; };',
+      'struct S { float S; };',
+      'float f(float x) { return x; }',
+    ].join('\n');
+
+    const parsed = parseHlslSymbols(hlsl, 'Test.hlsl', 'file:///Test.hlsl');
+    const structFieldS = parsed.symbols.find(
+      (s) => s.kind === 'field' && s.containerName === 'MyStruct_S' && s.name === 'S',
+    );
+    expect(structFieldS?.line).toBe(0);
+    expect(structFieldS?.column).toBe(26);
+
+    const sameNameFieldS = parsed.symbols.find(
+      (s) => s.kind === 'field' && s.containerName === 'S' && s.name === 'S',
+    );
+    expect(sameNameFieldS?.line).toBe(1);
+    expect(sameNameFieldS?.column).toBe(17);
+
+    const fnF = parsed.symbols.find((s) => s.kind === 'function' && s.name === 'f');
+    expect(fnF?.line).toBe(2);
+    expect(fnF?.column).toBe(6);
   });
 });

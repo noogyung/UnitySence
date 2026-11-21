@@ -269,7 +269,7 @@ public sealed class ExtractPropertyToIdCodeFixProvider : CodeFixProvider
     private static string DetectEol(SyntaxNode root)
     {
         var text = root.ToFullString();
-        return text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        return text.IndexOf("\r\n", StringComparison.Ordinal) >= 0 ? "\r\n" : "\n";
     }
 
     private static string GenerateUniqueFieldName(

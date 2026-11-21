@@ -809,9 +809,13 @@ function collectCrossFileOccurrences(
   const isDotCursor = Boolean(
     wordRange && wordRange.start.character > 0 && lineText[wordRange.start.character - 1] === '.',
   );
+  const isFieldDeclCursor = parsed.symbols.some(
+    (s) => s.kind === 'field' && s.name === word && s.line === cursorLine,
+  );
+  const isFieldCursor = isDotCursor || isFieldDeclCursor;
 
-  // If cursor is on a local variable or function parameter (and not a `.member` access), restrict to that function scope
-  if (!isDotCursor) {
+  // If cursor is on a local variable or function parameter (and not a `.member` access or struct field declaration), restrict to that function scope
+  if (!isFieldCursor) {
     const localScope = parsed.localVarScopes.find(
       (sc) => cursorLine >= sc.startLine && cursorLine <= sc.endLine && sc.declarations.has(word),
     );
@@ -838,7 +842,7 @@ function collectCrossFileOccurrences(
     .slice(1)
     .some((f) => f.symbols.some((s) => s.name === word));
   const restrictToCurrentShaderFile =
-    isShaderFile && !isShaderLabProp && !declaredInReachableHeader && !isDotCursor;
+    isShaderFile && !isShaderLabProp && !declaredInReachableHeader && !isFieldCursor;
 
   const parents = restrictToCurrentShaderFile ? [] : shaderGraph.findParentIncludeFiles(uriStr);
   const candidates = restrictToCurrentShaderFile
@@ -876,7 +880,7 @@ function collectCrossFileOccurrences(
 
     const matches = collectIdentifierMatches(content, word);
     for (const hit of matches) {
-      if (isDotCursor) {
+      if (isFieldCursor) {
         const isStructFieldDecl =
           file.symbols.some((s) => s.kind === 'field' && s.name === word && s.line === hit.line);
         if (!hit.isDotAccess && !isStructFieldDecl) continue;

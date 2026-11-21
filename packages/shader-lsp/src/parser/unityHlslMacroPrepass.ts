@@ -274,6 +274,19 @@ export interface MacroPrepassResult {
   lineMap: number[];
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findIdentifierColumn(line: string, name: string, searchStart = 0): number {
+  const start = Math.max(0, Math.min(searchStart, line.length));
+  const re = new RegExp(`\\b${escapeRegExp(name)}\\b`, 'g');
+  re.lastIndex = start;
+  const m = re.exec(line);
+  if (m) return m.index;
+  return line.indexOf(name, start);
+}
+
 export class UnityHlslMacroPrepass {
   public getBuiltinMacro(name: string): UnityMacroSpec | undefined {
     return UNITY_BUILTIN_MACROS.find((m) => m.name === name);
@@ -315,7 +328,11 @@ export class UnityHlslMacroPrepass {
         const hlslType = typeMap[macroName] ?? 'Texture2D';
         const needsLegacySampler =
           macroName.startsWith('UNITY_DECLARE_') && !macroName.endsWith('_NOSAMPLER');
-        const col = line.indexOf(texName);
+        const openParen = line.indexOf('(', indent.length + macroName.length);
+        const searchFrom = isRwTwoArg
+          ? line.indexOf(',', openParen + 1) + 1
+          : openParen + 1;
+        const col = findIdentifierColumn(line, texName, searchFrom > 0 ? searchFrom : 0);
         synthesizedSymbols.push({
           name: texName,
           kind: 'variable',
@@ -350,7 +367,8 @@ export class UnityHlslMacroPrepass {
       if (smpMatch) {
         const [, indent, smpName, trailing] = smpMatch;
         normalized = `${indent}SamplerState ${smpName};${trailing}`;
-        const col = line.indexOf(smpName);
+        const openParen = line.indexOf('(', indent.length);
+        const col = findIdentifierColumn(line, smpName, openParen >= 0 ? openParen + 1 : 0);
         synthesizedSymbols.push({
           name: smpName,
           kind: 'variable',
@@ -372,7 +390,8 @@ export class UnityHlslMacroPrepass {
       if (cbStartMatch) {
         const [, indent, cbName, trailing] = cbStartMatch;
         normalized = `${indent}cbuffer ${cbName} {${trailing}`;
-        const col = line.indexOf(cbName);
+        const openParen = line.indexOf('(', indent.length);
+        const col = findIdentifierColumn(line, cbName, openParen >= 0 ? openParen + 1 : 0);
         synthesizedSymbols.push({
           name: cbName,
           kind: 'cbuffer',
@@ -402,7 +421,8 @@ export class UnityHlslMacroPrepass {
         const [, indent, macroName, propType, propName, trailing] = instPropMatch;
         const cleanType = propType.trim();
         normalized = `${indent}${cleanType} ${propName};${trailing}`;
-        const col = line.indexOf(propName);
+        const commaIdx = line.indexOf(',', indent.length + macroName.length);
+        const col = findIdentifierColumn(line, propName, commaIdx >= 0 ? commaIdx + 1 : 0);
         synthesizedSymbols.push({
           name: propName,
           kind: 'variable',
@@ -422,7 +442,8 @@ export class UnityHlslMacroPrepass {
           /\bUNITY_DOTS_INSTANCED_PROP\(\s*([A-Za-z0-9_<> ]+?)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;?/g,
           (_full, rawType: string, propName: string, offset: number) => {
             const cleanType = rawType.trim();
-            const col = line.indexOf(propName, offset);
+            const commaIdx = line.indexOf(',', offset);
+            const col = findIdentifierColumn(line, propName, commaIdx >= 0 ? commaIdx + 1 : offset);
             synthesizedSymbols.push({
               name: propName,
               kind: 'variable',

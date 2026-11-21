@@ -205,4 +205,47 @@ describe('MetaFileSyncManager', () => {
       mgr.dispose();
     }
   });
+
+  it('catches async rejections in onDidCreateFiles and onDidRenameFiles listeners without unhandledRejection', async () => {
+    const root = createTempUnityRoot();
+    const mgr = new MetaFileSyncManager({ projectRoot: root });
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown) => {
+      unhandled.push(err);
+    };
+    process.on('unhandledRejection', onUnhandled);
+
+    let createCalls = 0;
+    let renameCalls = 0;
+    (mgr as unknown as { handleDidCreateFiles: () => Promise<string[]> }).handleDidCreateFiles = async () => {
+      createCalls++;
+      throw new Error('simulated EACCES on create');
+    };
+    (mgr as unknown as { handleDidRenameFiles: () => Promise<string[]> }).handleDidRenameFiles = async () => {
+      renameCalls++;
+      throw new Error('simulated EACCES on rename');
+    };
+
+    try {
+      const target = vscode.Uri.file(path.join(root, 'Assets', 'Scripts', 'Locked.cs'));
+      const emitters = vscode.__mock.emitters as unknown as {
+        onDidCreateFiles: { fire: (e: { files: readonly vscode.Uri[] }) => void };
+        onDidRenameFiles: {
+          fire: (e: { files: ReadonlyArray<{ oldUri: vscode.Uri; newUri: vscode.Uri }> }) => void;
+        };
+      };
+
+      emitters.onDidCreateFiles.fire({ files: [target] });
+      emitters.onDidRenameFiles.fire({ files: [{ oldUri: target, newUri: target }] });
+
+      // Wait for the 150ms create debounce timer + microtask flush
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(createCalls).toBe(1);
+      expect(renameCalls).toBe(1);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      mgr.dispose();
+    }
+  });
 });

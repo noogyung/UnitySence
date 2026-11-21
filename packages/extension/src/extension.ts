@@ -352,7 +352,7 @@ export async function activate(
     getDefinedMacros: (uri) => {
       const macros = new Set<string>();
       const walk = shaderGraph.collectReachableFiles(uri.toString());
-      for (const file of walk.files) {
+      for (const file of walk.files.slice(1)) {
         for (const sym of file.symbols) {
           if (sym.kind === 'macro') macros.add(sym.name);
         }

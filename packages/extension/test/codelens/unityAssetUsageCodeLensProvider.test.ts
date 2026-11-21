@@ -9,6 +9,7 @@ import {
   StreamMessageWriter,
 } from 'vscode-jsonrpc';
 import {
+  parseCSharpDeclarations,
   registerShowAssetUsagesCommand,
   UnityAssetUsageCodeLensProvider,
   UnityDaemonClient,
@@ -407,5 +408,83 @@ describe('UnityAssetUsageCodeLensProvider', () => {
 
     provider.dispose();
     daemonClient.dispose();
+  });
+
+  it('masks char literals and multiline block comments before tracking brace depth in parseCSharpDeclarations', () => {
+    const src = [
+      'public class BraceTrap : MonoBehaviour',
+      '{',
+      "    void A() { char c = '}'; /* } */ }",
+      '    /*',
+      '    public void CommentedOutMethod() {}',
+      '    }',
+      '    */',
+      '    private string verbatim = @"fake } brace";',
+      '    [SerializeField] private int realField;',
+      '    public void RealMethod() {}',
+      '}',
+    ].join('\n');
+
+    const decls = parseCSharpDeclarations(src);
+    expect(decls.classes.map((c) => c.className)).toEqual(['BraceTrap']);
+    expect(decls.serializedFields).toEqual([
+      { fieldName: 'realField', line: 8, className: 'BraceTrap' },
+    ]);
+    expect(decls.methods).toEqual([
+      { methodName: 'A', line: 2, className: 'BraceTrap' },
+      { methodName: 'RealMethod', line: 9, className: 'BraceTrap' },
+    ]);
+  });
+
+  it('uses 60000ms timeout for index/rebuild and 15000ms timeout for standard query RPCs', async () => {
+    const root = createTempProject();
+    const origSetTimeout = globalThis.setTimeout;
+    const origClearTimeout = globalThis.clearTimeout;
+    const capturedDelays: number[] = [];
+    const scheduledTimers: Array<{ delay: number; fn: () => void }> = [];
+
+    globalThis.setTimeout = ((fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+      if (delay === 15_000 || delay === 60_000) {
+        capturedDelays.push(delay);
+        scheduledTimers.push({ delay, fn: () => fn(...args) });
+        return { __mockTimer: true } as unknown as ReturnType<typeof setTimeout>;
+      }
+      return origSetTimeout(fn, delay, ...args);
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((id: ReturnType<typeof setTimeout> | undefined) => {
+      if (id && typeof id === 'object' && '__mockTimer' in id) return;
+      return origClearTimeout(id);
+    }) as typeof clearTimeout;
+
+    const client = new UnityDaemonClient({
+      projectRoot: root,
+      extensionPath: root,
+      transportFactory: () => ({
+        sendRequest: () => new Promise<never>(() => {}),
+        dispose: () => {},
+      }),
+    });
+
+    try {
+      const statusPromise = client.getStatus();
+      for (let i = 0; i < 5 && scheduledTimers.length < 1; i++) {
+        await Promise.resolve();
+      }
+      expect(capturedDelays).toEqual([15_000]);
+      scheduledTimers[0].fn();
+      await expect(statusPromise).rejects.toThrow(/timed out after 15000ms/);
+
+      const rebuildPromise = client.rebuild(true);
+      for (let i = 0; i < 5 && scheduledTimers.length < 2; i++) {
+        await Promise.resolve();
+      }
+      expect(capturedDelays).toEqual([15_000, 60_000]);
+      scheduledTimers[1].fn();
+      await expect(rebuildPromise).rejects.toThrow(/timed out after 60000ms/);
+    } finally {
+      client.dispose();
+      globalThis.setTimeout = origSetTimeout;
+      globalThis.clearTimeout = origClearTimeout;
+    }
   });
 });

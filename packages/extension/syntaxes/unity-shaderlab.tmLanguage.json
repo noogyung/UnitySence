@@ -93,7 +93,7 @@
         },
         {
           "name": "support.type.shaderlab.property",
-          "match": "(?<!\\.)\\b(Range|Float|Int|Integer|Color|Vector|2D|2DArray|Cube|CubeArray|3D|Any)\\b(?!\\s*(?:=|\\+=|-=|\\*=|/=|;|\\)|,|\\[|\\.))"
+          "match": "(?<!\\.)\\b(Range|Float|Int|Integer|Color|Vector|2D|2DArray|Cube|CubeArray|3D|Any)\\b(?!\\s*(?:=|\\+=|-=|\\*=|/=|;|,|\\[|\\.))"
         },
         {
           "name": "constant.language.shaderlab.option",

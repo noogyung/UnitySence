@@ -264,4 +264,68 @@ describe('Omni Shader Integrated Capabilities', () => {
     expect(onTypeEdits.length).toBe(1);
     expect(onTypeEdits[0].newText).toBe('}');
   });
+
+  it('finds and renames both struct field declaration and .field accesses when cursor is on declaration (P1-S4)', () => {
+    const ctx = createTempProject();
+    const graph = new IncludeDependencyGraph(ctx);
+    const refProvider = new ShaderReferenceProvider(graph);
+    const renameProvider = new ShaderRenameProvider(graph);
+    const hlslPath = path.join(ctx.projectRoot, 'Assets', 'Shaders', 'StructFieldRefs.hlsl');
+    const content = [
+      'struct Varyings',
+      '{',
+      '    float2 uv : TEXCOORD0;',
+      '};',
+      'float4 frag(Varyings i, float2 uv) : SV_Target',
+      '{',
+      '    float2 sampleUv = i.uv + uv;',
+      '    return float4(sampleUv, 0.0, 1.0);',
+      '}',
+    ].join('\n');
+    const doc = makeDoc(hlslPath, content, 'hlsl');
+
+    // Cursor on `uv` inside `float2 uv : TEXCOORD0;` (line 2, col 11)
+    const declPos = new vscode.Position(2, 11);
+    const refsFromDecl = refProvider.provideReferences(doc, declPos);
+    expect(refsFromDecl.map((r) => ({ line: r.range.start.line, col: r.range.start.character }))).toEqual([
+      { line: 2, col: 11 },
+      { line: 6, col: 24 },
+    ]);
+
+    // Symmetric with cursor on `i.uv` (line 6, col 24)
+    const dotPos = new vscode.Position(6, 24);
+    const refsFromDot = refProvider.provideReferences(doc, dotPos);
+    expect(refsFromDot.map((r) => ({ line: r.range.start.line, col: r.range.start.character }))).toEqual([
+      { line: 2, col: 11 },
+      { line: 6, col: 24 },
+    ]);
+
+    const renameEdit = renameProvider.provideRenameEdits(doc, declPos, 'texcoord');
+    const edits = renameEdit?.get(doc.uri) ?? [];
+    expect(edits.map((e) => ({ line: e.range.start.line, col: e.range.start.character }))).toEqual([
+      { line: 2, col: 11 },
+      { line: 6, col: 24 },
+    ]);
+  });
+
+  it('updates brace depth when code follows closing block comment on the same line (P1-S5)', () => {
+    const raw = [
+      '/*',
+      '* header comment',
+      '*/ void foo() {',
+      'return 0;',
+      '/* closing',
+      '*/ }',
+    ].join('\n');
+
+    const formatted = formatShaderText(raw, { tabSize: 4, insertSpaces: true });
+    expect(formatted).toBe([
+      '/*',
+      '* header comment',
+      '*/ void foo() {',
+      '    return 0;',
+      '    /* closing',
+      '*/ }',
+    ].join('\n'));
+  });
 });

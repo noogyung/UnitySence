@@ -668,6 +668,7 @@ export function evaluateInactivePreprocessorRanges(
     let trimmed = lines[i].replace(/\/\/.*$/, '').trim();
     if (!trimmed.startsWith('#')) continue;
 
+    const directiveStartLine = i;
     while (trimmed.endsWith('\\') && i + 1 < lines.length) {
       trimmed = trimmed.slice(0, -1).trimEnd() + ' ' + lines[++i].replace(/\/\/.*$/, '').trim();
     }
@@ -705,8 +706,8 @@ export function evaluateInactivePreprocessorRanges(
     const elifMatch = /^#\s*elif\s+(.+)$/.exec(trimmed);
     if (elifMatch && stack.length > 0) {
       const top = stack[stack.length - 1];
-      if (top.inactiveBodyStartLine !== null && i - 1 >= top.inactiveBodyStartLine) {
-        ranges.push({ startLine: top.inactiveBodyStartLine, endLine: i - 1 });
+      if (top.inactiveBodyStartLine !== null && directiveStartLine - 1 >= top.inactiveBodyStartLine) {
+        ranges.push({ startLine: top.inactiveBodyStartLine, endLine: directiveStartLine - 1 });
       }
       top.inactiveBodyStartLine = null;
 
@@ -730,8 +731,8 @@ export function evaluateInactivePreprocessorRanges(
 
     if (/^#\s*else\b/.test(trimmed) && stack.length > 0) {
       const top = stack[stack.length - 1];
-      if (top.inactiveBodyStartLine !== null && i - 1 >= top.inactiveBodyStartLine) {
-        ranges.push({ startLine: top.inactiveBodyStartLine, endLine: i - 1 });
+      if (top.inactiveBodyStartLine !== null && directiveStartLine - 1 >= top.inactiveBodyStartLine) {
+        ranges.push({ startLine: top.inactiveBodyStartLine, endLine: directiveStartLine - 1 });
       }
       top.inactiveBodyStartLine = null;
 
@@ -749,8 +750,8 @@ export function evaluateInactivePreprocessorRanges(
 
     if (/^#\s*endif\b/.test(trimmed) && stack.length > 0) {
       const top = stack.pop()!;
-      if (top.inactiveBodyStartLine !== null && i - 1 >= top.inactiveBodyStartLine) {
-        ranges.push({ startLine: top.inactiveBodyStartLine, endLine: i - 1 });
+      if (top.inactiveBodyStartLine !== null && directiveStartLine - 1 >= top.inactiveBodyStartLine) {
+        ranges.push({ startLine: top.inactiveBodyStartLine, endLine: directiveStartLine - 1 });
       }
       continue;
     }

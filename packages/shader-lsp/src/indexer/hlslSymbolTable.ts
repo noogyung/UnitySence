@@ -71,6 +71,36 @@ export function isLineVisibleInPass(
   return blocks[cursorBlk].includeBlockIndices.includes(symBlk);
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findIdentifierColumn(
+  line: string,
+  name: string,
+  searchStart = 0,
+  preferredColumn?: number,
+): number {
+  const start = Math.max(0, Math.min(searchStart, line.length));
+  const re = new RegExp(`\\b${escapeRegExp(name)}\\b`, 'g');
+  re.lastIndex = start;
+  let bestIndex = -1;
+  let bestDist = Number.POSITIVE_INFINITY;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (preferredColumn === undefined) {
+      return m.index;
+    }
+    const dist = Math.abs(m.index - preferredColumn);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIndex = m.index;
+    }
+  }
+  if (bestIndex >= 0) return bestIndex;
+  return line.indexOf(name, start);
+}
+
 function splitTopLevelCommas(text: string): Array<{ segment: string; offset: number }> {
   const out: Array<{ segment: string; offset: number }> = [];
   let parenDepth = 0;
@@ -111,7 +141,7 @@ function parseDeclaratorItems(
     if (!m) continue;
     const name = m[1];
     const arraySuffix = m[2] ? m[2].replace(/\s+/g, '') : '';
-    const nameInSegment = part.segment.indexOf(name, leadWs);
+    const nameInSegment = findIdentifierColumn(part.segment, name, leadWs);
     items.push({
       name,
       type: arraySuffix ? `${baseType}${arraySuffix}` : baseType,
@@ -144,7 +174,7 @@ const CONTROL_KEYWORDS = new Set([
 ]);
 
 function blankCommentsPreservingLayout(text: string): string {
-  const chars = Array.from(text);
+  const chars = text.split('');
   let i = 0;
   let inString = false;
   while (i < text.length) {
@@ -295,7 +325,9 @@ function extractDefines(lines: string[], rawLines: string[], uri: string): HlslS
     const params = m[2] ?? '';
     const body = (m[3] ?? '').trim();
     const origLine = rawLines[startLine] ?? lines[startLine];
-    const col = origLine.indexOf(name);
+    const cleanLine = lines[startLine] ?? origLine;
+    const defPrefix = /^\s*#\s*define\s+/.exec(cleanLine);
+    const col = findIdentifierColumn(cleanLine, name, defPrefix ? defPrefix[0].length : 0);
     out.push({
       name,
       kind: 'macro',
@@ -377,10 +409,17 @@ export function parseHlslSymbols(
     const closeBraceIdx = findMatchingBrace(cleanNormalized, openBraceIdx);
     structRanges.push({ start: sMatch.index, end: closeBraceIdx });
 
-    const nameOffset = sMatch.index + sMatch[0].indexOf(structName);
+    const structPrefix = /\bstruct\s+/.exec(sMatch[0]);
+    const nameInMatch = findIdentifierColumn(
+      sMatch[0],
+      structName,
+      structPrefix ? structPrefix.index + structPrefix[0].length : 0,
+    );
+    const nameOffset = sMatch.index + (nameInMatch >= 0 ? nameInMatch : 0);
     const sPos = offsetToLineCol(normStarts, nameOffset);
     const origStructLine = rawLines[sPos.line] ?? '';
-    const exactCol = origStructLine.indexOf(structName);
+    const cleanStructLine = cleanOrigLines[sPos.line] ?? origStructLine;
+    const exactCol = findIdentifierColumn(cleanStructLine, structName, 0, sPos.column);
 
     symbols.push({
       name: structName,
@@ -406,8 +445,9 @@ export function parseHlslSymbols(
         const absOffset = openBraceIdx + 1 + fMatch.index + tailStartInMatch + item.relOffset;
         const fPos = offsetToLineCol(normStarts, absOffset);
         const origLine = rawLines[fPos.line] ?? '';
-        const origTypeField = (cleanOrigLines[fPos.line] ?? origLine).trim();
-        const col = origLine.indexOf(item.name);
+        const cleanLine = cleanOrigLines[fPos.line] ?? origLine;
+        const origTypeField = cleanLine.trim();
+        const col = findIdentifierColumn(cleanLine, item.name, 0, fPos.column);
         const semStr = item.semantic ? ` : ${item.semantic}` : '';
 
         const fieldEntry: HlslSymbolEntry = {
@@ -457,7 +497,8 @@ export function parseHlslSymbols(
         const absOffset = openBraceIdx + 1 + vMatch.index + tailStartInMatch + item.relOffset;
         const vPos = offsetToLineCol(normStarts, absOffset);
         const origLine = rawLines[vPos.line] ?? '';
-        const col = origLine.indexOf(item.name);
+        const cleanLine = cleanOrigLines[vPos.line] ?? origLine;
+        const col = findIdentifierColumn(cleanLine, item.name, 0, vPos.column);
         symbols.push({
           name: item.name,
           kind: 'variable',
@@ -503,8 +544,12 @@ export function parseHlslSymbols(
     if (inBlock) continue;
 
     const returnInMatch = fnMatch[0].indexOf(returnType);
-    const nameInMatch = fnMatch[0].indexOf(fnName, returnInMatch + returnType.length);
-    const nameOffset = fnMatch.index + nameInMatch;
+    const nameInMatch = findIdentifierColumn(
+      fnMatch[0],
+      fnName,
+      returnInMatch >= 0 ? returnInMatch + returnType.length : 0,
+    );
+    const nameOffset = fnMatch.index + (nameInMatch >= 0 ? nameInMatch : 0);
     const fnPos = offsetToLineCol(normStarts, nameOffset);
     const origLine = rawLines[fnPos.line] ?? '';
     const origCleanLine = cleanOrigLines[fnPos.line] ?? origLine;
@@ -512,7 +557,7 @@ export function parseHlslSymbols(
       origCleanLine,
     );
     const displayReturn = origReturnMatch ? origReturnMatch[1] : returnType;
-    const col = origLine.indexOf(fnName);
+    const col = findIdentifierColumn(origCleanLine, fnName, 0, fnPos.column);
 
     const parsedParams = parseParameterList(rawParams);
     symbols.push({
@@ -555,11 +600,12 @@ export function parseHlslSymbols(
         const absParamOffset = partStart + (nameInPart >= 0 ? nameInPart : 0);
         const pPos = offsetToLineCol(normStarts, absParamOffset);
         const origParamLine = rawLines[pPos.line] ?? '';
-        const paramWordMatch = new RegExp(`\\b${pName}\\b`).exec(origParamLine);
+        const cleanParamLine = cleanOrigLines[pPos.line] ?? origParamLine;
+        const paramCol = findIdentifierColumn(cleanParamLine, pName, 0, pPos.column);
         scopeDecls.set(pName, {
           type: pType,
           line: pPos.line,
-          column: paramWordMatch ? paramWordMatch.index : pPos.column,
+          column: paramCol >= 0 ? paramCol : pPos.column,
           kind: 'parameter',
           signature: `${pType} ${pName}`,
         });
@@ -580,11 +626,12 @@ export function parseHlslSymbols(
           const absVarOffset = openBraceIdx + 1 + fvMatch.index + tailStart + item.relOffset;
           const lvPos = offsetToLineCol(normStarts, absVarOffset);
           const origVarLine = rawLines[lvPos.line] ?? '';
-          const colMatch = new RegExp(`\\b${item.name}\\b`).exec(origVarLine);
+          const cleanVarLine = cleanOrigLines[lvPos.line] ?? origVarLine;
+          const varCol = findIdentifierColumn(cleanVarLine, item.name, 0, lvPos.column);
           scopeDecls.set(item.name, {
             type: item.type,
             line: lvPos.line,
-            column: colMatch ? colMatch.index : lvPos.column,
+            column: varCol >= 0 ? varCol : lvPos.column,
             kind: 'localVariable',
             signature: `${item.type} ${item.name}`,
           });
@@ -605,11 +652,12 @@ export function parseHlslSymbols(
           const absVarOffset = openBraceIdx + 1 + lvMatch.index + tailStart + item.relOffset;
           const lvPos = offsetToLineCol(normStarts, absVarOffset);
           const origVarLine = rawLines[lvPos.line] ?? '';
-          const colMatch = new RegExp(`\\b${item.name}\\b`).exec(origVarLine);
+          const cleanVarLine = cleanOrigLines[lvPos.line] ?? origVarLine;
+          const varCol = findIdentifierColumn(cleanVarLine, item.name, 0, lvPos.column);
           scopeDecls.set(item.name, {
             type: item.type,
             line: lvPos.line,
-            column: colMatch ? colMatch.index : lvPos.column,
+            column: varCol >= 0 ? varCol : lvPos.column,
             kind: 'localVariable',
             signature: `${lType} ${item.name}${item.arraySuffix}`,
           });
@@ -647,7 +695,16 @@ export function parseHlslSymbols(
     for (const item of parseDeclaratorItems(declTail, gType)) {
       if (symbols.some((s) => s.name === item.name && s.line === lineIdx)) continue;
       const origLine = rawLines[lineIdx] ?? '';
-      const col = origLine.indexOf(item.name);
+      const cleanLine = cleanOrigLines[lineIdx] ?? origLine;
+      const declPrefixMatch =
+        /^\s*(?:(?:static|const|uniform|extern|groupshared|precise|volatile)\s+)*([A-Za-z_][A-Za-z0-9_<>]*)\s+/.exec(
+          cleanLine,
+        );
+      const col = findIdentifierColumn(
+        cleanLine,
+        item.name,
+        declPrefixMatch ? declPrefixMatch[0].length : 0,
+      );
       symbols.push({
         name: item.name,
         kind: 'variable',

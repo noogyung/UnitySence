@@ -412,4 +412,67 @@ PrefabInstance:
         AssertEx.Equal("second-frame", doc2.RootElement.GetProperty("tag").GetString());
         AssertEx.Equal(103, doc3.RootElement.GetProperty("id").GetInt32());
     }
+
+    [Fact]
+    public async Task ReturnsParseErrorForMalformedJsonAndStillProcessesSubsequentShutdown()
+    {
+        string tempRoot = Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "test-output",
+            "daemon-parse-err-" + Guid.NewGuid().ToString("N"));
+        string cacheFile = Path.Combine(tempRoot, "Library", "UnityBrainCache", "asset-index.bin");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var cache = new BinaryIndexCache();
+            var server = new RpcServer(cache, tempRoot, cacheFile);
+
+            using var input = new MemoryStream();
+            byte[] malformedBody = Encoding.UTF8.GetBytes("{bad json");
+            byte[] malformedHeader = Encoding.ASCII.GetBytes($"Content-Length: {malformedBody.Length}\r\n\r\n");
+            input.Write(malformedHeader, 0, malformedHeader.Length);
+            input.Write(malformedBody, 0, malformedBody.Length);
+
+            byte[] shutdownFrame = RpcServer.EncodeFrame(new
+            {
+                jsonrpc = "2.0",
+                id = 99,
+                method = "shutdown",
+                @params = new { },
+            });
+            input.Write(shutdownFrame, 0, shutdownFrame.Length);
+            input.Position = 0;
+
+            using var output = new MemoryStream();
+            await server.RunAsync(input, output).ConfigureAwait(false);
+            output.Position = 0;
+
+            byte[]? frame1 = await RpcServer.ReadFrameAsync(output, default).ConfigureAwait(false);
+            byte[]? frame2 = await RpcServer.ReadFrameAsync(output, default).ConfigureAwait(false);
+            byte[]? eof = await RpcServer.ReadFrameAsync(output, default).ConfigureAwait(false);
+
+            AssertEx.True(frame1 != null, "Expected Parse Error response frame");
+            AssertEx.True(frame2 != null, "Expected shutdown response frame");
+            AssertEx.True(eof == null, "Expected EOF after shutdown");
+
+            using var doc1 = JsonDocument.Parse(frame1!);
+            AssertEx.Equal("2.0", doc1.RootElement.GetProperty("jsonrpc").GetString());
+            AssertEx.Equal(JsonValueKind.Null, doc1.RootElement.GetProperty("id").ValueKind);
+            var err = doc1.RootElement.GetProperty("error");
+            AssertEx.Equal(-32700, err.GetProperty("code").GetInt32());
+            AssertEx.Equal("Parse error", err.GetProperty("message").GetString());
+
+            using var doc2 = JsonDocument.Parse(frame2!);
+            AssertEx.Equal(99, doc2.RootElement.GetProperty("id").GetInt64());
+            AssertEx.True(doc2.RootElement.GetProperty("result").GetProperty("ok").GetBoolean());
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
 }

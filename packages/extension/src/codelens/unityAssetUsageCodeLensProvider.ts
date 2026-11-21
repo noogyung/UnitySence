@@ -16,6 +16,7 @@ import type {
   SerializedFieldValueEntry,
 } from '../contracts/index.ts';
 import {
+  maskCSharpCommentsAndStrings,
   shortenCSharpType,
   UnityEventCompletionProvider,
 } from '../completion/unityEventGenerator.ts';
@@ -46,6 +47,7 @@ export interface ShowAssetUsagesCommandArgs {
 }
 
 const DAEMON_REQUEST_TIMEOUT_MS = 15_000;
+const DAEMON_REBUILD_TIMEOUT_MS = 60_000;
 const DAEMON_RETRY_COOLDOWN_MS = 5_000;
 const DAEMON_MAX_STDERR_BYTES = 8192;
 
@@ -349,6 +351,9 @@ export class UnityDaemonClient implements vscode.Disposable {
       throw new Error('UnityBrain.Daemon transport is unavailable.');
     }
 
+    const timeoutMs =
+      method === 'index/rebuild' ? DAEMON_REBUILD_TIMEOUT_MS : DAEMON_REQUEST_TIMEOUT_MS;
+
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const result = await Promise.race([
@@ -365,10 +370,10 @@ export class UnityDaemonClient implements vscode.Disposable {
             const suffix = stderrTail ? ` [stderr: ${stderrTail.slice(-300)}]` : '';
             reject(
               new Error(
-                `UnityBrain.Daemon request '${method}' timed out after ${DAEMON_REQUEST_TIMEOUT_MS}ms.${suffix}`,
+                `UnityBrain.Daemon request '${method}' timed out after ${timeoutMs}ms.${suffix}`,
               ),
             );
-          }, DAEMON_REQUEST_TIMEOUT_MS);
+          }, timeoutMs);
         }),
       ]);
       this.lastFailureAt = 0;
@@ -533,7 +538,7 @@ export function parseCSharpDeclarations(sourceText: string): CSharpCodeDeclarati
   const serializedFields: Array<{ fieldName: string; line: number; className?: string }> = [];
   const methods: Array<{ methodName: string; line: number; className?: string }> = [];
 
-  const lines = sourceText.split(/\r?\n/);
+  const lines = maskCSharpCommentsAndStrings(sourceText).split(/\r?\n/);
   let pendingSerializeField = false;
   let braceDepth = 0;
   let pendingClass: { className: string; memberBraceDepth: number } | null = null;
@@ -545,7 +550,7 @@ export function parseCSharpDeclarations(sourceText: string): CSharpCodeDeclarati
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
-    if (!trimmed || trimmed.startsWith('//')) {
+    if (!trimmed) {
       continue;
     }
 
@@ -614,8 +619,7 @@ export function parseCSharpDeclarations(sourceText: string): CSharpCodeDeclarati
       }
     }
 
-    const codeOnly = trimmed.replace(/"(?:\\.|[^"\\])*"/g, '').replace(/\/\/.*$/, '');
-    for (const ch of codeOnly) {
+    for (const ch of trimmed) {
       if (ch === '{') {
         braceDepth++;
         if (pendingClass) {

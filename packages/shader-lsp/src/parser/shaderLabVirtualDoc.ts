@@ -90,7 +90,7 @@ function matchKeywordAt(text: string, idx: number, kw: string): boolean {
 }
 
 export function blankShaderCommentsPreservingLayout(sourceText: string): string {
-  const chars = Array.from(sourceText);
+  const chars = sourceText.split('');
   let i = 0;
   let inString = false;
   while (i < sourceText.length) {
@@ -227,7 +227,7 @@ export function parseShaderPragmas(hlslText: string): ShaderPragmaInfo {
     if (entryMatch) {
       const stage = entryMatch[1] as PragmaEntryPoint['stage'];
       const name = entryMatch[2];
-      const col = line.indexOf(name, entryMatch.index);
+      const col = entryMatch.index + entryMatch[0].length - name.length;
       entryPoints.push({
         stage,
         name,
@@ -282,7 +282,7 @@ export function extractVirtualHlslDocument(
     };
   }
 
-  const chars = Array.from(sourceText);
+  const chars = sourceText.split('');
   const keepMask = new Uint8Array(chars.length);
   const blocks: ShaderCodeBlock[] = [];
   const rootIncludeIndices: number[] = [];

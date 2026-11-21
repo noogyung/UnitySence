@@ -418,5 +418,26 @@ describe('Extension Release Regression Suite', () => {
     } finally {
       metaMgr.dispose();
     }
+
+    // Extension manifest grammars & snippets declare only registered languages with unique scopeNames
+    const pkgJson = JSON.parse(
+      fs.readFileSync(path.join(REPO_ROOT, 'packages', 'extension', 'package.json'), 'utf8'),
+    ) as {
+      contributes: {
+        languages: Array<{ id: string }>;
+        grammars: Array<{ language: string; scopeName: string; path: string }>;
+        snippets: Array<{ language: string; path: string }>;
+      };
+    };
+    const declaredLangs = new Set(pkgJson.contributes.languages.map((l) => l.id));
+    const seenScopes = new Set<string>();
+    for (const g of pkgJson.contributes.grammars) {
+      expect(declaredLangs.has(g.language)).toBe(true);
+      expect(seenScopes.has(g.scopeName)).toBe(false);
+      seenScopes.add(g.scopeName);
+    }
+    for (const s of pkgJson.contributes.snippets) {
+      expect(declaredLangs.has(s.language)).toBe(true);
+    }
   });
 });

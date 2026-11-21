@@ -264,4 +264,51 @@ public class DirectScanner : MonoBehaviour
             .OrderBy(d => d.Location.SourceSpan.Start)
             .ToImmutableArray();
     }
+
+    [Fact]
+    public async Task ExcludesExternalObjectAndGameObjectReceiversButFlagsSelfReceiversForUB1002()
+    {
+        const string source = @"
+using UnityEngine;
+
+public class ReceiverScopeChecker : MonoBehaviour
+{
+    private Component _other = null!;
+
+    private void Update()
+    {
+        var ext1 = _other.gameObject.GetComponent<Rigidbody>();
+        var ext2 = _other.GetComponent<Rigidbody>();
+        var ext3 = _other.transform.GetComponent<Rigidbody>();
+
+        var self1 = GetComponent<Rigidbody>();
+        var self2 = this.gameObject.GetComponent<Rigidbody>();
+        var self3 = gameObject.GetComponent<Rigidbody>();
+        var self4 = this.transform.GetComponent<Rigidbody>();
+        var self5 = transform.GetComponent<Rigidbody>();
+        var self6 = this.GetComponent<Rigidbody>();
+
+        _ = ext1; _ = ext2; _ = ext3;
+        _ = self1; _ = self2; _ = self3; _ = self4; _ = self5; _ = self6;
+    }
+}";
+
+        var diags = await RoslynTestHarness.GetAnalyzerDiagnosticsAsync(
+            source,
+            new PerformanceCriticalContextAnalyzer());
+
+        var ub1002 = diags.Where(d => d.Id == DiagnosticIds.UncachedComponentLookup).ToArray();
+        AssertEx.Equal(6, ub1002.Length, $"Expected 6 UB1002 diagnostics on self receivers only, got {ub1002.Length}");
+
+        var texts = ub1002
+            .Select(d => d.Location.SourceTree!.GetText().ToString(d.Location.SourceSpan))
+            .ToArray();
+        foreach (var text in texts)
+        {
+            AssertEx.False(text.Contains("_other", StringComparison.Ordinal),
+                $"Did not expect UB1002 on external receiver: {text}");
+        }
+        AssertEx.True(texts.Any(t => t == "GetComponent<Rigidbody>()"), "Expected UB1002 for GetComponent<Rigidbody>()");
+        AssertEx.True(texts.Any(t => t == "this.gameObject.GetComponent<Rigidbody>()"), "Expected UB1002 for this.gameObject.GetComponent<Rigidbody>()");
+    }
 }
