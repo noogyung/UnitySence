@@ -225,6 +225,94 @@ describe('Omni Shader Integrated Capabilities', () => {
     expect(diags.some((d) => d.message.includes('_MissingInCBuffer'))).toBe(true);
   });
 
+  it('distinguishes keyword-only properties, included HLSL variable refs, render state refs, and unused properties', () => {
+    const ctx = createTempProject();
+    const shadersDir = path.join(ctx.projectRoot, 'Assets', 'Shaders');
+    const includePath = path.join(shadersDir, 'CustomHelper.hlsl');
+    fs.writeFileSync(
+      includePath,
+      [
+        'half4 ApplyHelper(half4 col) {',
+        '    #ifdef _USE_FOO',
+        '        col.rgb *= _UsedInCBuffer;',
+        '    #endif',
+        '    #ifdef _QUALITY_HIGH',
+        '        col.rgb = lerp(col.rgb, 1.0, _ToggleUsedAsVar);',
+        '    #endif',
+        '    return col;',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const shaderPath = path.join(shadersDir, 'KeywordUsage.shader');
+    const content = [
+      'Shader "Custom/KeywordUsage"',
+      '{',
+      '    Properties',
+      '    {',
+      '        [Toggle(_USE_FOO)] _UseFoo ("Use Foo", Float) = 0',
+      '        [Toggle] _UseBar ("Use Bar", Float) = 0',
+      '        [KeywordEnum(Off, Low, High)] _Quality ("Quality", Float) = 0',
+      '        [Toggle] _ToggleUsedAsVar ("Clamp Flag", Float) = 0',
+      '        [Toggle] _UnusedToggle ("Dead Toggle", Float) = 0',
+      '        _Cull ("Cull Mode", Float) = 2',
+      '        _UsedInCBuffer ("Used In CBuffer", Float) = 1.0',
+      '        _UnusedPlain ("Unused Plain", Float) = 0.5',
+      '    }',
+      '    SubShader',
+      '    {',
+      '        Pass',
+      '        {',
+      '            Cull [_Cull]',
+      '            HLSLPROGRAM',
+      '            #pragma vertex Vert',
+      '            #pragma fragment Frag',
+      '            #pragma shader_feature_local _USE_FOO',
+      '            #pragma shader_feature_local _USEBAR_ON',
+      '            #pragma shader_feature_local _QUALITY_OFF _QUALITY_LOW _QUALITY_HIGH',
+      '            CBUFFER_START(UnityPerMaterial)',
+      '                float _UsedInCBuffer;',
+      '            CBUFFER_END',
+      '            #include "CustomHelper.hlsl"',
+      '            float4 Vert() : SV_POSITION { return 0; }',
+      '            half4 Frag() : SV_Target {',
+      '                #ifdef _USEBAR_ON',
+      '                    return ApplyHelper(1);',
+      '                #endif',
+      '                return 0;',
+      '            }',
+      '            ENDHLSL',
+      '        }',
+      '    }',
+      '}',
+    ].join('\n');
+
+    const graph = new IncludeDependencyGraph(ctx);
+    const doc = makeDoc(shaderPath, content);
+    const diags = collectComputeAndShaderLabDiagnostics(doc, graph);
+
+    // Keyword-only & RenderState & CBUFFER-declared properties must NOT warn
+    expect(diags.some((d) => d.message.includes('_UseFoo'))).toBe(false);
+    expect(diags.some((d) => d.message.includes('_UseBar'))).toBe(false);
+    expect(diags.some((d) => d.message.includes('_Quality'))).toBe(false);
+    expect(diags.some((d) => d.message.includes('_Cull'))).toBe(false);
+    expect(diags.some((d) => d.message.includes('_UsedInCBuffer'))).toBe(false);
+
+    // [Toggle] referenced as a variable inside #include file without CBUFFER -> SRP Batcher warning
+    expect(
+      diags.some((d) => d.message.includes('_ToggleUsedAsVar') && d.message.includes('SRP Batcher')),
+    ).toBe(true);
+
+    // Unused properties (neither variable, keyword, nor render state) -> Unused property warning
+    expect(
+      diags.some((d) => d.message.includes('_UnusedToggle') && d.message.includes('미사용 프로퍼티')),
+    ).toBe(true);
+    expect(
+      diags.some((d) => d.message.includes('_UnusedPlain') && d.message.includes('미사용 프로퍼티')),
+    ).toBe(true);
+  });
+
   it('formats ShaderLab/HLSL idempotently and populates ShaderExplorer & LiveTest', () => {
     const ctx = createTempProject();
     const shaderPath = path.join(ctx.projectRoot, 'Assets', 'Shaders', 'Good.shader');

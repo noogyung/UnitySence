@@ -37,6 +37,9 @@
 6. **작업별 사용자 직접 검증 가이드 필수 첨부 (Mandatory User Verification Guide per Task)**
    * 모든 구현·수정 작업의 최종 응답에는 사용자가 VS Code / Unity 환경에서 직접 재현하고 확인할 수 있는 **수동 검증 절차(파일 경로, 입력 예시 코드, 기대 동작/출력, 실행 명령)**를 각 변경점마다 빠짐없이 포함한다.
 
+7. **테스트용 빌드(VSIX) 필수 제공 (Mandatory Testable VSIX Build)**
+   * 모든 구현·수정 작업이 완료되면 테스트 통과 후 반드시 `packages/extension/package.json`과 루트 `package.json`의 **패치 버전(`x.y.z` → `x.y.(z+1)`)을 올린 뒤** 확장 번들 빌드(`node tools/cli.mjs build:extension`)와 VSIX 패키징(`node tools/cli.mjs package:vsix`)을 실행하여, VS Code에서 버전 충돌 없이 바로 설치해 테스트할 수 있는 최신 `.vsix` 빌드 파일 경로를 최종 응답에 함께 제공한다.
+
 ---
 
 ## 2. 체크포인트 및 한도(Limit) 초기화 후 이어하기 프로토콜
@@ -62,7 +65,7 @@
 ## 3. 불변 아키텍처 제약 (Never Violate)
 
 * **공유 계약 단일 진실 공급원**: `PLAN.md §3` 및 `packages/extension/src/contracts/index.ts`의 인터페이스 필드명, 타입, 경로를 임의로 변경하지 마라.
-* **비침습적 MSBuild 주입**: `.csproj` 파일은 Unity가 재생성하므로 절대 수정하지 말고, `Directory.Build.props`의 `<!-- UnityBrain:Begin --> ... <!-- UnityBrain:End -->` 블록만 관리하라.
+* **대상 프로젝트 무오염 원칙 (Zero Workspace Pollution)**: 대상 Unity 프로젝트 폴더에는 `.csproj` 수정, `Directory.Build.props` 생성, `.gitignore` 수정 등 확장 프로그램에 의한 어떤 파일 변경도 수행하지 마라. C# 정적 진단은 이미 설치된 C# 확장의 LSP(`executeHoverProvider` 등)와 확장 내부 경량 TS 분석기로 처리한다.
 * **중복 구현 금지**: `Microsoft.Unity.Analyzers` (`UNT0001`~`UNT0038`, `USPxxxx`) 규칙을 재구현하지 마라. 신규 진단은 `UB1xxx`~`UB4xxx` 대역만 사용한다.
 * **완전한 구현**: `// TODO`, `// ... existing code`, `NotImplementedException` 등 미완성 스텁을 남기지 마라.
 

@@ -7,7 +7,7 @@ import { ShaderCompletionProvider } from '../../shader-lsp/src/providers/complet
 import { ShaderDefinitionProvider } from '../../shader-lsp/src/providers/definitionProvider.ts';
 import { ShaderHoverProvider } from '../../shader-lsp/src/providers/hoverProvider.ts';
 import { UnityCSharpCodeActionProvider } from './analyzers/csharpCodeActionProvider.ts';
-import { MsbuildAnalyzerInjector } from './analyzers/msbuildInjector.ts';
+import { collectUnityCSharpDiagnostics } from './analyzers/csharpDiagnosticsProvider.ts';
 import { UnityAsmdefProvider } from './asmdef/unityAsmdefProvider.ts';
 import {
   type DaemonClientTransport,
@@ -86,7 +86,6 @@ export interface UnitySenseExtensionApi {
   context: UnityProjectContext;
   contextManager: UnityProjectContextManager;
   settingsWatcher: ProjectSettingsWatcher;
-  msbuildInjector: MsbuildAnalyzerInjector;
   daemonClient: UnityDaemonClient;
   shaderGraph: IncludeDependencyGraph;
   shaderDefinitionProvider: ShaderDefinitionProvider;
@@ -197,19 +196,6 @@ export async function activate(
   const outputChannel = vscode.window.createOutputChannel?.('UnitySense');
   const shaderLiveOutputChannel = vscode.window.createOutputChannel?.('UnitySense Shader Live Profiler');
 
-  const msbuildInjector = new MsbuildAnalyzerInjector({
-    extensionPath: context.extensionPath,
-    projectRoot: unityContext.projectRoot,
-    cacheDir: unityContext.cacheDir,
-  });
-  try {
-    await msbuildInjector.ensureInjected();
-  } catch (err) {
-    outputChannel?.appendLine(
-      `[UnitySense] Directory.Build.props 자동 주입 중 오류 (무시하고 계속 진행): ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
   const mainStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   mainStatusBar.command = 'unitySense.rebuildAssetIndex';
   const refreshMainStatusBar = (ctx: UnityProjectContext, cache: ProjectSettingsCache) => {
@@ -232,6 +218,24 @@ export async function activate(
   const shaderCompletionProvider = new ShaderCompletionProvider(shaderGraph);
   const shaderHoverProvider = new ShaderHoverProvider(shaderGraph);
   const shaderDiagnosticCollection = vscode.languages.createDiagnosticCollection('unitysense-shader');
+  const csharpDiagnosticCollection = vscode.languages.createDiagnosticCollection('unitysense-csharp');
+
+  const updateCSharpDiagnostics = async (doc: vscode.TextDocument) => {
+    if (doc.languageId !== 'csharp') return;
+    const enabled = vscode.workspace
+      .getConfiguration('unitySense')
+      .get<boolean>('analyzers.enabled', true);
+    if (!enabled) {
+      csharpDiagnosticCollection.delete(doc.uri);
+      return;
+    }
+    try {
+      const diags = await collectUnityCSharpDiagnostics(doc, settingsWatcher.getCache());
+      csharpDiagnosticCollection.set(doc.uri, diags);
+    } catch {
+      // Ignore transient document/LSP errors
+    }
+  };
 
   const updateShaderDiagnostics = (doc: vscode.TextDocument) => {
     if (!isShaderDocument(doc)) return;
@@ -372,9 +376,28 @@ export async function activate(
   );
 
   const shaderDiagTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const csharpDiagTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const asmdefDiagTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const suggestTimers = new Set<ReturnType<typeof setTimeout>>();
   let assetRebuildTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const scheduleCSharpDiagnostics = (doc: vscode.TextDocument) => {
+    if (doc.languageId !== 'csharp') return;
+    if (!enableWatchers) {
+      void updateCSharpDiagnostics(doc);
+      return;
+    }
+    const key = doc.uri.toString();
+    const existing = csharpDiagTimers.get(key);
+    if (existing) clearTimeout(existing);
+    csharpDiagTimers.set(
+      key,
+      setTimeout(() => {
+        csharpDiagTimers.delete(key);
+        void updateCSharpDiagnostics(doc);
+      }, 250),
+    );
+  };
 
   const scheduleShaderDiagnostics = (doc: vscode.TextDocument) => {
     if (!isShaderDocument(doc)) return;
@@ -402,6 +425,7 @@ export async function activate(
     settingsWatcher,
     daemonClient,
     shaderDiagnosticCollection,
+    csharpDiagnosticCollection,
     assetUsageCodeLensProvider,
     shaderVariantCodeLensProvider,
     metaSyncManager,
@@ -410,6 +434,8 @@ export async function activate(
     new vscode.Disposable(() => {
       for (const t of shaderDiagTimers.values()) clearTimeout(t);
       shaderDiagTimers.clear();
+      for (const t of csharpDiagTimers.values()) clearTimeout(t);
+      csharpDiagTimers.clear();
       for (const t of asmdefDiagTimers.values()) clearTimeout(t);
       asmdefDiagTimers.clear();
       for (const t of suggestTimers) clearTimeout(t);
@@ -437,16 +463,19 @@ export async function activate(
 
     settingsWatcher.onDidUpdateCache((nextCache) => {
       refreshMainStatusBar(contextManager.context ?? unityContext, nextCache);
+      for (const openDoc of vscode.workspace.textDocuments) {
+        if (openDoc.languageId === 'csharp') {
+          void updateCSharpDiagnostics(openDoc);
+        }
+      }
     }),
 
     vscode.workspace.onDidChangeConfiguration(async (e) => {
       if (e.affectsConfiguration('unitySense.analyzers.enabled')) {
-        try {
-          await msbuildInjector.ensureInjected();
-        } catch (err) {
-          outputChannel?.appendLine(
-            `[UnitySense] Directory.Build.props 갱신 중 오류: ${err instanceof Error ? err.message : String(err)}`,
-          );
+        for (const openDoc of vscode.workspace.textDocuments) {
+          if (openDoc.languageId === 'csharp') {
+            await updateCSharpDiagnostics(openDoc);
+          }
         }
       }
       if (e.affectsConfiguration('unitySense.codeLens.enabled')) {
@@ -460,7 +489,10 @@ export async function activate(
       }
     }),
 
-    vscode.workspace.onDidOpenTextDocument((doc) => updateShaderDiagnostics(doc)),
+    vscode.workspace.onDidOpenTextDocument((doc) => {
+      updateShaderDiagnostics(doc);
+      void updateCSharpDiagnostics(doc);
+    }),
     ...(typeof vscode.workspace.onDidCloseTextDocument === 'function'
       ? [
           vscode.workspace.onDidCloseTextDocument((doc) => {
@@ -469,6 +501,11 @@ export async function activate(
             if (sTimer) {
               clearTimeout(sTimer);
               shaderDiagTimers.delete(key);
+            }
+            const cTimer = csharpDiagTimers.get(key);
+            if (cTimer) {
+              clearTimeout(cTimer);
+              csharpDiagTimers.delete(key);
             }
             const aTimer = asmdefDiagTimers.get(key);
             if (aTimer) {
@@ -479,6 +516,9 @@ export async function activate(
               shaderGraph.closeOpenDocument(key);
               shaderDiagnosticCollection.delete(doc.uri);
             }
+            if (doc.languageId === 'csharp') {
+              csharpDiagnosticCollection.delete(doc.uri);
+            }
             if (/\.(?:asmdef|asmref)$/i.test(doc.fileName)) {
               asmdefDiagCollection.delete(doc.uri);
             }
@@ -487,6 +527,7 @@ export async function activate(
       : []),
     vscode.workspace.onDidChangeTextDocument((e) => {
       scheduleShaderDiagnostics(e.document);
+      scheduleCSharpDiagnostics(e.document);
       const changeReason = (e as { reason?: number }).reason;
       const reasonEnum = (
         vscode as unknown as { TextDocumentChangeReason?: { Undo: number; Redo: number } }
@@ -974,6 +1015,7 @@ export async function activate(
 
   for (const openDoc of vscode.workspace.textDocuments) {
     updateShaderDiagnostics(openDoc);
+    void updateCSharpDiagnostics(openDoc);
   }
 
   void vscode.window.showInformationMessage(
@@ -985,7 +1027,6 @@ export async function activate(
     context: unityContext,
     contextManager,
     settingsWatcher,
-    msbuildInjector,
     daemonClient,
     shaderGraph,
     shaderDefinitionProvider,

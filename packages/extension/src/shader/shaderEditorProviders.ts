@@ -1483,7 +1483,12 @@ export function collectComputeAndShaderLabDiagnostics(
     }
   }
 
-  // 1-3. Validate SRP Batcher CBUFFER_START(UnityPerMaterial) coverage across passes and included files
+  // 1-3. Validate ShaderLab property usage, derived keywords, Render State refs, and SRP Batcher CBUFFER_START(UnityPerMaterial)
+  const hlslRanges = virtualDoc.isShaderLab
+    ? virtualDoc.blocks.map((b) => ({ start: b.startLine, end: b.endLine }))
+    : [{ start: 0, end: Math.max(0, lines.length - 1) }];
+  const strippedLines = stripCommentsAndStringsByLine(lines);
+
   if (virtualDoc.isShaderLab && virtualDoc.properties.length > 0) {
     const cleanSources: string[] = [blankShaderCommentsPreservingLayout(virtualDoc.virtualHlsl)];
     for (let fi = 1; fi < reachableWalk.files.length; fi++) {
@@ -1499,58 +1504,151 @@ export function collectComputeAndShaderLabDiagnostics(
       cleanSources.push(blankShaderCommentsPreservingLayout(fileText));
     }
 
-    const cbufferRe = /CBUFFER_START\s*\(\s*UnityPerMaterial\s*\)([\s\S]*?)CBUFFER_END/g;
+    const unityPerMaterialRe = /CBUFFER_START\s*\(\s*UnityPerMaterial\s*\)([\s\S]*?)CBUFFER_END/g;
+    const anyCbufferRe = /CBUFFER_START\s*\([^)]*\)[\s\S]*?CBUFFER_END/g;
     const cbufferBodies: string[] = [];
+    const preprocChunks: string[] = [];
+    const hlslBodyChunks: string[] = [];
+
     for (const src of cleanSources) {
-      cbufferRe.lastIndex = 0;
+      unityPerMaterialRe.lastIndex = 0;
       let cm: RegExpExecArray | null;
-      while ((cm = cbufferRe.exec(src)) !== null) {
+      while ((cm = unityPerMaterialRe.exec(src)) !== null) {
         cbufferBodies.push(cm[1]);
+      }
+
+      // Mask CBUFFER_START(...) ... CBUFFER_END so declarations inside CBUFFER do not count as variable usage
+      const withoutCbuffers = src.replace(anyCbufferRe, (m) => m.replace(/[^\n]/g, ' '));
+      const srcLines = withoutCbuffers.split(/\r?\n/);
+      const bodyLines: string[] = [];
+      let inPreprocContinuation = false;
+
+      for (const rawLine of srcLines) {
+        if (inPreprocContinuation || /^\s*#/.test(rawLine)) {
+          preprocChunks.push(rawLine);
+          inPreprocContinuation = rawLine.trimEnd().endsWith('\\');
+          bodyLines.push('');
+        } else {
+          bodyLines.push(rawLine);
+        }
+      }
+
+      hlslBodyChunks.push(bodyLines.join('\n'));
+    }
+
+    const hasUnityPerMaterial = cbufferBodies.length > 0;
+    const combinedCbufferBody = cbufferBodies.join('\n');
+    const combinedPreproc = preprocChunks.join('\n');
+    const combinedHlslBody = hlslBodyChunks.join('\n');
+
+    // Collect ShaderLab render state property references such as Cull [_Cull], Blend [_Src] [_Dst], ZWrite [_ZWrite]
+    const renderStateRefs = new Set<string>();
+    const propLineSet = new Set<number>(virtualDoc.properties.map((p) => p.line ?? -1));
+    const stateRefRe = /\[(_[A-Za-z0-9_]+)\]/g;
+    for (let i = 0; i < strippedLines.length; i++) {
+      if (propLineSet.has(i)) continue;
+      if (hlslRanges.some((r) => i >= r.start && i <= r.end)) continue;
+      const lineText = strippedLines[i] ?? '';
+      if (/\([^)]*\)\s*=/.test(lineText)) continue;
+      stateRefRe.lastIndex = 0;
+      let sm: RegExpExecArray | null;
+      while ((sm = stateRefRe.exec(lineText)) !== null) {
+        renderStateRefs.add(sm[1]);
       }
     }
 
-    if (cbufferBodies.length > 0) {
-      const combinedCbufferBody = cbufferBodies.join('\n');
-      const texTypes = new Set(['2D', '2DArray', '3D', 'Cube', 'CubeArray', 'Any']);
-      const skipAttrRe = /\[(?:HideInInspector|PerRendererData|NonModifiableTextureData)\]/;
+    const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const extractDerivedKeywords = (propName: string, attrBlock: string): string[] => {
+      const keywords: string[] = [];
+      const upperName = propName.toUpperCase();
 
-      for (const prop of virtualDoc.properties) {
-        if (texTypes.has(prop.type)) continue;
-        const propLine = prop.line ?? 0;
-        const propCol = prop.column ?? 0;
+      const toggleRe = /\[\s*(?:Toggle|MaterialToggle)\s*(?:\(\s*([^)]*?)\s*\))?\s*\]/g;
+      let tm: RegExpExecArray | null;
+      while ((tm = toggleRe.exec(attrBlock)) !== null) {
+        const explicit = tm[1]?.trim();
+        keywords.push(explicit && explicit.length > 0 ? explicit : `${upperName}_ON`);
+      }
 
-        let hasSkipAttr = false;
-        for (let lookback = 0; lookback <= 3 && propLine - lookback >= 0; lookback++) {
-          const checkLine = lines[propLine - lookback] ?? '';
-          if (lookback > 0 && (checkLine.includes('=') || checkLine.includes('{'))) {
-            break;
-          }
-          if (skipAttrRe.test(checkLine)) {
-            hasSkipAttr = true;
-            break;
+      const toggleOffRe = /\[\s*ToggleOff\s*(?:\(\s*([^)]*?)\s*\))?\s*\]/g;
+      let tom: RegExpExecArray | null;
+      while ((tom = toggleOffRe.exec(attrBlock)) !== null) {
+        const explicit = tom[1]?.trim();
+        keywords.push(explicit && explicit.length > 0 ? explicit : `${upperName}_OFF`);
+      }
+
+      const kwEnumRe = /\[\s*KeywordEnum\s*\(\s*([^)]+)\s*\)\s*\]/g;
+      let km: RegExpExecArray | null;
+      while ((km = kwEnumRe.exec(attrBlock)) !== null) {
+        for (const item of km[1].split(',')) {
+          const normalized = item.trim().replace(/\s+/g, '_').toUpperCase();
+          if (normalized) {
+            keywords.push(`${upperName}_${normalized}`);
           }
         }
-        if (hasSkipAttr) continue;
+      }
 
-        const propRe = new RegExp(`\\b${prop.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
-        if (!propRe.test(combinedCbufferBody)) {
+      return keywords;
+    };
+
+    const texTypes = new Set(['2D', '2DArray', '3D', 'Cube', 'CubeArray', 'Any']);
+
+    for (const prop of virtualDoc.properties) {
+      if (texTypes.has(prop.type)) continue;
+      const propLine = prop.line ?? 0;
+      const propCol = prop.column ?? 0;
+
+      const attrLines: string[] = [];
+      for (let lookback = 0; lookback <= 3 && propLine - lookback >= 0; lookback++) {
+        const checkLine = lines[propLine - lookback] ?? '';
+        if (lookback > 0 && (checkLine.includes('=') || checkLine.includes('{'))) {
+          break;
+        }
+        attrLines.push(checkLine);
+      }
+      const attrBlock = attrLines.join('\n');
+
+      const hasHideInInspector = /\[HideInInspector\]/.test(attrBlock);
+      const hasPerRendererData = /\[PerRendererData\]/.test(attrBlock);
+      const hasNonModifiable = /\[NonModifiableTextureData\]/.test(attrBlock);
+      const derivedKeywords = extractDerivedKeywords(prop.name, attrBlock);
+
+      const propRe = new RegExp(`\\b${escapeRegExp(prop.name)}\\b`);
+      const isVarUsed = propRe.test(combinedHlslBody);
+      const isKeywordUsed = derivedKeywords.some((kw) =>
+        new RegExp(`\\b${escapeRegExp(kw)}\\b`).test(combinedPreproc),
+      );
+      const isStateUsed = renderStateRefs.has(prop.name);
+      const inCBuffer = hasUnityPerMaterial && propRe.test(combinedCbufferBody);
+
+      if (isVarUsed) {
+        if (
+          hasUnityPerMaterial &&
+          !inCBuffer &&
+          !hasPerRendererData &&
+          !hasNonModifiable &&
+          !hasHideInInspector
+        ) {
           diags.push(
             new vscode.Diagnostic(
               new vscode.Range(propLine, propCol, propLine, propCol + prop.name.length),
-              `[UnitySense] SRP Batcher: 프로퍼티 '${prop.name}'이(가) CBUFFER_START(UnityPerMaterial)에 선언되어 있지 않습니다.`,
+              `[UnitySense] SRP Batcher: 프로퍼티 '${prop.name}'이(가) HLSL에서 사용되지만 CBUFFER_START(UnityPerMaterial)에 선언되어 있지 않습니다.`,
               vscode.DiagnosticSeverity.Warning,
             ),
           );
         }
+      } else if (!isKeywordUsed && !isStateUsed && !hasHideInInspector) {
+        diags.push(
+          new vscode.Diagnostic(
+            new vscode.Range(propLine, propCol, propLine, propCol + prop.name.length),
+            `[UnitySense] 미사용 프로퍼티: '${prop.name}'이(가) HLSL 변수, 키워드, ShaderLab 렌더 상태 어디에서도 사용되지 않습니다.`,
+            vscode.DiagnosticSeverity.Warning,
+          ),
+        );
       }
     }
   }
 
   // 2. Validate [numthreads(x, y, z)] <= 1024 and ShaderLab render state values
-  const hlslRanges = virtualDoc.isShaderLab
-    ? virtualDoc.blocks.map((b) => ({ start: b.startLine, end: b.endLine }))
-    : [{ start: 0, end: Math.max(0, lines.length - 1) }];
-  const strippedLines = stripCommentsAndStringsByLine(lines);
 
   for (let i = 0; i < lines.length; i++) {
     const strippedLine = strippedLines[i] ?? '';

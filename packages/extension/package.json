@@ -2,7 +2,7 @@
   "name": "unitysense",
   "displayName": "UnitySense",
   "description": "JetBrains Rider 수준의 Unity 개발 지능형 지원 확장 (ShaderLab/HLSL LSP, Roslyn 분석기, YAML 에셋 인덱서, .meta 자동 동기화).",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "noogkim",
   "author": {
     "name": "NoogKim"
@@ -179,7 +179,7 @@
         "unitySense.analyzers.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "[UnitySense] Directory.Build.props를 통해 UnitySense Roslyn 분석기 및 AdditionalFiles를 자동으로 주입합니다."
+          "description": "[UnitySense] 프로젝트 파일을 수정하지 않는 경량 C# Unity 정적 진단(성능/문자열/Burst)을 활성화합니다."
         },
         "unitySense.unityEditorPath": {
           "type": "string",

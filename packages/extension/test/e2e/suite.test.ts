@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 describe('UnitySense Extension End-to-End Integration Suite', () => {
-  it('activates on SampleUnityProject and integrates Directory.Build.props, Shader Definition/Variants, C# Completions, CodeLens, and Meta Sync', async () => {
+  it('activates on SampleUnityProject without creating Directory.Build.props and integrates Shader Definition/Variants, C# Completions, CodeLens, and Meta Sync', async () => {
     const repoRoot = process.cwd();
     const fixtureProject = path.join(repoRoot, 'test-fixtures', 'SampleUnityProject');
     const fixtureEditor = path.join(repoRoot, 'test-fixtures', 'SampleEditor');
@@ -64,6 +64,7 @@ describe('UnitySense Extension End-to-End Integration Suite', () => {
     );
     const sampleRoot = path.join(workDir, 'SampleUnityProject');
     copyDirRecursive(fixtureProject, sampleRoot);
+    fs.rmSync(path.join(sampleRoot, 'Directory.Build.props'), { force: true });
     tempDirs.push(workDir);
 
     vscode.workspace.workspaceFolders = [
@@ -107,16 +108,9 @@ describe('UnitySense Extension End-to-End Integration Suite', () => {
     expect(api).toBeDefined();
     expect(api!.context.editorVersion).toContain('6000.');
 
-    // 1. Verify Directory.Build.props points directly to ProjectSettings YAML without disk cache duplication
+    // 1. Verify no Directory.Build.props or disk cache files are created inside the Unity project
     const propsPath = path.join(sampleRoot, 'Directory.Build.props');
-    expect(fs.existsSync(propsPath)).toBe(true);
-    const propsText = fs.readFileSync(propsPath, 'utf8');
-    expect(propsText).toContain('<!-- UnityBrain:Begin -->');
-    expect(propsText).toContain('UnityBrain.Analyzers.dll');
-    expect(propsText).toContain('TagManager.asset');
-    expect(propsText).toContain('EditorBuildSettings.asset');
-    expect(propsText).toContain('unity-api.json');
-    expect(propsText).not.toContain('project-settings.json');
+    expect(fs.existsSync(propsPath)).toBe(false);
 
     expect(fs.existsSync(api!.context.cacheDir)).toBe(false);
     const memCache = api!.settingsWatcher.getCache();

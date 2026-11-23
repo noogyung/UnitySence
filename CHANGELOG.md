@@ -2,6 +2,12 @@
 
 All notable changes to the **UnitySense** extension will be documented in this file.
 
+## [1.0.2] - 2026-11-24
+
+### Changed
+- **`Directory.Build.props` 자동 생성 완전 제거 & 경량 C# 진단기 전환**: 대상 Unity 프로젝트에 어떤 파일도 생성하지 않도록 `MsbuildAnalyzerInjector`를 제거하고, 기존 `ProjectSettingsWatcher` 및 VS Code C# 확장의 LSP(`executeHoverProvider`)를 재활용하는 경량 `unitysense-csharp` 진단기(`UB1002`, `UB1003`, `UB2001`~`UB2004`, `UB3002`, `UB3003`)로 전환했습니다.
+- **Shader 프로퍼티 사용처 및 `#include` 기반 검사 정밀화**: `[Toggle]`, `[ToggleOff]`, `[KeywordEnum]` 키워드 전용 프로퍼티와 ShaderLab 렌더 상태(`Cull [_Cull]` 등) 참조 프로퍼티의 SRP Batcher 오탐을 제거하고, `#include` 파일을 포함해 HLSL 변수로 실제 참조되는 경우에만 `CBUFFER_START(UnityPerMaterial)` 경고를, 어디에도 사용되지 않는 경우 미사용 프로퍼티 경고를 표시하도록 개선했습니다.
+
 ## [1.0.1] - 2026-11-22
 
 ### Changed

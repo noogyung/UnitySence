@@ -3,7 +3,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as vscode from 'vscode';
 import { afterEach, describe, expect, it } from 'vitest';
-import { MsbuildAnalyzerInjector } from '../src/analyzers/msbuildInjector.ts';
 import { UnityCSharpCodeActionProvider } from '../src/analyzers/csharpCodeActionProvider.ts';
 import { UnityAsmdefProvider } from '../src/asmdef/unityAsmdefProvider.ts';
 import {
@@ -246,17 +245,8 @@ describe('Extension Release Regression Suite', () => {
     disp.dispose();
   });
 
-  it('escapes MSBuild special characters before XML entities and handles C# CodeAction edge cases', async () => {
+  it('handles C# CodeAction edge cases without creating Directory.Build.props', async () => {
     const baseOut = makeTempDir('ub-ext-msb-');
-    const specialProj = path.join(baseOut, "Team&1;Proj$%20'Dev");
-    fs.mkdirSync(path.join(specialProj, 'ProjectSettings'), { recursive: true });
-    const injector = new MsbuildAnalyzerInjector({
-      extensionPath: path.join(REPO_ROOT, 'packages', 'extension'),
-      projectRoot: specialProj,
-    });
-    const xmlBlock = injector.buildManagedBlock();
-    expect(xmlBlock).toContain('Team&amp;1%3BProj%24%2520%27Dev');
-    expect(xmlBlock).not.toContain('&amp%3B');
 
     const codeActionProvider = new UnityCSharpCodeActionProvider();
     const csCode = [
