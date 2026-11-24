@@ -692,11 +692,11 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
         if (!evInfo) continue;
 
         const shortOwner = shortenCSharpType(evInfo.apiType.fullName);
-        const perfBadge = evInfo.event.isPerformanceCritical ? ' · 매 프레임 호출' : '';
+        const perfBadge = evInfo.event.isPerformanceCritical ? ', 매 프레임 호출' : '';
         const range = new vscode.Range(method.line, 0, method.line, 0);
         lenses.push(
           new vscode.CodeLens(range, {
-            title: `$(symbol-event) [UnitySense] 유니티 이벤트 함수 (${shortOwner})${perfBadge}`,
+            title: `$(symbol-event) ${shortOwner}${perfBadge}`,
             command: 'unitySense.generateEventFunctions',
             tooltip: `[UnitySense] ${evInfo.apiType.fullName}.${evInfo.event.name}: ${evInfo.event.description}`,
           }),
@@ -710,12 +710,18 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
       return lenses;
     }
 
+    const showSerializedFieldValues = vscode.workspace
+      .getConfiguration('unitySense')
+      .get<boolean>('codeLens.showSerializedFieldValues', false);
+
     let scriptUsages: AssetUsageLocation[] = [];
     let serializedValues: SerializedFieldValueEntry[] = [];
     try {
       [scriptUsages, serializedValues] = await Promise.all([
         this.daemonClient.findByScriptGuid(scriptGuid),
-        this.daemonClient.getSerializedValues(scriptGuid),
+        showSerializedFieldValues
+          ? this.daemonClient.getSerializedValues(scriptGuid)
+          : Promise.resolve<SerializedFieldValueEntry[]>([]),
       ]);
     } catch {
       appendUnityEventMethodLenses();
@@ -746,8 +752,8 @@ export class UnityAssetUsageCodeLensProvider implements vscode.CodeLensProvider,
       );
     }
 
-    // 2. Field-level Inspector Serialized Values CodeLenses
-    if (serializedValues.length > 0) {
+    // 2. Field-level Inspector Serialized Values CodeLenses (opt-in, hidden by default)
+    if (showSerializedFieldValues && serializedValues.length > 0) {
       const valuesByField = new Map<string, SerializedFieldValueEntry[]>();
       for (const entry of serializedValues) {
         const normalizedFieldName = entry.fieldName.replace(

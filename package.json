@@ -1,6 +1,6 @@
 {
   "name": "unitybrain-monorepo",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,10 @@
     "build:daemon": "node tools/cli.mjs build:daemon",
     "build:lsp": "node tools/cli.mjs build:lsp",
     "build:extension": "node tools/cli.mjs build:extension",
-    "package:vsix": "node tools/cli.mjs package:vsix"
+    "package:vsix": "node tools/cli.mjs package:vsix",
+    "package:vsix:dev": "node tools/cli.mjs package:vsix:dev",
+    "release:prepare": "node tools/cli.mjs release:prepare",
+    "verify:release-tag": "node tools/cli.mjs verify:release-tag"
   },
   "engines": {
     "node": ">=22.15.0"

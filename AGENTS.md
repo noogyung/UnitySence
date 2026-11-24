@@ -37,8 +37,10 @@
 6. **작업별 사용자 직접 검증 가이드 필수 첨부 (Mandatory User Verification Guide per Task)**
    * 모든 구현·수정 작업의 최종 응답에는 사용자가 VS Code / Unity 환경에서 직접 재현하고 확인할 수 있는 **수동 검증 절차(파일 경로, 입력 예시 코드, 기대 동작/출력, 실행 명령)**를 각 변경점마다 빠짐없이 포함한다.
 
-7. **테스트용 빌드(VSIX) 필수 제공 (Mandatory Testable VSIX Build)**
-   * 모든 구현·수정 작업이 완료되면 테스트 통과 후 반드시 `packages/extension/package.json`과 루트 `package.json`의 **패치 버전(`x.y.z` → `x.y.(z+1)`)을 올린 뒤** 확장 번들 빌드(`node tools/cli.mjs build:extension`)와 VSIX 패키징(`node tools/cli.mjs package:vsix`)을 실행하여, VS Code에서 버전 충돌 없이 바로 설치해 테스트할 수 있는 최신 `.vsix` 빌드 파일 경로를 최종 응답에 함께 제공한다.
+7. **테스트용 개발 빌드(VSIX) 필수 제공 — 버전 변경 금지 (Mandatory Dev VSIX Build, No Version Bumps)**
+   * 모든 구현·수정 작업이 완료되면 테스트 통과 후 확장 번들 빌드(`node tools/cli.mjs build:extension`)와 개발용 VSIX 패키징(`node tools/cli.mjs package:vsix:dev`)을 실행하고, 생성된 `dist/dev/unitysense-<x.y.(z+1)>-dev.<시각>.vsix` 경로를 최종 응답에 함께 제공한다. 개발 버전은 빌드할 때마다 커지므로 VS Code / Antigravity IDE에 덮어 설치해도 충돌하지 않는다.
+   * 루트 `package.json`과 `packages/extension/package.json`의 `version`은 **마지막 정식 릴리스 버전**을 유지하며, 테스트나 일반 작업을 이유로 **절대 올리지 않는다**. 변경사항은 `CHANGELOG.md`의 `## [Unreleased]` 섹션에 기록한다.
+   * 버전 변경은 사용자가 정식 릴리스를 명시적으로 지시한 경우에만 `node tools/cli.mjs release:prepare <x.y.z>`로 수행하고, 릴리스 커밋(`release: vX.Y.Z`)과 태그(`vX.Y.Z`)를 함께 만든다. 절차는 `docs/PUBLISHING.md`를 따른다.
 
 ---
 

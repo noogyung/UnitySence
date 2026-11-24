@@ -2,7 +2,7 @@
   "name": "unitysense",
   "displayName": "UnitySense",
   "description": "JetBrains Rider 수준의 Unity 개발 지능형 지원 확장 (ShaderLab/HLSL LSP, Roslyn 분석기, YAML 에셋 인덱서, .meta 자동 동기화).",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "publisher": "noogkim",
   "author": {
     "name": "NoogKim"
@@ -40,9 +40,13 @@
     "Other"
   ],
   "activationEvents": [
+    "onStartupFinished",
+    "workspaceContains:.git",
     "workspaceContains:ProjectSettings/ProjectVersion.txt",
     "workspaceContains:**/ProjectSettings/ProjectVersion.txt",
-    "workspaceContains:Assets"
+    "workspaceContains:Assets",
+    "onCommand:unitySense.toggleGitBlame",
+    "onCommand:unitySense.toggleRiderHighlighting"
   ],
   "scripts": {
     "build": "node ../../tools/cli.mjs build:extension",
@@ -135,8 +139,35 @@
       {
         "command": "unitySense.refreshShaderExplorer",
         "title": "[UnitySense] 셰이더 탐색기 새로고침"
+      },
+      {
+        "command": "unitySense.toggleRiderHighlighting",
+        "title": "[UnitySense] Rider 스타일 C# 하이라이팅 켜기/끄기"
+      },
+      {
+        "command": "unitySense.toggleGitBlame",
+        "title": "[UnitySense] Git Blame 주석 켜기/끄기 (Annotate)"
+      },
+      {
+        "command": "unitySense.copyBlameCommitHash",
+        "title": "[UnitySense] Blame 커밋 해시 복사"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "unitySense.toggleGitBlame",
+          "when": "editorTextFocus",
+          "group": "9_cutcopypaste@99"
+        }
+      ],
+      "editor/lineNumber/context": [
+        {
+          "command": "unitySense.toggleGitBlame",
+          "group": "1_unitySense@1"
+        }
+      ]
+    },
     "views": {
       "explorer": [
         {
@@ -175,6 +206,106 @@
           "type": "boolean",
           "default": true,
           "description": "[UnitySense] 유니티 에셋 참조, 이벤트 콜백, 인스펙터 직렬화 값 및 셰이더 배리언트 CodeLens를 표시합니다."
+        },
+        "unitySense.codeLens.showSerializedFieldValues": {
+          "type": "boolean",
+          "default": false,
+          "description": "[UnitySense] 직렬화된 필드/프로퍼티 위에 씬·프리팹 인스펙터 값 미리보기 CodeLens를 표시합니다."
+        },
+        "unitySense.csharp.riderHighlighting.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "[UnitySense] 현재 테마의 배경과 UI는 유지하면서 C# 코드 색상만 JetBrains Rider Dark 스타일 시맨틱 하이라이팅으로 적용합니다."
+        },
+        "unitySense.csharp.riderHighlighting.distinguishStructs": {
+          "type": "boolean",
+          "default": false,
+          "description": "[UnitySense] Rider 스타일 C# 하이라이팅에서 struct(float3, NativeArray, CustomStruct 등)를 연보라 보조 톤(#E1BFFF)으로 구분합니다. 기본값(false)은 class와 동일한 Rider 기본 보라색(#C191FF)으로 통일합니다."
+        },
+        "unitySense.gitBlame.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "[UnitySense] JetBrains Rider 스타일의 경량 읽기 전용 Git Blame 주석 기능을 활성화합니다."
+        },
+        "unitySense.gitBlame.showGutterColumn": {
+          "type": "boolean",
+          "default": true,
+          "description": "[UnitySense] 모든 열린 Git 추적 파일의 각 줄 왼쪽에 날짜·작성자 고정 폭 열과 커밋 최신도 배경 음영(Rider Annotate 스타일)을 상시 표시합니다."
+        },
+        "unitySense.gitBlame.groupConsecutiveCommits": {
+          "type": "boolean",
+          "default": false,
+          "description": "[UnitySense] 같은 커밋이 연속된 줄에서 첫 줄에만 날짜·작성자를 표시하고 나머지 줄은 비웁니다. 기본값(false)은 Rider처럼 모든 줄에 표시합니다."
+        },
+        "unitySense.gitBlame.dateFormat": {
+          "type": "string",
+          "default": "YY-MM-DD",
+          "description": "[UnitySense] Git Blame에 표시할 사용자 지정 날짜 형식입니다. 기본값은 YY-MM-DD이며 YYYY, YY, MM, M, DD, D, HH, mm, ss 토큰 조합(예: YYYY-MM-DD, YY.MM.DD, MM/DD HH:mm) 또는 relative(상대 시간)를 직접 입력할 수 있습니다."
+        },
+        "unitySense.gitBlame.authorDisplay": {
+          "type": "string",
+          "enum": ["name", "email", "emailLocalPart", "nameAndEmail", "none"],
+          "enumDescriptions": [
+            "작성자 닉네임(이름)으로 표시합니다. (기본값)",
+            "작성자 이메일 전체 주소로 표시합니다.",
+            "작성자 이메일의 @ 앞 아이디만 표시합니다.",
+            "작성자 닉네임과 이메일을 함께 표시합니다.",
+            "작성자를 숨기고 날짜 등 다른 항목만 표시합니다."
+          ],
+          "default": "name",
+          "description": "[UnitySense] Git Blame에 표시할 작성자 표기 방식입니다. (기본값: 닉네임 name)"
+        },
+        "unitySense.gitBlame.columnFormat": {
+          "type": "string",
+          "default": "${date}  ${author}",
+          "description": "[UnitySense] 코드 왼쪽 Git Blame 열의 표시 형태 템플릿입니다. 사용 가능 변수: ${date}(날짜), ${author}(작성자 표기 설정 반영), ${name}(닉네임), ${email}(이메일), ${emailUser}(이메일 아이디), ${hash}(8자리 해시), ${summary}(커밋 요약)."
+        },
+        "unitySense.gitBlame.columnWidth": {
+          "type": "number",
+          "default": 20,
+          "minimum": 6,
+          "maximum": 80,
+          "description": "[UnitySense] 코드 왼쪽 Git Blame 열이 차지할 고정 칸 폭(영문/숫자 1칸, 한글 2칸 기준, 기본값 20)입니다."
+        },
+        "unitySense.gitBlame.foregroundColor": {
+          "type": "string",
+          "default": "#CBD5E1",
+          "description": "[UnitySense] 코드 왼쪽 Git Blame 열의 기본 글자 색상입니다. (예: #CBD5E1, #94A3B8, rgba(203, 213, 225, 0.85))"
+        },
+        "unitySense.gitBlame.uncommittedForegroundColor": {
+          "type": "string",
+          "default": "#E5C07B",
+          "description": "[UnitySense] 아직 커밋되지 않은(미커밋) 줄의 좌측 열 글자 색상입니다."
+        },
+        "unitySense.gitBlame.backgroundColor": {
+          "type": "string",
+          "default": "",
+          "description": "[UnitySense] 코드 왼쪽 Git Blame 열의 고정 배경 색상입니다. 비워 두면(\"\") 커밋 최신도별 히트맵 배경이 자동 적용되며, 색상(예: #1E293B, rgba(30, 41, 59, 0.5), transparent)을 지정하면 고정됩니다."
+        },
+        "unitySense.gitBlame.accentBarColor": {
+          "type": "string",
+          "default": "",
+          "description": "[UnitySense] 코드 왼쪽 Git Blame 열 우측 경계선(▎) 색상입니다. 비워 두면(\"\") 커밋 최신도별 색상이 자동 적용되며, 색상을 지정하면 고정되고 none 입력 시 경계선을 숨깁니다."
+        },
+        "unitySense.gitBlame.showHeatStrip": {
+          "type": "boolean",
+          "default": true,
+          "description": "[UnitySense] 배경/경계선 사용자 색상이 비어 있을 때 커밋 최신도 배경 음영(Heat Map)과 경계선 컬러 바를 자동 적용합니다."
+        },
+        "unitySense.gitBlame.inlineCurrentLine": {
+          "type": "boolean",
+          "default": false,
+          "description": "[UnitySense] 좌측 열 표시 여부와 무관하게 현재 커서가 위치한 줄 끝에 작성자 - 날짜 - 커밋 요약을 인라인으로 상시 표시합니다."
+        },
+        "unitySense.gitBlame.inlineFormat": {
+          "type": "string",
+          "default": "${author} - ${date} - ${summary}",
+          "description": "[UnitySense] 현재 커서 줄 끝 인라인 Blame 표시 형태 템플릿입니다. (기본값: ${author} - ${date} - ${summary})"
+        },
+        "unitySense.gitBlame.inlineForegroundColor": {
+          "type": "string",
+          "default": "rgba(148, 163, 184, 0.65)",
+          "description": "[UnitySense] 현재 커서 줄 끝 인라인 Blame 글자 색상입니다."
         },
         "unitySense.analyzers.enabled": {
           "type": "boolean",

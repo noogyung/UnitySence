@@ -2,6 +2,31 @@
 
 All notable changes to the **UnitySense** extension will be documented in this file.
 
+## [Unreleased]
+
+## [1.1.0] - 2026-11-25
+
+### Added
+- **Rider 스타일 C# 시맨틱 하이라이팅 오버레이 (옵션 토글)**: 현재 테마의 배경·사이드바·UI(`workbench.colorCustomizations`)는 그대로 두고 C# 코드 하이라이팅만 JetBrains Rider Dark와 같게 적용하는 `unitySense.csharp.riderHighlighting.enabled`(기본 `false`)와 `unitySense.toggleRiderHighlighting` 커맨드를 추가했습니다. 비활성화하면 기존 사용자 설정을 완전히 원복합니다.
+  - `JetBrains Rider Dark Theme`의 `tokenColors` 규칙과 시맨틱 토큰 팔레트(`namespace`/`class`/`struct: #C191FF`, `field/property: #65C3CC`, `method: #3ACC9B`, `string: #C8A16D`, `number: #EC94C0`, `comment: #85C46C` 등)를 그대로 적용합니다.
+  - Roslyn(`ms-dotnettools.csharp`)과 Open VSX OmniSharp(`muhammad-sammy.csharp`)의 시맨틱 토큰, C# 전용 TextMate 스코프(`keyword.type.cs`, `punctuation.*.cs` 등)를 지원합니다.
+  - 활성화 시 `[csharp]` 스코프에 `editor.bracketPairColorization.enabled: false`, `editor.semanticHighlighting.enabled: true`를 적용해 괄호 무지개 색이 Rider 중립 회색을 덮지 않도록 합니다.
+  - `unitySense.csharp.riderHighlighting.distinguishStructs`(기본 `false`)를 켜면 `struct`를 별도 색으로 구분합니다.
+- **Rider 스타일 경량 Git Blame (Read-Only Annotate)**: 외부 Git 라이브러리 없이 로컬 `git blame --porcelain`만 파싱해 좌측 고정 폭 열에 날짜·작성자를 표시합니다.
+  - `unitySense.gitBlame.enabled`, `showGutterColumn`(기본 `true`), `groupConsecutiveCommits`(기본 `false`), `showHeatStrip`(커밋 최신도 컬러 바), `unitySense.toggleGitBlame` 커맨드와 줄 번호 우클릭 메뉴를 제공합니다.
+  - `dateFormat`(기본 `YY-MM-DD`, `YYYY`/`YY`/`MM`/`M`/`DD`/`D`/`HH`/`mm`/`ss` 조합 또는 `relative`), `authorDisplay`(`name`/`email`/`emailLocalPart`/`nameAndEmail`/`none`), `columnFormat`(기본 `${date}  ${author}`, `${hash}`/`${summary}` 사용 가능), `columnWidth`(기본 `20`)로 표시 형식을 바꿀 수 있습니다.
+  - `foregroundColor`, `uncommittedForegroundColor`, `backgroundColor`, `accentBarColor`(`none`이면 숨김)로 색상을 바꿀 수 있습니다.
+  - 현재 커서 줄 끝 인라인 표시(`inlineCurrentLine`, `inlineFormat`, `inlineForegroundColor`)를 지원하며, 좌측 열과 함께 켤 수 있습니다.
+  - 미저장 버퍼(`git blame --contents -`), 미커밋 줄, 긴 영문/한글 작성자명 말줄임(`…`), 호버 팝업의 GitFork 검색용 `커밋 해시 복사` 링크를 지원합니다.
+  - 자동 줄바꿈(`editor.wordWrap`) 설정은 그대로 두고, 줄바꿈된 2번째 이후 시각 줄은 좌측 열 폭만큼 들여 써서 Blame 열을 침범하지 않습니다.
+  - Unity 프로젝트가 아닌 Git 워크스페이스에서도 동작합니다 (`onStartupFinished`, `workspaceContains:.git` 활성화).
+- **Antigravity IDE 지원 & Open VSX 배포**: 태그 푸시 시 GitHub Release, VS Code Marketplace(`VSCE_PAT`)와 함께 Open VSX Registry(`OVSX_PAT`)에도 게시합니다.
+
+### Changed
+- **직렬화 필드 인스펙터 값 CodeLens 기본 숨김**: `unitySense.codeLens.showSerializedFieldValues`(기본 `false`)를 추가했고, 숨김 상태에서는 `getSerializedValues` RPC 호출도 하지 않습니다.
+- **유니티 이벤트 함수 CodeLens 라벨 간소화**: `[UnitySense] 유니티 이벤트 함수 (MonoBehaviour) · 매 프레임 호출`을 `MonoBehaviour` / `MonoBehaviour, 매 프레임 호출`로 줄였습니다.
+- **릴리스 버전 관리 정리**: 확장 버전은 정식 릴리스 때만 올립니다. 로컬 테스트는 `node tools/cli.mjs package:vsix:dev`로 `x.y.(z+1)-dev.<시각>` 버전의 VSIX를 `dist/dev/`에 만들고, 릴리스는 `release:prepare <x.y.z>`로 준비합니다. CI는 태그·`package.json`·CHANGELOG 버전이 다르면 게시하지 않습니다(`verify:release-tag`).
+
 ## [1.0.2] - 2026-11-24
 
 ### Changed

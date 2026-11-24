@@ -781,9 +781,123 @@ function collectFilesRecursive(dir, basePrefix, entries, filterFn = () => true) 
   }
 }
 
-function cmdPackageVsix() {
+const RELEASE_VERSION_RE = /^(\d+)\.(\d+)\.(\d+)$/;
+
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function parseReleaseVersion(version) {
+  const m = RELEASE_VERSION_RE.exec(String(version ?? ''));
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+function compareReleaseVersions(a, b) {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+function formatDevTimestamp(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function formatIsoDate(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** Local test builds: next patch + `-dev.<timestamp>`, so each build sorts above the last release and below the next one. */
+function computeDevVersion(releaseVersion, date = new Date()) {
+  const parts = parseReleaseVersion(releaseVersion);
+  if (!parts) {
+    throw new Error(`Source version "${releaseVersion}" must be a plain x.y.z release version.`);
+  }
+  return `${parts[0]}.${parts[1]}.${parts[2] + 1}-dev.${formatDevTimestamp(date)}`;
+}
+
+function setJsonVersionText(text, version) {
+  const re = /("version"\s*:\s*)"[^"]*"/;
+  if (!re.test(text)) throw new Error('"version" field not found');
+  return text.replace(re, `$1"${version}"`);
+}
+
+function cmdReleasePrepare(nextVersion) {
+  const next = parseReleaseVersion(nextVersion);
+  if (!next) {
+    console.error('Usage: node tools/cli.mjs release:prepare <x.y.z>  (plain release version, no pre-release suffix)');
+    process.exit(1);
+  }
+  const rootPkgPath = path.join(ROOT, 'package.json');
+  const extPkgPath = path.join(ROOT, 'packages', 'extension', 'package.json');
+  const current = readJson(extPkgPath).version;
+  const currentParts = parseReleaseVersion(current);
+  if (currentParts && compareReleaseVersions(next, currentParts) <= 0) {
+    console.error(`release:prepare: ${nextVersion} must be greater than the current release ${current}.`);
+    process.exit(1);
+  }
+
+  const changelogPath = path.join(ROOT, 'CHANGELOG.md');
+  const changelog = fs.readFileSync(changelogPath, 'utf8');
+  const eol = changelog.includes('\r\n') ? '\r\n' : '\n';
+  if (changelog.includes(`## [${nextVersion}]`)) {
+    console.error(`release:prepare: CHANGELOG.md already has a [${nextVersion}] section.`);
+    process.exit(1);
+  }
+  const unreleasedRe = /^## \[Unreleased\][^\r\n]*\r?\n/m;
+  if (!unreleasedRe.test(changelog)) {
+    console.error('release:prepare: CHANGELOG.md needs a "## [Unreleased]" section with the release notes.');
+    process.exit(1);
+  }
+  const nextChangelog = changelog.replace(
+    unreleasedRe,
+    `## [Unreleased]${eol}${eol}## [${nextVersion}] - ${formatIsoDate(new Date())}${eol}`,
+  );
+
+  for (const pkgPath of [rootPkgPath, extPkgPath]) {
+    fs.writeFileSync(pkgPath, setJsonVersionText(fs.readFileSync(pkgPath, 'utf8'), nextVersion));
+  }
+  fs.writeFileSync(changelogPath, nextChangelog);
+  console.log(`Prepared release ${nextVersion} (was ${current}). Review CHANGELOG.md, then commit "release: v${nextVersion}" and push tag v${nextVersion}.`);
+}
+
+function cmdVerifyReleaseTag(tag) {
+  const errors = [];
+  const rootVersion = readJson(path.join(ROOT, 'package.json')).version;
+  const extVersion = readJson(path.join(ROOT, 'packages', 'extension', 'package.json')).version;
+  if (!parseReleaseVersion(extVersion)) {
+    errors.push(`packages/extension/package.json version "${extVersion}" is not a plain x.y.z release version.`);
+  }
+  if (rootVersion !== extVersion) {
+    errors.push(`Root package.json version "${rootVersion}" differs from packages/extension/package.json "${extVersion}".`);
+  }
+  if (tag !== undefined && tag !== `v${extVersion}`) {
+    errors.push(`Tag "${tag}" does not match extension version "v${extVersion}".`);
+  }
+  const changelog = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
+  if (!changelog.includes(`## [${extVersion}]`)) {
+    errors.push(`CHANGELOG.md has no "## [${extVersion}]" section.`);
+  }
+  if (errors.length > 0) {
+    for (const e of errors) console.error(`verify:release-tag: ${e}`);
+    process.exit(1);
+  }
+  console.log(`Release version v${extVersion} verified${tag !== undefined ? ` against tag ${tag}` : ''}.`);
+}
+
+function cmdPackageVsix({ dev = false } = {}) {
   const extDir = path.join(ROOT, 'packages', 'extension');
-  const pkg = JSON.parse(fs.readFileSync(path.join(extDir, 'package.json'), 'utf8'));
+  const sourcePkgText = fs.readFileSync(path.join(extDir, 'package.json'), 'utf8');
+  const pkg = JSON.parse(sourcePkgText);
+  const packagedPkgText = dev ? setJsonVersionText(sourcePkgText, computeDevVersion(pkg.version)) : sourcePkgText;
+  if (dev) {
+    pkg.version = JSON.parse(packagedPkgText).version;
+  } else if (!parseReleaseVersion(pkg.version)) {
+    console.error(`Cannot package release VSIX; version "${pkg.version}" is not a plain x.y.z release version.`);
+    process.exit(1);
+  }
 
   const docPaths = {};
   const extraEntries = [];
@@ -857,7 +971,7 @@ ${manifestAssets}
   const entries = [
     { name: '[Content_Types].xml', data: Buffer.from(contentTypesXml, 'utf8') },
     { name: 'extension.vsixmanifest', data: Buffer.from(manifestXml, 'utf8') },
-    { name: 'extension/package.json', data: fs.readFileSync(path.join(extDir, 'package.json')) },
+    { name: 'extension/package.json', data: Buffer.from(packagedPkgText, 'utf8') },
     ...extraEntries,
   ];
 
@@ -892,7 +1006,7 @@ ${manifestAssets}
   }
 
   const zipBuf = createZipBuffer(entries);
-  const outDir = path.join(ROOT, 'dist');
+  const outDir = dev ? path.join(ROOT, 'dist', 'dev') : path.join(ROOT, 'dist');
   fs.mkdirSync(outDir, { recursive: true });
   for (const existingFile of fs.readdirSync(outDir)) {
     if (existingFile.startsWith(`${pkg.name}-`) && existingFile.endsWith('.vsix')) {
@@ -942,6 +1056,15 @@ switch (cmd) {
     break;
   case 'package:vsix':
     cmdPackageVsix();
+    break;
+  case 'package:vsix:dev':
+    cmdPackageVsix({ dev: true });
+    break;
+  case 'release:prepare':
+    cmdReleasePrepare(arg);
+    break;
+  case 'verify:release-tag':
+    cmdVerifyReleaseTag(arg);
     break;
   default:
     console.error(`Unknown command: ${cmd}`);

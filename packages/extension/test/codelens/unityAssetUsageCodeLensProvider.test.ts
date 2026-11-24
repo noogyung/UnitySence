@@ -168,6 +168,10 @@ describe('UnityAssetUsageCodeLensProvider', () => {
         UnityDaemonClient.createConnectionTransport(clientReadable, clientWritable),
     });
 
+    await vscode.workspace
+      .getConfiguration('unitySense')
+      .update('codeLens.showSerializedFieldValues', true);
+
     const provider = new UnityAssetUsageCodeLensProvider(root, daemonClient);
     const cmdDisp = registerShowAssetUsagesCommand(root);
 
@@ -226,6 +230,10 @@ describe('UnityAssetUsageCodeLensProvider', () => {
       }),
     });
 
+    await vscode.workspace
+      .getConfiguration('unitySense')
+      .update('codeLens.showSerializedFieldValues', true);
+
     const provider = new UnityAssetUsageCodeLensProvider(root, daemonClient);
     const doc = vscode.__mock.createTextDocument(vscode.Uri.file(csPath), source, 'csharp');
     const lenses = await provider.provideCodeLenses(doc, new vscode.CancellationTokenSource().token);
@@ -260,6 +268,10 @@ describe('UnityAssetUsageCodeLensProvider', () => {
       }),
     });
 
+    await vscode.workspace
+      .getConfiguration('unitySense')
+      .update('codeLens.showSerializedFieldValues', true);
+
     const provider = new UnityAssetUsageCodeLensProvider(root, daemonClient);
     const doc = vscode.__mock.createTextDocument(vscode.Uri.file(csPath), source, 'csharp');
     const lenses = await provider.provideCodeLenses(doc, new vscode.CancellationTokenSource().token);
@@ -268,17 +280,72 @@ describe('UnityAssetUsageCodeLensProvider', () => {
     const updateLens = lenses.find((l) => l.range.start.line === 5);
     const helperLens = lenses.find((l) => l.range.start.line === 6);
 
-    expect(awakeLens?.command?.title).toBe('$(symbol-event) [UnitySense] 유니티 이벤트 함수 (MonoBehaviour)');
-    expect(updateLens?.command?.title).toBe(
-      '$(symbol-event) [UnitySense] 유니티 이벤트 함수 (MonoBehaviour) · 매 프레임 호출',
-    );
+    expect(awakeLens?.command?.title).toBe('$(symbol-event) MonoBehaviour');
+    expect(updateLens?.command?.title).toBe('$(symbol-event) MonoBehaviour, 매 프레임 호출');
     expect(helperLens).toBeUndefined();
+    provider.dispose();
+    daemonClient.dispose();
+  });
+
+  it('hides serialized field value CodeLenses by default and skips getSerializedValues RPC', async () => {
+    const root = createTempProject();
+    const csPath = path.join(root, 'Assets', 'Scripts', 'DefaultHiddenStats.cs');
+    const source = [
+      'using UnityEngine;',
+      '',
+      'public class DefaultHiddenStats : MonoBehaviour',
+      '{',
+      '    [SerializeField]',
+      '    private float moveSpeed = 5f;',
+      '}',
+    ].join('\n');
+    fs.writeFileSync(csPath, source, 'utf8');
+    fs.writeFileSync(`${csPath}.meta`, 'guid: 88888888888888888888888888888888\n', 'utf8');
+
+    let serializedRpcCalled = false;
+    const daemonClient = new UnityDaemonClient({
+      projectRoot: root,
+      extensionPath: root,
+      transportFactory: () => ({
+        sendRequest: async <T>(method: string) => {
+          if (method === 'inspector/getSerializedValues') {
+            serializedRpcCalled = true;
+            return {
+              fields: [
+                {
+                  fieldName: 'moveSpeed',
+                  value: '9.5',
+                  assetPath: 'Assets/Scenes/Main.unity',
+                  assetType: 'scene',
+                  gameObjectPath: 'Player',
+                  fileId: '10',
+                  line: 5,
+                },
+              ],
+            } as T;
+          }
+          return { locations: [] } as T;
+        },
+        dispose: () => {},
+      }),
+    });
+
+    const provider = new UnityAssetUsageCodeLensProvider(root, daemonClient);
+    const doc = vscode.__mock.createTextDocument(vscode.Uri.file(csPath), source, 'csharp');
+    const lenses = await provider.provideCodeLenses(doc, new vscode.CancellationTokenSource().token);
+
+    expect(serializedRpcCalled).toBe(false);
+    expect(lenses.some((l) => l.command?.title.includes('인스펙터 값'))).toBe(false);
+
     provider.dispose();
     daemonClient.dispose();
   });
 
   it('matches nested struct propertyPath entries to parent serialized field CodeLens', async () => {
     const root = createTempProject();
+    await vscode.workspace
+      .getConfiguration('unitySense')
+      .update('codeLens.showSerializedFieldValues', true);
     const csPath = path.join(root, 'Assets', 'Scripts', 'StatsHolder.cs');
     const source = [
       'using UnityEngine;',
@@ -317,6 +384,10 @@ describe('UnityAssetUsageCodeLensProvider', () => {
         dispose: () => {},
       }),
     });
+
+    await vscode.workspace
+      .getConfiguration('unitySense')
+      .update('codeLens.showSerializedFieldValues', true);
 
     const provider = new UnityAssetUsageCodeLensProvider(root, daemonClient);
     const doc = vscode.__mock.createTextDocument(vscode.Uri.file(csPath), source, 'csharp');
@@ -390,6 +461,10 @@ describe('UnityAssetUsageCodeLensProvider', () => {
       }),
     });
 
+    await vscode.workspace
+      .getConfiguration('unitySense')
+      .update('codeLens.showSerializedFieldValues', true);
+
     const provider = new UnityAssetUsageCodeLensProvider(root, daemonClient);
     const doc = vscode.__mock.createTextDocument(vscode.Uri.file(csPath), source, 'csharp');
     const lenses = await provider.provideCodeLenses(doc, new vscode.CancellationTokenSource().token);
@@ -404,7 +479,7 @@ describe('UnityAssetUsageCodeLensProvider', () => {
     expect(ignoredLens).toBeUndefined();
 
     const updateLens = lenses.find((l) => l.range.start.line === 8);
-    expect(updateLens?.command?.title).toContain('유니티 이벤트 함수 (MonoBehaviour)');
+    expect(updateLens?.command?.title).toBe('$(symbol-event) MonoBehaviour, 매 프레임 호출');
 
     provider.dispose();
     daemonClient.dispose();

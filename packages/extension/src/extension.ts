@@ -72,6 +72,14 @@ import {
 } from './shader/shaderKeywordContextStatusBar.ts';
 import { ShaderFormattingProvider } from './shader/shaderFormatter.ts';
 import { executeShaderLiveTestCommand } from './shader/shaderLiveTester.ts';
+import {
+  registerGitBlameCommands,
+  RiderGitBlameProvider,
+} from './git/riderGitBlameProvider.ts';
+import {
+  registerToggleRiderHighlightingCommand,
+  RiderHighlightingManager,
+} from './theme/riderHighlightingManager.ts';
 import { ProjectSettingsWatcher } from './watchers/projectSettingsWatcher.ts';
 
 export interface UnitySenseActivationOptions {
@@ -98,6 +106,8 @@ export interface UnitySenseExtensionApi {
   metaSyncManager: MetaFileSyncManager;
   shaderKeywordStatusBar: ShaderKeywordContextStatusBar;
   shaderExplorerProvider: ShaderExplorerProvider;
+  riderHighlightingManager: RiderHighlightingManager;
+  gitBlameProvider: RiderGitBlameProvider;
   dispose: () => void;
 }
 
@@ -181,6 +191,17 @@ export async function activate(
   if (!unityContext) {
     setUnityProjectContextKey(false);
     contextManager.dispose();
+    const fallbackDisposables: vscode.Disposable[] = [];
+    const riderHighlightingManager = new RiderHighlightingManager(context);
+    await riderHighlightingManager.initialize();
+    const gitBlameProvider = new RiderGitBlameProvider(undefined, context);
+    fallbackDisposables.push(
+      riderHighlightingManager,
+      registerToggleRiderHighlightingCommand(riderHighlightingManager),
+      gitBlameProvider,
+      ...registerGitBlameCommands(gitBlameProvider),
+    );
+    context.subscriptions.push(...fallbackDisposables);
     return undefined;
   }
 
@@ -478,7 +499,10 @@ export async function activate(
           }
         }
       }
-      if (e.affectsConfiguration('unitySense.codeLens.enabled')) {
+      if (
+        e.affectsConfiguration('unitySense.codeLens.enabled') ||
+        e.affectsConfiguration('unitySense.codeLens.showSerializedFieldValues')
+      ) {
         assetUsageCodeLensProvider.refresh();
         shaderVariantCodeLensProvider.refresh();
       }
@@ -875,7 +899,15 @@ export async function activate(
     getUiToolkitElements,
   });
 
+  const riderHighlightingManager = new RiderHighlightingManager(context);
+  await riderHighlightingManager.initialize();
+  const gitBlameProvider = new RiderGitBlameProvider(undefined, context);
+
   disposables.push(
+    riderHighlightingManager,
+    registerToggleRiderHighlightingCommand(riderHighlightingManager),
+    gitBlameProvider,
+    ...registerGitBlameCommands(gitBlameProvider),
     csharpDefinitionProvider,
     asmdefProvider,
     asmdefDiagCollection,
@@ -1039,6 +1071,8 @@ export async function activate(
     metaSyncManager,
     shaderKeywordStatusBar,
     shaderExplorerProvider,
+    riderHighlightingManager,
+    gitBlameProvider,
     dispose: () => {
       if (disposed) return;
       disposed = true;

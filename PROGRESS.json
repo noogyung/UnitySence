@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "overallStatus": "completed",
   "currentStepId": null,
-  "lastUpdatedAt": "2026-11-21T04:42:00.000Z",
+  "lastUpdatedAt": "2026-11-24T18:07:00.000Z",
   "steps": [
     {
       "id": "1-1",
@@ -844,6 +844,112 @@
         "node tools/cli.mjs package:vsix"
       ],
       "resumeNote": "Step 9-1 완료: v1.1.2 릴리스 전수 감사·수정·회귀/아티팩트 E2E 테스트 및 VSIX 패키징 검증 완료"
+    },
+    {
+      "id": "9-2",
+      "phase": 9,
+      "name": "UnitySense v1.1.3 Rider C# Highlighting & Git Blame Left Column Complete Fix",
+      "status": "completed",
+      "optional": false,
+      "startedAt": "2026-11-24T14:37:00.000Z",
+      "completedAt": "2026-11-24T14:49:00.000Z",
+      "targetFiles": [
+        "packages/extension/src/theme/riderHighlightingManager.ts",
+        "packages/extension/src/git/gitBlameParser.ts",
+        "packages/extension/src/git/riderGitBlameProvider.ts",
+        "packages/extension/package.json",
+        "packages/extension/test/theme/riderHighlightingManager.test.ts",
+        "packages/extension/test/git/gitBlameParser.test.ts",
+        "package.json",
+        "CHANGELOG.md"
+      ],
+      "completedFiles": [
+        "packages/extension/src/theme/riderHighlightingManager.ts",
+        "packages/extension/src/git/gitBlameParser.ts",
+        "packages/extension/src/git/riderGitBlameProvider.ts",
+        "packages/extension/package.json",
+        "packages/extension/test/theme/riderHighlightingManager.test.ts",
+        "packages/extension/test/git/gitBlameParser.test.ts",
+        "package.json",
+        "CHANGELOG.md"
+      ],
+      "verificationCommands": [
+        "node tools/cli.mjs typecheck",
+        "node tools/cli.mjs build:lsp",
+        "node tools/cli.mjs build:extension",
+        "node tools/cli.mjs test",
+        "dotnet test --no-restore UnityBrain.sln -nodeReuse:false -p:UseSharedCompilation=false -m:1",
+        "node tools/cli.mjs package:vsix"
+      ],
+      "resumeNote": "Step 9-2 완료: v1.1.3 Rider C# 하이라이팅 및 Git Blame 좌측 열 표시 완벽 수정, 전체 테스트 통과 및 VSIX 패키징 완료"
+    },
+    {
+      "id": "9-3",
+      "phase": 9,
+      "name": "UnitySense v1.1.4 Git Blame Word-Wrap Fix, Clean Hover, Simultaneous Inline Blame & Full Customization",
+      "status": "completed",
+      "optional": false,
+      "startedAt": "2026-11-24T15:05:00.000Z",
+      "completedAt": "2026-11-24T15:16:00.000Z",
+      "targetFiles": [
+        "node_modules/vscode/index.d.ts",
+        "packages/extension/src/git/gitBlameParser.ts",
+        "packages/extension/src/git/riderGitBlameProvider.ts",
+        "packages/extension/src/extension.ts",
+        "packages/extension/package.json",
+        "packages/extension/test/git/gitBlameParser.test.ts",
+        "package.json",
+        "CHANGELOG.md"
+      ],
+      "completedFiles": [
+        "node_modules/vscode/index.d.ts",
+        "packages/extension/src/git/gitBlameParser.ts",
+        "packages/extension/src/git/riderGitBlameProvider.ts",
+        "packages/extension/src/extension.ts",
+        "packages/extension/package.json",
+        "packages/extension/test/git/gitBlameParser.test.ts",
+        "package.json",
+        "CHANGELOG.md"
+      ],
+      "verificationCommands": [
+        "node tools/cli.mjs typecheck",
+        "node tools/cli.mjs build:extension",
+        "node tools/cli.mjs test extension",
+        "node tools/cli.mjs package:vsix"
+      ],
+      "resumeNote": "Step 9-3 완료: v1.1.4 Git Blame 줄바꿈 밀림 방지, 호버 정밀 수정, 현재 줄 인라인 동시 표시, 날짜(YY-MM-DD)/작성자/폭/색상 커스터마이징 완료"
+    },
+    {
+      "id": "9-4",
+      "phase": 9,
+      "name": "UnitySense v1.1.5 Soft-Wrap Continuation Column Guard (Keep Word Wrap Enabled)",
+      "status": "completed",
+      "optional": false,
+      "startedAt": "2026-11-24T18:01:00.000Z",
+      "completedAt": "2026-11-24T18:07:00.000Z",
+      "targetFiles": [
+        "node_modules/vscode/index.d.ts",
+        "packages/extension/src/git/riderGitBlameProvider.ts",
+        "packages/extension/package.json",
+        "packages/extension/test/git/gitBlameParser.test.ts",
+        "package.json",
+        "CHANGELOG.md"
+      ],
+      "completedFiles": [
+        "node_modules/vscode/index.d.ts",
+        "packages/extension/src/git/riderGitBlameProvider.ts",
+        "packages/extension/package.json",
+        "packages/extension/test/git/gitBlameParser.test.ts",
+        "package.json",
+        "CHANGELOG.md"
+      ],
+      "verificationCommands": [
+        "node tools/cli.mjs typecheck",
+        "node tools/cli.mjs build:extension",
+        "node tools/cli.mjs test extension",
+        "node tools/cli.mjs package:vsix"
+      ],
+      "resumeNote": "Step 9-4 완료: v1.1.5 자동 줄바꿈 유지 상태에서 줄바꿈된 이어지는 줄의 좌측 Git Blame 열 침범 방지 완료"
     }
   ]
 }
