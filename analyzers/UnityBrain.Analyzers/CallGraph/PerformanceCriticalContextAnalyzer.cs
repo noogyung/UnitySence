@@ -31,6 +31,7 @@ public sealed class PerformanceCriticalContextAnalyzer : DiagnosticAnalyzer
             {
                 if (symbolCtx.Symbol is not INamedTypeSymbol typeSymbol ||
                     typeSymbol.TypeKind != TypeKind.Class ||
+                    UnityCallGraphHelper.IsPackageCacheSymbol(typeSymbol) ||
                     !UnityCallGraphHelper.DerivesFromUnityBehaviour(typeSymbol))
                 {
                     return;

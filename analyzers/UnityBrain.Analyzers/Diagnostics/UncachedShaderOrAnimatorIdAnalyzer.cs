@@ -70,6 +70,12 @@ public sealed class UncachedShaderOrAnimatorIdAnalyzer : DiagnosticAnalyzer
                     return;
                 }
 
+                if (UnityCallGraphHelper.IsPackageCacheSymbol(typeSymbol) ||
+                    UnityCallGraphHelper.DerivesFromShaderGuiOrEditor(typeSymbol))
+                {
+                    return;
+                }
+
                 Dictionary<IMethodSymbol, CriticalMethodInfo>? criticalMap = null;
                 if (UnityCallGraphHelper.DerivesFromUnityBehaviour(typeSymbol))
                 {

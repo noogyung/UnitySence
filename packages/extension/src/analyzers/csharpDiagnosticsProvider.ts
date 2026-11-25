@@ -206,11 +206,48 @@ export async function collectUnityCSharpDiagnostics(
 ): Promise<vscode.Diagnostic[]> {
   if (doc.languageId !== 'csharp') return [];
 
+  const fsPath = doc.uri.fsPath ?? '';
+  if (/[\\/](?:Library[\\/])?PackageCache[\\/]/i.test(fsPath)) {
+    return [];
+  }
+
   const text = doc.getText();
   const lines = text.split(/\r?\n/);
   const maskedText = maskCSharpCommentsAndStrings(text);
   const maskedLines = maskedText.split(/\r?\n/);
   const diags: vscode.Diagnostic[] = [];
+
+  const isInEditorFolder = /[\\/]Editor[\\/]/i.test(fsPath);
+  const editorClassMatch =
+    /\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:UnityEditor(?:\.[A-Za-z0-9_]+)*\.)?(ShaderGUI|BaseShaderGUI|Editor|EditorWindow|PropertyDrawer|MaterialPropertyDrawer)\b/.exec(
+      maskedText,
+    );
+  const isEditorScript = isInEditorFolder || editorClassMatch !== null;
+
+  if (
+    /[\\/]Assets[\\/]/i.test(fsPath) &&
+    !isInEditorFolder &&
+    editorClassMatch !== null &&
+    !/#\s*if\b[^\r\n]*\bUNITY_EDITOR\b/.test(text)
+  ) {
+    const baseTypeName = editorClassMatch[2];
+    const matchIdx = editorClassMatch.index;
+    const prefix = maskedText.slice(0, matchIdx);
+    const lastNl = prefix.lastIndexOf('\n');
+    const lineNum = prefix.split('\n').length - 1;
+    const colNum = lastNl < 0 ? matchIdx : matchIdx - lastNl - 1;
+    const classNameOffset = editorClassMatch[0].indexOf(editorClassMatch[1]);
+    diags.push(
+      makeDiag(
+        lineNum,
+        colNum + Math.max(0, classNameOffset),
+        editorClassMatch[1].length,
+        `[UnitySense] Editor 전용 클래스('${baseTypeName}')가 'Editor' 폴더 외부에 선언되어 Player 어셈블리에서 UnityEditor 참조 오류(CS0246)가 발생할 수 있습니다. 'Editor' 폴더로 이동하거나 '#if UNITY_EDITOR'로 감싸세요.`,
+        vscode.DiagnosticSeverity.Warning,
+        'UB1004',
+      ),
+    );
+  }
 
   // 1. UB1002: Performance-critical loop uncached lookups (GetComponent / Camera.main / Find*)
   const perfBlocks = findPerfCriticalMethodBlocks(maskedLines);
@@ -261,25 +298,27 @@ export async function collectUnityCSharpDiagnostics(
     if (!rawLine.includes('"')) continue;
 
     // UB1003
-    shaderOrAnimMethodRe.lastIndex = 0;
-    let sm: RegExpExecArray | null;
-    while ((sm = shaderOrAnimMethodRe.exec(rawLine)) !== null) {
-      // Ensure the method call itself is not inside a comment/string
-      if ((mLine[sm.index] ?? ' ') === ' ') continue;
-      const methodName = sm[1];
-      const literal = sm[2];
-      const isAnim = methodName === 'SetTrigger' || methodName === 'ResetTrigger' || methodName === 'SetBool' || methodName === 'GetBool' || methodName === 'SetInteger' || methodName === 'GetInteger';
-      const helper = isAnim ? 'Animator.StringToHash' : 'Shader.PropertyToID';
-      diags.push(
-        makeDiag(
-          l,
-          sm.index,
-          sm[0].length,
-          `[UnitySense] ${methodName}에서 문자열 리터럴 "${literal}"이(가) 사용되었습니다. ${helper}로 static readonly int 필드에 캐싱하세요.`,
-          vscode.DiagnosticSeverity.Warning,
-          'UB1003',
-        ),
-      );
+    if (!isEditorScript) {
+      shaderOrAnimMethodRe.lastIndex = 0;
+      let sm: RegExpExecArray | null;
+      while ((sm = shaderOrAnimMethodRe.exec(rawLine)) !== null) {
+        // Ensure the method call itself is not inside a comment/string
+        if ((mLine[sm.index] ?? ' ') === ' ') continue;
+        const methodName = sm[1];
+        const literal = sm[2];
+        const isAnim = methodName === 'SetTrigger' || methodName === 'ResetTrigger' || methodName === 'SetBool' || methodName === 'GetBool' || methodName === 'SetInteger' || methodName === 'GetInteger';
+        const helper = isAnim ? 'Animator.StringToHash' : 'Shader.PropertyToID';
+        diags.push(
+          makeDiag(
+            l,
+            sm.index,
+            sm[0].length,
+            `[UnitySense] ${methodName}에서 문자열 리터럴 "${literal}"이(가) 사용되었습니다. ${helper}로 static readonly int 필드에 캐싱하세요.`,
+            vscode.DiagnosticSeverity.Warning,
+            'UB1003',
+          ),
+        );
+      }
     }
 
     // UB3002: Tag

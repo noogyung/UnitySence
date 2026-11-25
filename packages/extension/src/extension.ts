@@ -29,6 +29,7 @@ import {
   UnityStringCompletionProvider,
 } from './completion/unityStringCompletionProvider.ts';
 import { registerUnityEditorCommands } from './editor/unityEditorIntegration.ts';
+import { CodeAutoIndentManager, registerAutoIndentCommand } from './editor/codeAutoIndent.ts';
 import {
   collectUiToolkitElements,
   UnityUssCompletionProvider,
@@ -55,6 +56,18 @@ import {
   ShaderSemanticTokensProvider,
   ShaderSignatureHelpProvider,
 } from './shader/shaderEditorProviders.ts';
+import {
+  findCustomEditorAtPosition,
+  invalidateCustomEditorCache,
+  isBuiltInCompiledShaderGui,
+  resolveCustomEditorDefinition,
+} from './shader/shaderCustomEditorResolver.ts';
+import {
+  findFallbackOrUsePassAtPosition,
+  invalidateShaderNameCache,
+  resolveShaderDefinitionByName,
+} from './shader/shaderFallbackResolver.ts';
+import { UnityShaderLogDiagnosticsProvider } from './shader/unityShaderLogDiagnostics.ts';
 import {
   isShaderFilePath,
   normalizePathKey,
@@ -108,6 +121,7 @@ export interface UnitySenseExtensionApi {
   shaderExplorerProvider: ShaderExplorerProvider;
   riderHighlightingManager: RiderHighlightingManager;
   gitBlameProvider: RiderGitBlameProvider;
+  autoIndentManager: CodeAutoIndentManager;
   dispose: () => void;
 }
 
@@ -195,11 +209,14 @@ export async function activate(
     const riderHighlightingManager = new RiderHighlightingManager(context);
     await riderHighlightingManager.initialize();
     const gitBlameProvider = new RiderGitBlameProvider(undefined, context);
+    const autoIndentManager = new CodeAutoIndentManager();
     fallbackDisposables.push(
       riderHighlightingManager,
       registerToggleRiderHighlightingCommand(riderHighlightingManager),
       gitBlameProvider,
       ...registerGitBlameCommands(gitBlameProvider),
+      autoIndentManager,
+      registerAutoIndentCommand(autoIndentManager),
     );
     context.subscriptions.push(...fallbackDisposables);
     return undefined;
@@ -258,6 +275,59 @@ export async function activate(
     }
   };
 
+  const unityShaderLogProvider = new UnityShaderLogDiagnosticsProvider({
+    projectRoot: unityContext.projectRoot,
+    enableWatch: enableWatchers,
+    onDidUpdate: () => {
+      for (const openDoc of vscode.workspace.textDocuments) {
+        updateShaderDiagnostics(openDoc);
+      }
+    },
+  });
+
+  const BUILTIN_UNITY_CGINC_NAMES = new Set([
+    'unitycg.cginc',
+    'autolight.cginc',
+    'lighting.cginc',
+    'hlslsupport.cginc',
+    'unitypbslighting.cginc',
+    'unityshadervariables.cginc',
+    'unityshaderutilities.cginc',
+    'unityinstancing.cginc',
+    'unityglobalillumination.cginc',
+    'unityshadowlibrary.cginc',
+    'unitystandardcore.cginc',
+    'unitystandardcoreforward.cginc',
+    'unitystandardcoreforwardsimple.cginc',
+    'unitystandardinput.cginc',
+    'unitystandardbrdf.cginc',
+    'unitystandardutils.cginc',
+    'unitystandardconfig.cginc',
+    'unitystandardmeta.cginc',
+    'unitystandardshadow.cginc',
+    'unityimageeffects.cginc',
+    'unitymetapass.cginc',
+    'unityui.cginc',
+    'unitysprites.cginc',
+    'unitydeferredlibrary.cginc',
+    'unitygbuffer.cginc',
+    'unitylightingcommon.cginc',
+    'unitybuiltin3xtreelibrary.cginc',
+    'unitybuiltin2xtreelibrary.cginc',
+    'unitycustomrendertexture.cginc',
+    'terrainengine.cginc',
+    'terrainsplatmapcommon.cginc',
+    'speedtreecommon.cginc',
+    'speedtree8common.cginc',
+    'speedtreewind.cginc',
+    'tessellation.cginc',
+  ]);
+
+  const isBuiltInUnityCginc = (includePath: string): boolean => {
+    const trimmed = includePath.trim().replace(/\\/g, '/').toLowerCase();
+    return !trimmed.includes('/') && BUILTIN_UNITY_CGINC_NAMES.has(trimmed);
+  };
+
   const updateShaderDiagnostics = (doc: vscode.TextDocument) => {
     if (!isShaderDocument(doc)) return;
     const diagsEnabled = vscode.workspace
@@ -270,8 +340,17 @@ export async function activate(
     shaderGraph.setOpenDocumentContent(doc.uri.toString(), doc.getText());
     const walk = shaderGraph.collectReachableFiles(doc.uri.toString());
     const docKey = normalizePathKey(doc.uri.toString());
+    const hasCgIncludes = Boolean(shaderGraph.getResolver().getContext().cgIncludesPath);
     const includeDiags = walk.unresolvedIncludes
-      .filter((u) => u.fromUri === doc.uri.toString() || normalizePathKey(u.fromFile) === docKey)
+      .filter((u) => {
+        if (u.fromUri !== doc.uri.toString() && normalizePathKey(u.fromFile) !== docKey) {
+          return false;
+        }
+        if (!hasCgIncludes && isBuiltInUnityCginc(u.includePath)) {
+          return false;
+        }
+        return true;
+      })
       .map(
         (u) =>
           new vscode.Diagnostic(
@@ -280,8 +359,23 @@ export async function activate(
             vscode.DiagnosticSeverity.Error,
           ),
       );
-    const semanticDiags = collectComputeAndShaderLabDiagnostics(doc, shaderGraph);
-    shaderDiagnosticCollection.set(doc.uri, [...includeDiags, ...semanticDiags]);
+    let semanticDiags: vscode.Diagnostic[] = [];
+    try {
+      semanticDiags = collectComputeAndShaderLabDiagnostics(doc, shaderGraph);
+    } catch (err) {
+      outputChannel?.appendLine(
+        `[UnitySense] 셰이더 진단 수집 오류 (${doc.fileName}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    let unityLogDiags: vscode.Diagnostic[] = [];
+    try {
+      unityLogDiags = unityShaderLogProvider.getDiagnosticsForDocument(doc);
+    } catch (err) {
+      outputChannel?.appendLine(
+        `[UnitySense] Unity Editor.log 셰이더 진단 오류 (${doc.fileName}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    shaderDiagnosticCollection.set(doc.uri, [...includeDiags, ...semanticDiags, ...unityLogDiags]);
   };
 
   let cachedShaderIndex: ShaderSymbolIndex | null = null;
@@ -517,6 +611,15 @@ export async function activate(
       updateShaderDiagnostics(doc);
       void updateCSharpDiagnostics(doc);
     }),
+    ...(typeof vscode.window.onDidChangeActiveTextEditor === 'function'
+      ? [
+          vscode.window.onDidChangeActiveTextEditor((editor) => {
+            if (editor && isShaderDocument(editor.document)) {
+              updateShaderDiagnostics(editor.document);
+            }
+          }),
+        ]
+      : []),
     ...(typeof vscode.workspace.onDidCloseTextDocument === 'function'
       ? [
           vscode.workspace.onDidCloseTextDocument((doc) => {
@@ -601,15 +704,57 @@ export async function activate(
         cachedShaderKeywords = null;
         shaderExplorerProvider.refresh();
         updateShaderDiagnostics(doc);
+      } else if (doc.fileName.toLowerCase().endsWith('.cs')) {
+        invalidateCustomEditorCache(unityContext.projectRoot, doc.fileName);
+        for (const openDoc of vscode.workspace.textDocuments) {
+          updateShaderDiagnostics(openDoc);
+        }
       }
     }),
 
     vscode.languages.registerDefinitionProvider(SHADER_SELECTOR, {
       provideDefinition(doc: vscode.TextDocument, pos: vscode.Position) {
+        const docText = doc.getText();
+        const customEditorDir = findCustomEditorAtPosition(docText, pos.line, pos.character);
+        if (customEditorDir) {
+          const defLocs = resolveCustomEditorDefinition(
+            shaderGraph.getResolver(),
+            customEditorDir.name,
+            doc.uri.fsPath,
+          );
+          if (defLocs.length > 0) {
+            return defLocs.map(
+              (loc) =>
+                new vscode.Location(
+                  vscode.Uri.file(loc.filePath),
+                  new vscode.Range(loc.line, loc.column, loc.line, loc.endColumn),
+                ),
+            );
+          }
+        }
+
+        const fallbackTarget = findFallbackOrUsePassAtPosition(docText, pos.line, pos.character);
+        if (fallbackTarget) {
+          const shaderLoc = resolveShaderDefinitionByName(
+            shaderGraph.getResolver(),
+            fallbackTarget.shaderName,
+            fallbackTarget.passName,
+            doc.uri.fsPath,
+          );
+          if (shaderLoc) {
+            return [
+              new vscode.Location(
+                vscode.Uri.file(shaderLoc.filePath),
+                new vscode.Range(shaderLoc.line, shaderLoc.column, shaderLoc.line, shaderLoc.endColumn),
+              ),
+            ];
+          }
+        }
+
         const locs = shaderDefinitionProvider.provideDefinition(
           doc.uri.toString(),
           { line: pos.line, character: pos.character },
-          doc.getText(),
+          docText,
         );
         return locs.map(
           (l) =>
@@ -624,6 +769,71 @@ export async function activate(
             ),
         );
       },
+    }),
+
+    vscode.commands.registerCommand('unitySense.shaderGoToDefinition', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || !isShaderDocument(editor.document)) {
+        await vscode.commands.executeCommand('editor.action.revealDefinition');
+        return;
+      }
+
+      const doc = editor.document;
+      const pos = editor.selection.active;
+      const docText = doc.getText();
+
+      const customEditorDir = findCustomEditorAtPosition(docText, pos.line, pos.character);
+      if (customEditorDir) {
+        const defLocs = resolveCustomEditorDefinition(
+          shaderGraph.getResolver(),
+          customEditorDir.name,
+          doc.uri.fsPath,
+        );
+        if (defLocs.length > 0) {
+          const first = defLocs[0];
+          const targetDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(first.filePath));
+          await vscode.window.showTextDocument(targetDoc, {
+            selection: new vscode.Range(first.line, first.column, first.line, first.endColumn),
+          });
+        } else if (isBuiltInCompiledShaderGui(customEditorDir.name)) {
+          void vscode.window.showInformationMessage(
+            `[UnitySense] '${customEditorDir.name}'은(는) Unity 엔진 내장(UnityEditor.dll) 컴파일 ShaderGUI입니다.`,
+          );
+        } else {
+          void vscode.window.showInformationMessage(
+            `[UnitySense] CustomEditor 클래스 '${customEditorDir.name}'의 C# 파일을 프로젝트 또는 패키지에서 찾을 수 없습니다.`,
+          );
+        }
+        return;
+      }
+
+      const fallbackTarget = findFallbackOrUsePassAtPosition(docText, pos.line, pos.character);
+      if (fallbackTarget) {
+        const shaderLoc = resolveShaderDefinitionByName(
+          shaderGraph.getResolver(),
+          fallbackTarget.shaderName,
+          fallbackTarget.passName,
+          doc.uri.fsPath,
+        );
+        if (shaderLoc) {
+          const targetDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(shaderLoc.filePath));
+          await vscode.window.showTextDocument(targetDoc, {
+            selection: new vscode.Range(
+              shaderLoc.line,
+              shaderLoc.column,
+              shaderLoc.line,
+              shaderLoc.endColumn,
+            ),
+          });
+        } else {
+          void vscode.window.showInformationMessage(
+            `[UnitySense] '${fallbackTarget.shaderName}'은(는) Unity 엔진 내장(Built-in) 셰이더이거나 프로젝트/패키지 내에 원본 .shader 파일이 없습니다.`,
+          );
+        }
+        return;
+      }
+
+      await vscode.commands.executeCommand('editor.action.revealDefinition');
     }),
 
     vscode.languages.registerCompletionItemProvider(
@@ -902,12 +1112,16 @@ export async function activate(
   const riderHighlightingManager = new RiderHighlightingManager(context);
   await riderHighlightingManager.initialize();
   const gitBlameProvider = new RiderGitBlameProvider(undefined, context);
+  const autoIndentManager = new CodeAutoIndentManager();
 
   disposables.push(
+    unityShaderLogProvider,
     riderHighlightingManager,
     registerToggleRiderHighlightingCommand(riderHighlightingManager),
     gitBlameProvider,
     ...registerGitBlameCommands(gitBlameProvider),
+    autoIndentManager,
+    registerAutoIndentCommand(autoIndentManager),
     csharpDefinitionProvider,
     asmdefProvider,
     asmdefDiagCollection,
@@ -961,6 +1175,8 @@ export async function activate(
       );
       const onPackageChanged = () => {
         shaderGraph.getResolver().invalidateCache();
+        invalidateCustomEditorCache(unityContext.projectRoot);
+        invalidateShaderNameCache(unityContext.projectRoot);
         cachedShaderIndex = null;
         cachedShaderKeywords = null;
         shaderExplorerProvider.refresh();
@@ -988,6 +1204,7 @@ export async function activate(
       shaderGraph.registerWorkspaceShaderFiles(
         walkShaderFiles(path.join(activeCtx.projectRoot, 'Assets')),
       );
+      invalidateShaderNameCache(unityContext.projectRoot);
       cachedShaderIndex = null;
       cachedShaderKeywords = null;
       shaderExplorerProvider.refresh();
@@ -1034,8 +1251,12 @@ export async function activate(
     const csWatcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(unityContext.projectRoot, 'Assets/**/*.cs'),
     );
-    const onCsChanged = () => {
+    const onCsChanged = (uri?: vscode.Uri) => {
       eventCompletionProvider.invalidateInheritanceCache();
+      invalidateCustomEditorCache(unityContext.projectRoot, uri?.fsPath);
+      for (const openDoc of vscode.workspace.textDocuments) {
+        updateShaderDiagnostics(openDoc);
+      }
     };
     disposables.push(
       csWatcher,
@@ -1073,6 +1294,7 @@ export async function activate(
     shaderExplorerProvider,
     riderHighlightingManager,
     gitBlameProvider,
+    autoIndentManager,
     dispose: () => {
       if (disposed) return;
       disposed = true;

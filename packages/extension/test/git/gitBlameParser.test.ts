@@ -247,6 +247,8 @@ describe('RiderGitBlameProvider', () => {
       )!;
       assert.ok(columnDeco);
       assert.ok(stripDeco);
+      assert.equal(columnDeco[0].renderOptions?.before?.width, '22ch');
+      assert.equal(stripDeco[0].renderOptions?.before?.width, '1ch');
       assert.equal(stripDeco[0].hoverMessage, undefined, 'Strip decoration must NOT carry duplicate hoverMessage');
       const hoverMd = (columnDeco[0].hoverMessage as vscode.MarkdownString).value;
       assert.equal(hoverMd.includes('$('), false, 'Hover must NOT leak raw $(icon) syntax');
@@ -277,6 +279,7 @@ describe('RiderGitBlameProvider', () => {
         (arr) => arr.length === 4,
       ) as readonly vscode.DecorationOptions[];
       assert.ok(customColDeco[0].renderOptions?.before?.contentText?.includes('hong@example.com'));
+      assert.equal(customColDeco[0].renderOptions?.before?.width, '28ch');
       assert.equal(customColDeco[0].renderOptions?.before?.color, '#AABBCC');
       assert.equal(customColDeco[0].renderOptions?.before?.backgroundColor, '#112233');
       assert.equal(customColDeco[0].renderOptions?.before?.margin, '0 12px 0 0');

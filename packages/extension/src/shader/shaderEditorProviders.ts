@@ -16,6 +16,11 @@ import {
   extractVirtualHlslDocument,
 } from '../../../shader-lsp/src/parser/shaderLabVirtualDoc.ts';
 import { isShaderFilePath, normalizePathKey } from '../../../shader-lsp/src/vfs/virtualPathResolver.ts';
+import {
+  extractCustomEditorDirectives,
+  isBuiltInCompiledShaderGui,
+  resolveCustomEditorProperties,
+} from './shaderCustomEditorResolver.ts';
 
 export const SHADER_SEMANTIC_TOKEN_TYPES = [
   'struct',
@@ -1411,6 +1416,16 @@ export function collectComputeAndShaderLabDiagnostics(
         } else {
           const expectedEnd = tok.startsWith('HLSL') ? 'ENDHLSL' : 'ENDCG';
           programStack.push({ tag: tok, expectedEnd, line: i, col: bm.index });
+          if (tok === 'CGPROGRAM' || tok === 'CGINCLUDE') {
+            const recommended = tok === 'CGPROGRAM' ? 'HLSLPROGRAM' : 'HLSLINCLUDE';
+            diags.push(
+              new vscode.Diagnostic(
+                new vscode.Range(i, bm.index, i, bm.index + tok.length),
+                `[UnitySense] 레거시 셰이더 블록 '${tok}'을(를) 사용 중입니다. 최신 Unity/SRP 환경에서는 '${recommended}' 사용을 권장합니다.`,
+                vscode.DiagnosticSeverity.Warning,
+              ),
+            );
+          }
         }
       }
 
@@ -1489,8 +1504,37 @@ export function collectComputeAndShaderLabDiagnostics(
     : [{ start: 0, end: Math.max(0, lines.length - 1) }];
   const strippedLines = stripCommentsAndStringsByLine(lines);
 
+  const customEditorProps = new Set<string>();
+  const resolvedEditors: string[] = [];
+  if (virtualDoc.isShaderLab) {
+    const customEditorDirectives = extractCustomEditorDirectives(text);
+    const seenResolved = new Set<string>();
+    for (const dir of customEditorDirectives) {
+      const resolution = resolveCustomEditorProperties(shaderGraph.getResolver(), dir.name, filePath);
+      if (resolution.resolved) {
+        if (!seenResolved.has(dir.name)) {
+          seenResolved.add(dir.name);
+          resolvedEditors.push(dir.name);
+        }
+        for (const propName of resolution.referencedProperties) {
+          customEditorProps.add(propName);
+        }
+      } else if (!isBuiltInCompiledShaderGui(dir.name)) {
+        diags.push(
+          new vscode.Diagnostic(
+            new vscode.Range(dir.line, dir.startCol, dir.line, dir.endCol),
+            `[UnitySense] CustomEditor 클래스 '${dir.name}'을(를) 프로젝트 또는 패키지에서 찾을 수 없습니다.`,
+            vscode.DiagnosticSeverity.Warning,
+          ),
+        );
+      }
+    }
+  }
+
   if (virtualDoc.isShaderLab && virtualDoc.properties.length > 0) {
-    const cleanSources: string[] = [blankShaderCommentsPreservingLayout(virtualDoc.virtualHlsl)];
+    const cleanSources: Array<{ src: string; isShaderLibrary: boolean }> = [
+      { src: blankShaderCommentsPreservingLayout(virtualDoc.virtualHlsl), isShaderLibrary: false },
+    ];
     for (let fi = 1; fi < reachableWalk.files.length; fi++) {
       const f = reachableWalk.files[fi];
       let fileText = f.virtualHlsl;
@@ -1501,24 +1545,59 @@ export function collectComputeAndShaderLabDiagnostics(
       } catch {
         // Keep parsed virtualHlsl fallback
       }
-      cleanSources.push(blankShaderCommentsPreservingLayout(fileText));
+      cleanSources.push({
+        src: blankShaderCommentsPreservingLayout(fileText),
+        isShaderLibrary: /[\\/]ShaderLibrary[\\/]/i.test(f.filePath),
+      });
     }
 
     const unityPerMaterialRe = /CBUFFER_START\s*\(\s*UnityPerMaterial\s*\)([\s\S]*?)CBUFFER_END/g;
     const anyCbufferRe = /CBUFFER_START\s*\([^)]*\)[\s\S]*?CBUFFER_END/g;
+    const dotsInstancingBlockRe =
+      /UNITY_DOTS_INSTANCING_START\s*\([^)]*\)[\s\S]*?UNITY_DOTS_INSTANCING_END(?:\s*\([^)]*\))?/g;
+    const gpuInstancingBlockRe =
+      /UNITY_INSTANCING_BUFFER_START\s*\([^)]*\)[\s\S]*?UNITY_INSTANCING_BUFFER_END\s*\([^)]*\)/g;
+    const instancedPropDeclRe =
+      /\b(?:UNITY_DOTS_INSTANCED_PROP(?:_OVERRIDE_SUPPORTED|_OVERRIDE_REQUIRED|_FLOAT|_FLOAT2|_FLOAT3|_FLOAT4|_INT|_UINT|_MATRIX)?|UNITY_DEFINE_INSTANCED_PROP)\s*\([^)]*\)/g;
+    const dotsAccessMacroRe =
+      /\bUNITY_ACCESS_DOTS_INSTANCED_PROP(?:_WITH_DEFAULT|_WITH_CUSTOM_DEFAULT)?\s*\([^)]*\)/g;
+    const stringLiteralRe = /"(?:\\.|[^"\\\r\n])*"/g;
+    const instancedPropNames = new Set<string>();
+    const propIdentRe = /\b(_[A-Za-z0-9_]+)\b/g;
+    const collectInstancedPropNames = (chunk: string) => {
+      propIdentRe.lastIndex = 0;
+      let pm: RegExpExecArray | null;
+      while ((pm = propIdentRe.exec(chunk)) !== null) {
+        instancedPropNames.add(pm[1]);
+      }
+    };
+    const maskInstancingAndCollect = (m: string) => {
+      collectInstancedPropNames(m);
+      return m.replace(/[^\n]/g, ' ');
+    };
+    const maskPreservingNewlines = (m: string) => m.replace(/[^\n]/g, ' ');
     const cbufferBodies: string[] = [];
     const preprocChunks: string[] = [];
     const hlslBodyChunks: string[] = [];
+    const localHlslBodyChunks: string[] = [];
 
-    for (const src of cleanSources) {
+    for (const entry of cleanSources) {
+      const src = entry.src;
       unityPerMaterialRe.lastIndex = 0;
       let cm: RegExpExecArray | null;
       while ((cm = unityPerMaterialRe.exec(src)) !== null) {
         cbufferBodies.push(cm[1]);
       }
 
-      // Mask CBUFFER_START(...) ... CBUFFER_END so declarations inside CBUFFER do not count as variable usage
-      const withoutCbuffers = src.replace(anyCbufferRe, (m) => m.replace(/[^\n]/g, ' '));
+      // Mask string literals, CBUFFER_START(...) ... CBUFFER_END, and DOTS/GPU instancing
+      // metadata/access macros so they do not trigger false HLSL body or SRP Batcher warnings
+      const withoutCbuffers = src
+        .replace(stringLiteralRe, maskPreservingNewlines)
+        .replace(anyCbufferRe, maskPreservingNewlines)
+        .replace(dotsInstancingBlockRe, maskInstancingAndCollect)
+        .replace(gpuInstancingBlockRe, maskInstancingAndCollect)
+        .replace(instancedPropDeclRe, maskInstancingAndCollect)
+        .replace(dotsAccessMacroRe, maskInstancingAndCollect);
       const srcLines = withoutCbuffers.split(/\r?\n/);
       const bodyLines: string[] = [];
       let inPreprocContinuation = false;
@@ -1533,13 +1612,18 @@ export function collectComputeAndShaderLabDiagnostics(
         }
       }
 
-      hlslBodyChunks.push(bodyLines.join('\n'));
+      const joinedBody = bodyLines.join('\n');
+      hlslBodyChunks.push(joinedBody);
+      if (!entry.isShaderLibrary) {
+        localHlslBodyChunks.push(joinedBody);
+      }
     }
 
     const hasUnityPerMaterial = cbufferBodies.length > 0;
     const combinedCbufferBody = cbufferBodies.join('\n');
     const combinedPreproc = preprocChunks.join('\n');
     const combinedHlslBody = hlslBodyChunks.join('\n');
+    const combinedLocalHlslBody = localHlslBodyChunks.join('\n');
 
     // Collect ShaderLab render state property references such as Cull [_Cull], Blend [_Src] [_Dst], ZWrite [_ZWrite]
     const renderStateRefs = new Set<string>();
@@ -1591,6 +1675,16 @@ export function collectComputeAndShaderLabDiagnostics(
     };
 
     const texTypes = new Set(['2D', '2DArray', '3D', 'Cube', 'CubeArray', 'Any']);
+    const isPropUsedInHlslBody = (bodyText: string, propName: string): boolean => {
+      const escaped = escapeRegExp(propName);
+      const paramDeclRe = new RegExp(
+        `\\b(?:float|half|fixed|int|uint|bool|real|min16float|min10float)[1-4]?(?:x[1-4])?\\s+${escaped}\\s*(?=[,)])`,
+        'g',
+      );
+      const withoutParams = bodyText.replace(paramDeclRe, '');
+      const identRe = new RegExp(`(?<![.\\w])${escaped}\\b`);
+      return identRe.test(withoutParams);
+    };
 
     for (const prop of virtualDoc.properties) {
       if (texTypes.has(prop.type)) continue;
@@ -1598,9 +1692,9 @@ export function collectComputeAndShaderLabDiagnostics(
       const propCol = prop.column ?? 0;
 
       const attrLines: string[] = [];
-      for (let lookback = 0; lookback <= 3 && propLine - lookback >= 0; lookback++) {
+      for (let lookback = 0; lookback <= 8 && propLine - lookback >= 0; lookback++) {
         const checkLine = lines[propLine - lookback] ?? '';
-        if (lookback > 0 && (checkLine.includes('=') || checkLine.includes('{'))) {
+        if (lookback > 0 && (checkLine.includes('=') || checkLine.includes('{') || checkLine.includes('}'))) {
           break;
         }
         attrLines.push(checkLine);
@@ -1612,21 +1706,32 @@ export function collectComputeAndShaderLabDiagnostics(
       const hasNonModifiable = /\[NonModifiableTextureData\]/.test(attrBlock);
       const derivedKeywords = extractDerivedKeywords(prop.name, attrBlock);
 
-      const propRe = new RegExp(`\\b${escapeRegExp(prop.name)}\\b`);
-      const isVarUsed = propRe.test(combinedHlslBody);
+      const escapedProp = escapeRegExp(prop.name);
+      const propRe = new RegExp(`\\b${escapedProp}\\b`);
+      const isVarUsed = isPropUsedInHlslBody(combinedHlslBody, prop.name);
+      const isVarUsedLocal = isPropUsedInHlslBody(combinedLocalHlslBody, prop.name);
+      const hasLooseGlobalDecl = new RegExp(
+        `^[ \\t]*(?:uniform\\s+)?(?:float|half|fixed|int|uint|bool|real|min16float|min10float)[1-4]?(?:x[1-4])?\\s+${escapedProp}\\s*(?:=|;|\\[)`,
+        'm',
+      ).test(combinedHlslBody);
       const isKeywordUsed = derivedKeywords.some((kw) =>
         new RegExp(`\\b${escapeRegExp(kw)}\\b`).test(combinedPreproc),
       );
       const isStateUsed = renderStateRefs.has(prop.name);
+      const isCustomEditorUsed = customEditorProps.has(prop.name);
+      const isInstancedUsed = instancedPropNames.has(prop.name);
       const inCBuffer = hasUnityPerMaterial && propRe.test(combinedCbufferBody);
+      const isInternalEditorProp = prop.displayName.startsWith('__') && isCustomEditorUsed;
 
       if (isVarUsed) {
         if (
           hasUnityPerMaterial &&
           !inCBuffer &&
+          !isInstancedUsed &&
           !hasPerRendererData &&
           !hasNonModifiable &&
-          !hasHideInInspector
+          !hasHideInInspector &&
+          (hasLooseGlobalDecl || (isVarUsedLocal && !isInternalEditorProp))
         ) {
           diags.push(
             new vscode.Diagnostic(
@@ -1636,11 +1741,21 @@ export function collectComputeAndShaderLabDiagnostics(
             ),
           );
         }
-      } else if (!isKeywordUsed && !isStateUsed && !hasHideInInspector) {
+      } else if (
+        !isKeywordUsed &&
+        !isStateUsed &&
+        !isCustomEditorUsed &&
+        !isInstancedUsed &&
+        !hasHideInInspector
+      ) {
+        const message =
+          resolvedEditors.length > 0
+            ? `[UnitySense] 미사용 프로퍼티: '${prop.name}'이(가) HLSL 변수, 키워드, ShaderLab 렌더 상태 및 CustomEditor(${resolvedEditors.join(', ')}) 어디에서도 사용되지 않습니다.`
+            : `[UnitySense] 미사용 프로퍼티: '${prop.name}'이(가) HLSL 변수, 키워드, ShaderLab 렌더 상태 어디에서도 사용되지 않습니다.`;
         diags.push(
           new vscode.Diagnostic(
             new vscode.Range(propLine, propCol, propLine, propCol + prop.name.length),
-            `[UnitySense] 미사용 프로퍼티: '${prop.name}'이(가) HLSL 변수, 키워드, ShaderLab 렌더 상태 어디에서도 사용되지 않습니다.`,
+            message,
             vscode.DiagnosticSeverity.Warning,
           ),
         );

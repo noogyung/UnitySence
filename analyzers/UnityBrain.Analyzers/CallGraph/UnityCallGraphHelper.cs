@@ -78,6 +78,44 @@ public static class UnityCallGraphHelper
         return roots;
     }
 
+    public static bool IsPackageCachePath(string? filePath)
+    {
+        if (string.IsNullOrEmpty(filePath)) return false;
+        return filePath.IndexOf("PackageCache/", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               filePath.IndexOf("PackageCache\\", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    public static bool IsPackageCacheSymbol(ISymbol symbol)
+    {
+        foreach (var loc in symbol.Locations)
+        {
+            if (IsPackageCachePath(loc.SourceTree?.FilePath))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static bool DerivesFromShaderGuiOrEditor(INamedTypeSymbol type)
+    {
+        for (var cur = type.BaseType; cur != null; cur = cur.BaseType)
+        {
+            var fullName = cur.ToDisplayString();
+            if (cur.Name == "ShaderGUI" ||
+                cur.Name == "BaseShaderGUI" ||
+                fullName == "UnityEditor.ShaderGUI" ||
+                fullName == "UnityEditor.Editor" ||
+                fullName == "UnityEditor.EditorWindow" ||
+                fullName == "UnityEditor.PropertyDrawer" ||
+                fullName == "UnityEditor.MaterialPropertyDrawer")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static bool DerivesFromUnityBehaviour(INamedTypeSymbol type)
     {
         for (var cur = type.BaseType; cur != null; cur = cur.BaseType)

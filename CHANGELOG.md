@@ -4,6 +4,35 @@ All notable changes to the **UnitySense** extension will be documented in this f
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-26
+
+### Added
+- **레거시 `CGPROGRAM` / `CGINCLUDE` 블록 안내 및 내장 `.cginc` 오탐 완화**:
+  - `CGPROGRAM` / `CGINCLUDE` 블록 사용 시 최신 Unity/SRP 환경에 맞춰 `HLSLPROGRAM` / `HLSLINCLUDE` 전환을 권장하는 경고를 표시합니다.
+  - Unity 에디터 설치 경로(`cgIncludesPath`)가 감지되지 않은 환경에서 `UnityCG.cginc`, `AutoLight.cginc`, `Lighting.cginc` 등 표준 Built-in `.cginc` 미해석 오류는 조용히 무시합니다.
+- **ShaderLab `CustomEditor` / `Fallback` / `UsePass` F12 이동 및 미구현 경고 · Unity `Editor.log` 셰이더 진단 연동**:
+  - `CustomEditor` 음수 캐싱 및 오래된 `rootFilesCache`를 제거하고 3단계 클래스 탐색 폴백(파일명+네임스페이스 → 전체 스캔 → 네임스페이스 완화)과 에디터 탭 전환 시 즉시 재진단을 추가해, `.cs` 파일을 새로 만들거나 이동한 직후에도 `CustomEditor` F12 및 미사용 프로퍼티 해제가 즉시 동작합니다.
+  - `unitySense.shaderGoToDefinition` F12 키바인딩 및 커맨드를 추가하고, `shader`/`compute` 언어 ID 지원과 줄 전체 매칭·작은따옴표 안전 처리·`fromFilePath` 기반 `PackageCache` 탐색을 보강해 `CustomEditor "..."` 및 `Fallback "..."`/`UsePass "..."` 어디서든 `F12`로 바로 이동할 수 있습니다.
+  - `CustomEditor` / `CustomEditorForRenderPipeline` 클래스가 프로젝트(`Assets/`) 및 패키지(`Packages/`, `Library/PackageCache/`)에 존재하지 않으면 셰이더 파일 해당 줄에 경고를 표시합니다(Unity 내장 컴파일 GUI `StandardShaderGUI` 등 제외).
+  - `CustomEditor "..."`, `CustomEditorForRenderPipeline "..." "..."` 및 `Fallback "..."`, `UsePass "Shader/Pass"`에서 `F12`(정의로 이동)로 외부 UPM 패키지(`UnityEditor.Rendering.Universal.ShaderGUI.LitShader`, `Hidden/Universal Render Pipeline/FallbackError` 등)를 포함한 대상 C# 클래스 또는 셰이더/패스 선언으로 바로 이동할 수 있습니다.
+  - Unity `Editor.log`의 실시간 셰이더 컴파일러 에러/경고(`Shader error/warning in '...'`)를 파싱해 열려 있는 셰이더 문서의 문제(Problems) 패널에 자동 표시하고 재임포트/재컴파일 시 오래된 진단을 정리합니다(`unityShaderLogDiagnostics`).
+- **ShaderLab 미사용 프로퍼티 및 SRP Batcher 진단 정교화 (`shaderCustomEditorResolver`, `shaderEditorProviders`)**:
+  - 셰이더에 선언된 `CustomEditor` / `CustomEditorForRenderPipeline` 클래스를 `Assets/` 뿐 아니라 `Packages/` 및 `Library/PackageCache/`(외부 UPM 패키지 포함)까지 탐색하고, 상속 부모 클래스·`partial class`·중첩 `static class`(`Property`, `UIBlock`, `Section` 등) 및 `*GUI`/`*Properties` 정적 헬퍼까지 추적해 참조되는 프로퍼티(`_Surface`, `_ReceiveShadows`, `_QueueOffset` 등)의 미사용 오탐 경고를 제거합니다.
+  - `UNITY_DOTS_INSTANCING_START...END` / `UNITY_DOTS_INSTANCED_PROP*` / `UNITY_ACCESS_DOTS_INSTANCED_PROP*` 등 DOTS/GPU Instancing 매크로, `ShaderLibrary/` 공통 헤더, 구조체 멤버(`._Prop`), 함수 매개변수, 문자열 리터럴 일치에 의한 SRP Batcher 오탐 경고를 제거했습니다.
+  - `Packages/packages-lock.json` · `manifest.json` 변경 및 `.cs` 파일 `mtime`/크기 변경을 자동 감지해 패키지 버전 업그레이드나 에디터 스크립트 수정 시 캐시를 자동 무효화하고 진단을 즉시 갱신합니다.
+  - `build:extension` 실행 시 `shader-lsp` 컴파일 산출물(`dist/shader-lsp/`)도 함께 재빌드되도록 빌드 파이프라인을 보완했습니다.
+- **C# · ShaderLab/HLSL 코드 줄맞춤 자동 정렬 (`CodeAutoIndentManager`)**:
+  - 복사/붙여넣기(`unitySense.autoIndent.onPaste`, 기본 `true`) 시 붙여넣은 영역의 들여쓰기를 주변 중괄호·괄호·`switch`/`case` 깊이에 맞게 자동으로 정렬합니다.
+  - 파일 저장(`unitySense.autoIndent.onSave`, 기본 `true`) 시 이미 작성된 코드 중 줄맞춤이 어긋난 줄을 자동으로 정렬하며, 우클릭 메뉴 및 명령 팔레트(`[UnitySense] 코드 줄맞춤 자동 정렬`)로도 실행할 수 있습니다.
+  - C# 멀티라인 축자 문자열(`@"..."`)과 원시 문자열(`"""..."""`) 내부 줄의 공백은 건드리지 않습니다.
+
+### Fixed
+- **외부 패키지(`Library/PackageCache`) 및 `ShaderGUI`/`Editor` 스크립트 C# 진단 오탐 제거 · `Editor` 폴더 외부 배치 경고(`UB1004`)**:
+  - `Library/PackageCache` 내부의 읽기 전용 C# 파일(예: URP `LitShader.cs`) 및 `ShaderGUI`/`Editor` 클래스에서 `UB1003`(문자열 리터럴 해시 캐싱 권장) 등 런타임 성능 경고가 발생하지 않도록 TypeScript/Roslyn 분석기 양쪽을 보완했습니다.
+  - `ShaderGUI`/`Editor` 등 에디터 전용 클래스가 `Assets/Editor` 외부(예: `Assets/Shaders/`)에 `#if UNITY_EDITOR` 없이 선언되어 `CS0246` 컴파일 오류를 유발하는 경우 경고(`UB1004`)를 표시합니다.
+  - Unity 6 `Editor.log`의 `[Worker0]` 접두사 로그, 4MB 로그 tail, 재임포트 시 `at line N` 기반 셰이더명 진단 정리를 보강하고, `ShaderGUI/Sections` 및 `PackageCache/*` 직속 탐색을 추가했습니다.
+- **Git Blame 좌측 주석 열 1칸 밀림/어긋남 수정**: 한글 작성자명(`홍길동`), `미커밋`, 말줄임표(`…`), 경계선(`▎`) 등이 폴백 폰트에서 1ch보다 약간 넓거나 좁게 렌더링되어 코드 시작 위치가 1칸씩 어긋나던 문제를 고정 CSS 폭(`width: <columnWidth + 2>ch`, `overflow: clip`, `white-space: pre`, `box-sizing: border-box`) 및 경계선 `width: 1ch` 지정으로 해결했습니다.
+
 ## [1.1.0] - 2026-11-25
 
 ### Added

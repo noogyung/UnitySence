@@ -55,8 +55,10 @@ export const SHADER_HEADER_EXTENSIONS = [
 export const SHADER_LANGUAGE_IDS = [
   'unity-shaderlab',
   'shaderlab',
+  'shader',
   'hlsl',
   'cg',
+  'compute',
 ] as const;
 
 const SHADER_EXTENSIONS = new Set<string>(SHADER_FILE_EXTENSIONS);
@@ -135,6 +137,10 @@ export class UnityVirtualPathResolver {
     this.context = newContext;
     this.invalidateCache();
     this.refreshPackageMap(true);
+  }
+
+  public getContext(): UnityProjectContext {
+    return this.context;
   }
 
   public invalidateCache(): void {

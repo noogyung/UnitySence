@@ -99,4 +99,62 @@ describe('collectUnityCSharpDiagnostics', () => {
     // [BurstDiscard] line (line 14) must be excluded
     expect(diags.some((d) => d.range.start.line === 14)).toBe(false);
   });
+
+  it('skips Library/PackageCache files, suppresses UB1003 in ShaderGUI/Editor scripts, and emits UB1004 outside Editor folder without UNITY_EDITOR', async () => {
+    const pkgCacheLit = vscode.__mock.createTextDocument(
+      vscode.Uri.file('D:/Proj/Library/PackageCache/com.unity.render-pipelines.universal@d7774c218bdf/Editor/ShaderGUI/Shaders/LitShader.cs'),
+      [
+        'public class LitShader : BaseShaderGUI {',
+        '    void Foo(Material m) {',
+        '        if (m.HasProperty("_Emission")) m.SetFloat("_WorkflowMode", 1f);',
+        '    }',
+        '}',
+      ].join('\n'),
+      'csharp',
+    );
+    expect(await collectUnityCSharpDiagnostics(pkgCacheLit, makeCache())).toEqual([]);
+
+    const editorGui = vscode.__mock.createTextDocument(
+      vscode.Uri.file('D:/Proj/Assets/Editor/TestShaderGUI.cs'),
+      [
+        'using UnityEditor;',
+        'public class TestShaderGUI : ShaderGUI {',
+        '    public override void OnGUI(MaterialEditor ed, MaterialProperty[] props) {',
+        '        var m = (UnityEngine.Material)ed.target;',
+        '        m.SetFloat("_Surface", 1f);',
+        '    }',
+        '}',
+      ].join('\n'),
+      'csharp',
+    );
+    const editorDiags = await collectUnityCSharpDiagnostics(editorGui, makeCache());
+    expect(editorDiags.some((d) => d.code === 'UB1003')).toBe(false);
+    expect(editorDiags.some((d) => d.code === 'UB1004')).toBe(false);
+
+    const misplacedGui = vscode.__mock.createTextDocument(
+      vscode.Uri.file('D:/Proj/Assets/Shaders/TestShaderGUI.cs'),
+      [
+        'using UnityEditor;',
+        'public class TestShaderGUI : ShaderGUI {',
+        '    public override void OnGUI(MaterialEditor ed, MaterialProperty[] props) {}',
+        '}',
+      ].join('\n'),
+      'csharp',
+    );
+    const misplacedDiags = await collectUnityCSharpDiagnostics(misplacedGui, makeCache());
+    expect(misplacedDiags.some((d) => d.code === 'UB1004')).toBe(true);
+
+    const guardedMisplacedGui = vscode.__mock.createTextDocument(
+      vscode.Uri.file('D:/Proj/Assets/Shaders/TestShaderGUI.cs'),
+      [
+        '#if UNITY_EDITOR',
+        'using UnityEditor;',
+        'public class TestShaderGUI : ShaderGUI {}',
+        '#endif',
+      ].join('\n'),
+      'csharp',
+    );
+    const guardedDiags = await collectUnityCSharpDiagnostics(guardedMisplacedGui, makeCache());
+    expect(guardedDiags.some((d) => d.code === 'UB1004')).toBe(false);
+  });
 });

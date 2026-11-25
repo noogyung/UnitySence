@@ -37,6 +37,11 @@ public sealed class BurstCompileAnalyzer : DiagnosticAnalyzer
             return;
         }
 
+        if (CallGraph.UnityCallGraphHelper.IsPackageCacheSymbol(typeSymbol))
+        {
+            return;
+        }
+
         bool typeHasBurst = HasAttribute(typeSymbol, "BurstCompileAttribute", "BurstCompile");
         // In Unity Burst, [BurstCompile] on a class (e.g. static class or MonoBehaviour) is only a
         // marker container for `[BurstCompile] static` methods; instance fields and non-Burst methods

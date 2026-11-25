@@ -2,7 +2,7 @@
   "name": "unitysense",
   "displayName": "UnitySense",
   "description": "JetBrains Rider 수준의 Unity 개발 지능형 지원 확장 (ShaderLab/HLSL LSP, Roslyn 분석기, YAML 에셋 인덱서, .meta 자동 동기화).",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "noogkim",
   "author": {
     "name": "NoogKim"
@@ -137,6 +137,10 @@
         "title": "[UnitySense] C# Unity 에셋/심볼 정의로 이동"
       },
       {
+        "command": "unitySense.shaderGoToDefinition",
+        "title": "[UnitySense] 셰이더 심볼/CustomEditor/Fallback 정의로 이동"
+      },
+      {
         "command": "unitySense.refreshShaderExplorer",
         "title": "[UnitySense] 셰이더 탐색기 새로고침"
       },
@@ -151,10 +155,19 @@
       {
         "command": "unitySense.copyBlameCommitHash",
         "title": "[UnitySense] Blame 커밋 해시 복사"
+      },
+      {
+        "command": "unitySense.autoIndentDocument",
+        "title": "[UnitySense] 코드 줄맞춤 자동 정렬"
       }
     ],
     "menus": {
       "editor/context": [
+        {
+          "command": "unitySense.autoIndentDocument",
+          "when": "editorTextFocus && (editorLangId == csharp || editorLangId == unity-shaderlab || editorLangId == hlsl)",
+          "group": "1_modification@1"
+        },
         {
           "command": "unitySense.toggleGitBlame",
           "when": "editorTextFocus",
@@ -182,6 +195,11 @@
         "command": "unitySense.csharpGoToDefinition",
         "key": "f12",
         "when": "unitySense.isUnityProject && editorTextFocus && editorLangId == csharp"
+      },
+      {
+        "command": "unitySense.shaderGoToDefinition",
+        "key": "f12",
+        "when": "unitySense.isUnityProject && editorTextFocus && (editorLangId == unity-shaderlab || editorLangId == shaderlab || editorLangId == hlsl || editorLangId == cg || editorLangId == shader || editorLangId == compute)"
       }
     ],
     "snippets": [
@@ -332,6 +350,21 @@
           "type": "boolean",
           "default": true,
           "description": "[UnitySense] C# MonoBehaviour/NetworkBehaviour 유니티 이벤트 함수 자동완성 제안을 표시합니다."
+        },
+        "unitySense.autoIndent.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "[UnitySense] C# 및 ShaderLab/HLSL 코드의 자동 줄맞춤(들여쓰기 정렬) 기능을 활성화합니다."
+        },
+        "unitySense.autoIndent.onPaste": {
+          "type": "boolean",
+          "default": true,
+          "description": "[UnitySense] 코드를 복사/붙여넣기 할 때 붙여넣은 줄의 들여쓰기를 주변 블록 깊이에 맞게 자동으로 맞춥니다."
+        },
+        "unitySense.autoIndent.onSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "[UnitySense] 파일을 저장할 때 이미 작성된 코드 중 줄맞춤이 어긋난 줄의 들여쓰기를 자동으로 정렬합니다."
         }
       }
     }

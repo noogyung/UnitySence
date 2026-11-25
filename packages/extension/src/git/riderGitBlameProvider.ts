@@ -166,7 +166,7 @@ function buildWrapContinuationCss(
   return [
     'none;',
     `&:not([class*="ced-"] ~ &) { margin-left: calc(${totalCh}ch + 12px); }`,
-    `&:not([class*="ced-"] ~ &)::before { content: "${spacerPad}${barGlyph}"; position: absolute; left: 0; top: 0; color: ${barColor}; background-color: ${bg}; font-style: normal; font-weight: normal; pointer-events: none; }`,
+    `&:not([class*="ced-"] ~ &)::before { content: "${spacerPad}${barGlyph}"; position: absolute; left: 0; top: 0; width: ${totalCh}ch; overflow: clip; white-space: pre; box-sizing: border-box; color: ${barColor}; background-color: ${bg}; font-style: normal; font-weight: normal; pointer-events: none; }`,
     'border-spacing: 0',
   ].join(' ');
 }
@@ -193,13 +193,16 @@ export class RiderGitBlameProvider implements vscode.Disposable {
       before: {
         fontStyle: 'normal',
         fontWeight: 'normal',
+        textDecoration: 'none; overflow: clip; white-space: pre; box-sizing: border-box;',
       },
     });
     this.heatStripDecorationType = vscode.window.createTextEditorDecorationType({
       before: {
         fontStyle: 'normal',
         fontWeight: 'normal',
+        width: '1ch',
         margin: '0 12px 0 0',
+        textDecoration: 'none; overflow: clip; white-space: pre; box-sizing: border-box;',
       },
     });
     this.firstCharMarkerDecorationType = vscode.window.createTextEditorDecorationType({
@@ -683,6 +686,7 @@ export class RiderGitBlameProvider implements vscode.Disposable {
           ? computeHeatBackgroundColor(info.commit.authorTime, info.commit.isUncommitted, nowMs)
           : 'rgba(148, 163, 184, 0.06)';
 
+      const colWidthCss = `${columnWidth + 2}ch`;
       const range = new vscode.Range(lineIdx, 0, lineIdx, 0);
       columnDecorations.push({
         range,
@@ -690,6 +694,7 @@ export class RiderGitBlameProvider implements vscode.Disposable {
         renderOptions: {
           before: {
             contentText: `\u00a0${text}\u00a0`,
+            width: colWidthCss,
             color: info.commit.isUncommitted ? uncommittedFgColor : fgColor,
             backgroundColor: bgColor,
             fontStyle: 'normal',
@@ -705,6 +710,7 @@ export class RiderGitBlameProvider implements vscode.Disposable {
           renderOptions: {
             before: {
               contentText: '▎',
+              width: '1ch',
               color: heatColor,
               backgroundColor: bgColor,
               margin: '0 12px 0 0',

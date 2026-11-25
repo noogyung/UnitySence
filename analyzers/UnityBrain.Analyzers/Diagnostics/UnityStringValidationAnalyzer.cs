@@ -64,6 +64,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
 
     private static void AnalyzeInvocation(SyntaxNodeAnalysisContext context, ProjectSettingsSnapshot settings)
     {
+        if (CallGraph.UnityCallGraphHelper.IsPackageCachePath(context.Node.SyntaxTree.FilePath)) return;
         var inv = (InvocationExpressionSyntax)context.Node;
         if (context.SemanticModel.GetSymbolInfo(inv, context.CancellationToken).Symbol is not IMethodSymbol called)
         {
@@ -150,6 +151,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
 
     private static void AnalyzeAssignment(SyntaxNodeAnalysisContext context, ProjectSettingsSnapshot settings)
     {
+        if (CallGraph.UnityCallGraphHelper.IsPackageCachePath(context.Node.SyntaxTree.FilePath)) return;
         if (!settings.HasFile || !settings.HasTags) return;
 
         var assign = (AssignmentExpressionSyntax)context.Node;
@@ -172,6 +174,7 @@ public sealed class UnityStringValidationAnalyzer : DiagnosticAnalyzer
 
     private static void AnalyzeEquality(SyntaxNodeAnalysisContext context, ProjectSettingsSnapshot settings)
     {
+        if (CallGraph.UnityCallGraphHelper.IsPackageCachePath(context.Node.SyntaxTree.FilePath)) return;
         if (!settings.HasFile || !settings.HasTags) return;
 
         var bin = (BinaryExpressionSyntax)context.Node;

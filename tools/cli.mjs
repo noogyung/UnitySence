@@ -637,6 +637,7 @@ function cmdBuildLsp() {
 }
 
 function cmdBuildExtension() {
+  cmdBuildLsp();
   const srcRoot = path.join(ROOT, 'packages', 'extension', 'src');
   const distRoot = path.join(ROOT, 'packages', 'extension', 'dist');
   const count = compileTsDirectory(srcRoot, distRoot, ['shader-lsp']);
@@ -1021,7 +1022,6 @@ ${manifestAssets}
 function cmdBuildAll() {
   cmdBuildAnalyzers();
   cmdBuildDaemon();
-  cmdBuildLsp();
   cmdBuildExtension();
 }
 

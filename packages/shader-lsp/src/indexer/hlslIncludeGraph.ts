@@ -94,6 +94,10 @@ export class IncludeDependencyGraph {
     this.clearCache();
   }
 
+  public getContext(): UnityProjectContext {
+    return this.context;
+  }
+
   public getResolver(): UnityVirtualPathResolver {
     return this.resolver;
   }
